@@ -762,24 +762,60 @@ class PowerBIConnectionManager:
 
         self._clr = clr
         candidate_dirs = self._candidate_dll_directories(instance)
-        loaded_dir: str | None = None
         for directory in candidate_dirs:
             self._add_dll_search_path(directory)
-            if self._try_add_reference("Microsoft.AnalysisServices.Tabular", directory) and self._try_add_reference(
-                "Microsoft.AnalysisServices.AdomdClient", directory
-            ):
-                loaded_dir = directory
+
+        # Search for each DLL independently across all candidate dirs
+        tabular_names = [
+            "Microsoft.AnalysisServices.Tabular",
+            "Microsoft.AnalysisServices.Server.Tabular",
+        ]
+        adomd_names = [
+            "Microsoft.AnalysisServices.AdomdClient",
+            "Microsoft.PowerBI.AdomdClient",
+        ]
+
+        tabular_loaded = False
+        adomd_loaded = False
+        loaded_dir: str | None = None
+
+        for directory in candidate_dirs:
+            if not tabular_loaded:
+                for name in tabular_names:
+                    if self._try_add_reference(name, directory):
+                        tabular_loaded = True
+                        loaded_dir = directory
+                        break
+            if not adomd_loaded:
+                for name in adomd_names:
+                    if self._try_add_reference(name, directory):
+                        adomd_loaded = True
+                        if loaded_dir is None:
+                            loaded_dir = directory
+                        break
+            if tabular_loaded and adomd_loaded:
                 break
 
-        if loaded_dir is None:
+        if not tabular_loaded or not adomd_loaded:
             raise PowerBIConfigurationError(
                 "Could not load Microsoft.AnalysisServices assemblies. Set PBI_DESKTOP_BIN "
                 "to the Power BI Desktop bin directory if auto-discovery fails.",
                 details={"searched_directories": candidate_dirs},
             )
 
-        from Microsoft.AnalysisServices import Tabular  # type: ignore
-        from Microsoft.AnalysisServices import AdomdClient  # type: ignore
+        try:
+            from Microsoft.AnalysisServices import Tabular  # type: ignore
+        except ImportError:
+            try:
+                import Microsoft.AnalysisServices.Tabular as Tabular  # type: ignore
+            except ImportError:
+                import Microsoft.AnalysisServices as _as_mod  # type: ignore
+                Tabular = getattr(_as_mod, "Tabular", _as_mod)
+
+        try:
+            from Microsoft.AnalysisServices import AdomdClient  # type: ignore
+        except ImportError:
+            import Microsoft.AnalysisServices.AdomdClient as AdomdClient  # type: ignore
 
         self._tom = Tabular
         self._adomd_client = AdomdClient
@@ -822,6 +858,10 @@ class PowerBIConnectionManager:
                 os.path.join(program_files_x86, "Microsoft Power BI Desktop RS", "bin"),
             ]
         )
+        # ADOMD.NET client libraries installed separately
+        for adomd_ver in ("160", "150", "140"):
+            dirs.append(os.path.join(program_files, "Microsoft.NET", "ADOMD.NET", adomd_ver))
+            dirs.append(os.path.join(program_files_x86, "Microsoft.NET", "ADOMD.NET", adomd_ver))
 
         deduped: list[str] = []
         seen: set[str] = set()
