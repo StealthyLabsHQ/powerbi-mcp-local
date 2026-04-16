@@ -174,7 +174,7 @@ Build an entire dashboard page from a layout spec. Each dict in the list:
   "x": 50, "y": 100, "width": 400, "height": 300,
   "measure": "CA Total",
   "category": "Dim_Temps.Annee",
-  "title": "CA par année"
+  "title": "Sales by Year"
 }
 ```
 This is the power tool — build a full TB in one call.
