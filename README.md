@@ -13,7 +13,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 57](https://img.shields.io/badge/tools-57-orange)](#tool-catalog-en-57-tools)
+[![Tools 58](https://img.shields.io/badge/tools-58-orange)](#tool-catalog-en-58-tools)
 
 </div>
 
@@ -21,7 +21,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 
 | Start | Setup | Demo | Tools | Security | FR |
 | --- | --- | --- | --- | --- | --- |
-| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-57-tools) | [Security](#security-en) | [Version française](#francais) |
+| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-58-tools) | [Security](#security-en) | [Version française](#francais) |
 
 <a id="demo-60s"></a>
 ## Demo (60s)
@@ -160,8 +160,8 @@ Guides:
 - `Run this DAX query and show top 20 rows.`
 - `Extract report, add a new page, place 3 visuals, then compile.`
 
-<a id="tool-catalog-en-57-tools"></a>
-### Tool catalog (EN, 57 tools)
+<a id="tool-catalog-en-58-tools"></a>
+### Tool catalog (EN, 58 tools)
 
 Core model discovery (6):
 - `pbi_connect`
@@ -209,7 +209,7 @@ Excel tools (13):
 - `excel_workbook_info`
 - `excel_to_pbi_check`
 
-Report and visual tools (21):
+Report and visual tools (22):
 - `pbi_extract_report`
 - `pbi_compile_report`
 - `pbi_patch_layout`
@@ -229,6 +229,7 @@ Report and visual tools (21):
 - `pbi_add_text_box`
 - `pbi_remove_visual`
 - `pbi_move_visual`
+- `pbi_apply_design`
 - `pbi_apply_theme`
 - `pbi_build_dashboard`
 
@@ -368,7 +369,7 @@ Guides:
 
 ### Catalogue des outils (FR)
 
-Le projet expose **57 tools MCP**.
+Le projet expose **58 tools MCP**.
 Les noms et catégories sont identiques à la section anglaise:
 
 - Core model discovery (6)
@@ -376,9 +377,9 @@ Les noms et catégories sont identiques à la section anglaise:
 - Query and import (4)
 - Power Query (M) tools (7)
 - Excel tools (13)
-- Report and visual tools (21)
+- Report and visual tools (22)
 
-Voir le détail complet ici: [Tool catalog (EN)](#tool-catalog-en-57-tools)
+Voir le détail complet ici: [Tool catalog (EN)](#tool-catalog-en-58-tools)
 
 ### Dépannage (FR)
 

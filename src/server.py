@@ -54,6 +54,7 @@ from tools import (
     pbi_add_table_visual_tool,
     pbi_add_text_box_tool,
     pbi_add_waterfall_tool,
+    pbi_apply_design_tool,
     pbi_apply_theme_tool,
     pbi_build_dashboard_tool,
     pbi_compile_report_tool,
@@ -1085,6 +1086,24 @@ def pbi_apply_theme(extract_folder: str, theme_json_path: str) -> dict[str, Any]
         pbi_apply_theme_tool,
         extract_folder=extract_folder,
         theme_json_path=theme_json_path,
+    )
+
+
+@mcp.tool()
+def pbi_apply_design(
+    extract_folder: str,
+    preset: str = "powerbi-navy-pro",
+    page_background: str | None = "#F0F4FB",
+    style_cards: bool = True,
+) -> dict[str, Any]:
+    """Apply a complete visual design preset (theme + page background + card styling)."""
+    return _run(
+        "pbi_apply_design",
+        pbi_apply_design_tool,
+        extract_folder=extract_folder,
+        preset=preset,
+        page_background=page_background,
+        style_cards=style_cards,
     )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -15,13 +16,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 from pbi_connection import PowerBIError, PowerBINotFoundError, PowerBIValidationError, error_payload, ok
-from security import resolve_local_path
+from security import SECURITY, resolve_local_path
 
 DEFAULT_PAGE_WIDTH = 1280
 DEFAULT_PAGE_HEIGHT = 720
 LAYOUT_RELATIVE_PATH = Path("Report") / "Layout"
 THEMES_RELATIVE_DIR = Path("Report") / "StaticResources" / "Themes"
+DESIGN_THEME_RELATIVE_PATH = Path("Report") / "StaticResources" / "SharedResources" / "BaseThemes" / "CY26SU02.json"
 MODEL_TABLES_RELATIVE_DIR = Path("Model") / "tables"
+HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 DEFAULT_VISUAL_SIZES = {
     "card": (200, 120),
     "bar_chart": (400, 300),
@@ -34,6 +37,82 @@ DEFAULT_VISUAL_SIZES = {
     "gauge": (280, 220),
     "kpi": (260, 140),
     "map": (420, 320),
+}
+
+DESIGN_PRESETS: dict[str, dict[str, Any]] = {
+    "powerbi-navy-pro": {
+        "name": "Power BI Navy Pro",
+        "dataColors": ["#1E40AF", "#0EA5E9", "#059669", "#D97706", "#7C3AED", "#DB2777", "#0891B2", "#EA580C"],
+        "foreground": "#1E293B",
+        "foregroundNeutralSecondary": "#475569",
+        "foregroundNeutralTertiary": "#94A3B8",
+        "background": "#FFFFFF",
+        "backgroundLight": "#F1F5F9",
+        "backgroundNeutral": "#CBD5E0",
+        "tableAccent": "#1E40AF",
+        "good": "#059669",
+        "neutral": "#D97706",
+        "bad": "#DC2626",
+        "maximum": "#1E40AF",
+        "center": "#D97706",
+        "minimum": "#DBEAFE",
+        "hyperlink": "#1E40AF",
+        "visitedHyperlink": "#1E40AF",
+        "textClasses": {
+            "callout": {"fontSize": 28, "fontFace": "Segoe UI Semibold", "color": "#1E293B"},
+            "title": {"fontSize": 13, "fontFace": "Segoe UI Semibold", "color": "#1E40AF"},
+            "header": {"fontSize": 12, "fontFace": "Segoe UI Semibold", "color": "#1E293B"},
+            "label": {"fontSize": 10, "fontFace": "Segoe UI", "color": "#475569"},
+        },
+        "visualStyles": {
+            "*": {
+                "*": {
+                    "background": [{"show": True, "color": {"solid": {"color": "#FFFFFF"}}, "transparency": 0}],
+                    "border": [{"show": True, "color": {"solid": {"color": "#DBEAFE"}}, "radius": 8}],
+                    "shadow": [{"show": True}],
+                    "title": [{"show": True, "fontColor": {"solid": {"color": "#1E40AF"}}, "background": {"solid": {"color": "#FFFFFF"}}, "fontSize": 12, "fontFamily": "Segoe UI Semibold"}],
+                    "lineStyles": [{"strokeWidth": 3}],
+                    "categoryAxis": [{"showAxisTitle": False, "gridlineStyle": "dotted", "gridlineColor": {"solid": {"color": "#E2E8F0"}}}],
+                    "valueAxis": [{"showAxisTitle": False, "gridlineStyle": "dotted", "gridlineColor": {"solid": {"color": "#E2E8F0"}}}],
+                }
+            },
+            "card": {
+                "*": {
+                    "labels": [{"color": {"solid": {"color": "#1E293B"}}, "fontSize": 22, "fontBold": True, "fontFamily": "Segoe UI Semibold"}],
+                    "categoryLabels": [{"color": {"solid": {"color": "#475569"}}, "fontSize": 11, "fontFamily": "Segoe UI"}],
+                    "outline": [{"show": True, "color": {"solid": {"color": "#BFDBFE"}}, "weight": 2}],
+                    "background": [{"show": True, "color": {"solid": {"color": "#FFFFFF"}}, "transparency": 0}],
+                    "border": [{"show": True, "color": {"solid": {"color": "#BFDBFE"}}, "radius": 8}],
+                    "shadow": [{"show": True}],
+                    "title": [{"show": False}],
+                }
+            },
+            "slicer": {
+                "*": {
+                    "background": [{"show": True, "color": {"solid": {"color": "#FFFFFF"}}, "transparency": 0}],
+                    "border": [{"show": True, "color": {"solid": {"color": "#BFDBFE"}}, "radius": 8}],
+                    "title": [{"show": True, "fontColor": {"solid": {"color": "#1E40AF"}}, "fontSize": 12}],
+                }
+            },
+            "gauge": {
+                "*": {
+                    "calloutValue": [{"color": {"solid": {"color": "#1E293B"}}, "fontSize": 20, "fontBold": True}],
+                    "background": [{"show": True, "color": {"solid": {"color": "#FFFFFF"}}, "transparency": 0}],
+                    "border": [{"show": True, "color": {"solid": {"color": "#DBEAFE"}}, "radius": 8}],
+                    "shadow": [{"show": True}],
+                }
+            },
+            "tableEx": {
+                "*": {
+                    "background": [{"show": True, "color": {"solid": {"color": "#FFFFFF"}}, "transparency": 0}],
+                    "border": [{"show": True, "color": {"solid": {"color": "#DBEAFE"}}, "radius": 8}],
+                    "shadow": [{"show": True}],
+                    "columnHeaders": [{"fontColor": {"solid": {"color": "#1E40AF"}}, "backColor": {"solid": {"color": "#EFF6FF"}}, "fontSize": 11, "fontBold": True}],
+                    "values": [{"fontColor": {"solid": {"color": "#1E293B"}}, "backColor": {"solid": {"color": "#FFFFFF"}}, "altBackColor": {"solid": {"color": "#F8FAFC"}}, "fontSize": 10}],
+                }
+            },
+        },
+    }
 }
 
 logger = logging.getLogger(__name__)
@@ -1032,6 +1111,130 @@ def pbi_apply_theme_tool(extract_folder: str, theme_json_path: str) -> dict[str,
     return _run(_impl)
 
 
+def _validate_hex_color(value: str, *, field: str) -> None:
+    if not HEX_COLOR_RE.match(value):
+        raise PowerBIValidationError(
+            f"{field} must match '#RRGGBB'.",
+            details={"field": field, "value": value},
+        )
+
+
+def _validate_preset_hex_colors(value: Any, *, field: str) -> None:
+    if isinstance(value, str):
+        if value.startswith("#"):
+            _validate_hex_color(value, field=field)
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_preset_hex_colors(item, field=f"{field}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _validate_preset_hex_colors(item, field=f"{field}.{key}")
+
+
+def _card_vc_objects() -> dict[str, Any]:
+    return {
+        "background": [
+            {
+                "properties": {
+                    "show": {"expr": {"Literal": {"Value": "true"}}},
+                    "color": {"solid": {"color": "#FFFFFF"}},
+                }
+            }
+        ],
+        "border": [
+            {
+                "properties": {
+                    "show": {"expr": {"Literal": {"Value": "true"}}},
+                    "color": {"solid": {"color": "#BFDBFE"}},
+                }
+            }
+        ],
+        "shadow": [{"properties": {"show": {"expr": {"Literal": {"Value": "true"}}}}}],
+    }
+
+
+def pbi_apply_design_tool(
+    extract_folder: str,
+    *,
+    preset: str = "powerbi-navy-pro",
+    page_background: str | None = "#F0F4FB",
+    style_cards: bool = True,
+) -> dict[str, Any]:
+    def _impl() -> dict[str, Any]:
+        folder = SECURITY.validate_directory(extract_folder, must_exist=True)
+        if preset not in DESIGN_PRESETS:
+            raise PowerBIValidationError(
+                "Unknown design preset.",
+                details={"preset": preset, "available_presets": sorted(DESIGN_PRESETS)},
+            )
+        if page_background is not None:
+            _validate_hex_color(page_background, field="page_background")
+
+        theme_payload = DESIGN_PRESETS[preset]
+        _validate_preset_hex_colors(theme_payload, field=f"preset:{preset}")
+
+        _, layout = _load_layout(folder)
+
+        pages_updated = 0
+        if page_background is not None:
+            for section in layout.get("sections", []):
+                if not isinstance(section, dict):
+                    continue
+                section_config = _parse_embedded_json(section.get("config"), {})
+                if not isinstance(section_config, dict):
+                    section_config = {}
+                section_config["background"] = {
+                    "color": {"solid": {"color": page_background}},
+                    "transparency": 0,
+                }
+                section["config"] = _dump_embedded_json(section_config)
+                pages_updated += 1
+
+        cards_styled = 0
+        if style_cards:
+            for section in layout.get("sections", []):
+                if not isinstance(section, dict):
+                    continue
+                for container in section.get("visualContainers", []) or []:
+                    if not isinstance(container, dict):
+                        continue
+                    container_config = _parse_embedded_json(container.get("config"), {})
+                    if not isinstance(container_config, dict):
+                        continue
+                    single_visual = container_config.get("singleVisual")
+                    if not isinstance(single_visual, dict):
+                        continue
+                    if str(single_visual.get("visualType", "")).casefold() != "card":
+                        continue
+                    single_visual["vcObjects"] = _card_vc_objects()
+                    container["config"] = _dump_embedded_json(container_config)
+                    cards_styled += 1
+
+        theme_path = folder / DESIGN_THEME_RELATIVE_PATH
+        theme_path.parent.mkdir(parents=True, exist_ok=True)
+        theme_path.write_text(json.dumps(theme_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        relative_theme_path = str(theme_path.relative_to(folder)).replace("\\", "/")
+        theme_entry = {"name": str(theme_payload.get("name") or preset), "path": relative_theme_path}
+        themes = layout.setdefault("themeCollection", [])
+        if not any(str(item.get("path")) == relative_theme_path for item in themes if isinstance(item, dict)):
+            themes.append(theme_entry)
+        layout["activeTheme"] = theme_entry
+
+        _save_layout(folder, layout)
+        return ok(
+            f"Design '{preset}' applied.",
+            preset=preset,
+            theme_file=str(theme_path),
+            pages_updated=pages_updated,
+            cards_styled=cards_styled,
+            page_background=page_background,
+        )
+
+    return _run(_impl)
+
+
 def _create_visual_from_spec(
     section: dict[str, Any],
     spec: dict[str, Any],
@@ -1118,6 +1321,7 @@ __all__ = [
     "pbi_add_table_visual_tool",
     "pbi_add_text_box_tool",
     "pbi_add_waterfall_tool",
+    "pbi_apply_design_tool",
     "pbi_apply_theme_tool",
     "pbi_build_dashboard_tool",
     "pbi_compile_report_tool",
