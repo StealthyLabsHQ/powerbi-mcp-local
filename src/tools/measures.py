@@ -297,7 +297,9 @@ def _parse_dax_file(path: str | Path) -> list[dict[str, str]]:
         raise PowerBINotFoundError(f"DAX file '{resolved}' was not found.", details={"path": str(resolved)})
 
     raw_text = resolved.read_text(encoding="utf-8")
-    blocks = [block.strip() for block in re.split(r"(?:\r?\n){2,}", raw_text) if block.strip()]
+    cleaned_text = _strip_dax_comments(raw_text)
+    normalized_text = "\n".join(line.rstrip() for line in cleaned_text.splitlines())
+    blocks = [block.strip() for block in re.split(r"(?:\n\s*){2,}", normalized_text) if block.strip()]
     if not blocks:
         raise PowerBIValidationError(f"DAX file '{resolved}' is empty.", details={"path": str(resolved)})
 
@@ -336,3 +338,63 @@ def _parse_dax_file(path: str | Path) -> list[dict[str, str]]:
         parsed.append({"name": name, "expression": expression})
 
     return parsed
+
+
+def _strip_dax_comments(text: str) -> str:
+    """Remove // and /* */ comments while preserving text inside string literals."""
+    output: list[str] = []
+    index = 0
+    in_string = False
+    in_line_comment = False
+    in_block_comment = False
+
+    while index < len(text):
+        char = text[index]
+        next_char = text[index + 1] if index + 1 < len(text) else ""
+
+        if in_line_comment:
+            if char in "\r\n":
+                in_line_comment = False
+                output.append(char)
+            index += 1
+            continue
+
+        if in_block_comment:
+            if char == "*" and next_char == "/":
+                in_block_comment = False
+                index += 2
+                continue
+            if char in "\r\n":
+                output.append(char)
+            index += 1
+            continue
+
+        if in_string:
+            output.append(char)
+            if char == '"':
+                if next_char == '"':
+                    output.append(next_char)
+                    index += 2
+                    continue
+                in_string = False
+            index += 1
+            continue
+
+        if char == '"':
+            in_string = True
+            output.append(char)
+            index += 1
+            continue
+        if char == "/" and next_char == "/":
+            in_line_comment = True
+            index += 2
+            continue
+        if char == "/" and next_char == "*":
+            in_block_comment = True
+            index += 2
+            continue
+
+        output.append(char)
+        index += 1
+
+    return "".join(output)
