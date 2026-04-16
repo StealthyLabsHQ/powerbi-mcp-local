@@ -34,6 +34,8 @@ READ_TOOLS = {
     "excel_search",
     "excel_workbook_info",
     "excel_to_pbi_check",
+    "pbi_list_pages",
+    "pbi_get_page",
 }
 
 WRITE_TOOLS = {
@@ -55,12 +57,30 @@ WRITE_TOOLS = {
     "excel_format_range",
     "excel_auto_width",
     "excel_create_workbook",
+    "pbi_extract_report",
+    "pbi_compile_report",
+    "pbi_create_page",
+    "pbi_set_page_size",
+    "pbi_add_card",
+    "pbi_add_bar_chart",
+    "pbi_add_line_chart",
+    "pbi_add_donut_chart",
+    "pbi_add_table_visual",
+    "pbi_add_waterfall",
+    "pbi_add_slicer",
+    "pbi_add_gauge",
+    "pbi_add_text_box",
+    "pbi_move_visual",
+    "pbi_apply_theme",
+    "pbi_build_dashboard",
 }
 
 DESTRUCTIVE_TOOLS = {
     "pbi_delete_measure",
     "pbi_bulk_import_excel",
     "excel_delete_sheet",
+    "pbi_delete_page",
+    "pbi_remove_visual",
 }
 
 EXCEL_TOOLS = {
@@ -93,13 +113,24 @@ MODEL_NAME_PARAM_KEYS = {
     "sheet",
 }
 MEASURE_NAME_PARAM_KEYS = {"name"}
-PATH_PARAM_KEYS = {"path", "file_path", "excel_path", "csv_path", "folder_path"}
+PATH_PARAM_KEYS = {
+    "path",
+    "file_path",
+    "excel_path",
+    "csv_path",
+    "folder_path",
+    "pbix_path",
+    "extract_folder",
+    "output_path",
+    "theme_json_path",
+}
 EXPRESSION_PARAM_KEYS = {"expression", "m_expression"}
 QUERY_PARAM_KEYS = {"query"}
 DESCRIPTION_PARAM_KEYS = {"description", "display_folder", "format_string", "delimiter", "quote_style"}
 JSON_EXPORT_EXTENSIONS = {".json"}
 DAX_FILE_EXTENSIONS = {".dax"}
 DEFAULT_EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
+PBIX_FILE_EXTENSIONS = {".pbix"}
 SENSITIVE_KEYWORDS = {
     "password",
     "pwd",
@@ -365,6 +396,10 @@ def _validate_string(tool_name: str, key: str, value: str, policy: SecurityPolic
         elif tool_name == "pbi_import_dax_file":
             allowed_extensions = DAX_FILE_EXTENSIONS
         elif tool_name == "pbi_export_model":
+            allowed_extensions = JSON_EXPORT_EXTENSIONS
+        elif lowered in {"pbix_path", "output_path"}:
+            allowed_extensions = PBIX_FILE_EXTENSIONS
+        elif lowered == "theme_json_path":
             allowed_extensions = JSON_EXPORT_EXTENSIONS
         resolve_local_path(value, must_exist=False, allowed_extensions=allowed_extensions, policy=policy)
     if lowered in MODEL_NAME_PARAM_KEYS:

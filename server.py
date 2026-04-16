@@ -43,9 +43,29 @@ from tools import (
     pbi_create_csv_import_query_tool,
     pbi_create_folder_import_query_tool,
     pbi_create_import_query_tool,
+    pbi_add_bar_chart_tool,
+    pbi_add_card_tool,
+    pbi_add_donut_chart_tool,
+    pbi_add_gauge_tool,
+    pbi_add_line_chart_tool,
+    pbi_add_slicer_tool,
+    pbi_add_table_visual_tool,
+    pbi_add_text_box_tool,
+    pbi_add_waterfall_tool,
+    pbi_apply_theme_tool,
+    pbi_build_dashboard_tool,
+    pbi_compile_report_tool,
+    pbi_create_page_tool,
+    pbi_delete_page_tool,
+    pbi_extract_report_tool,
     pbi_get_power_query_tool,
+    pbi_get_page_tool,
+    pbi_list_pages_tool,
     pbi_list_power_queries_tool,
+    pbi_move_visual_tool,
+    pbi_remove_visual_tool,
     pbi_set_power_query_tool,
+    pbi_set_page_size_tool,
 )
 
 
@@ -56,7 +76,8 @@ mcp = FastMCP(
         "lets clients inspect the semantic model, manage measures and "
         "relationships, run DAX queries, trigger model refreshes, manage "
         "Power Query partitions, and read or write Excel workbooks used in "
-        "the Power BI pipeline."
+        "the Power BI pipeline. It can also extract, modify, and compile "
+        "report layouts for page and visual automation."
     ),
     json_response=True,
     log_level="INFO",
@@ -656,6 +677,386 @@ def pbi_bulk_import_excel(
         sheet_table_map=sheet_table_map,
         promote_headers=promote_headers,
         refresh_after=refresh_after,
+    )
+
+
+@mcp.tool()
+def pbi_extract_report(pbix_path: str, extract_folder: str | None = None) -> dict[str, Any]:
+    """Extract a .pbix report into a pbi-tools folder structure."""
+    return _run(
+        "pbi_extract_report",
+        pbi_extract_report_tool,
+        pbix_path=pbix_path,
+        extract_folder=extract_folder,
+    )
+
+
+@mcp.tool()
+def pbi_compile_report(extract_folder: str, output_path: str) -> dict[str, Any]:
+    """Compile an extracted report folder back into a .pbix."""
+    return _run(
+        "pbi_compile_report",
+        pbi_compile_report_tool,
+        extract_folder=extract_folder,
+        output_path=output_path,
+    )
+
+
+@mcp.tool()
+def pbi_list_pages(extract_folder: str) -> dict[str, Any]:
+    """List pages in an extracted report."""
+    return _run("pbi_list_pages", pbi_list_pages_tool, extract_folder=extract_folder)
+
+
+@mcp.tool()
+def pbi_get_page(extract_folder: str, page: str) -> dict[str, Any]:
+    """Get page details and visual metadata from an extracted report."""
+    return _run("pbi_get_page", pbi_get_page_tool, extract_folder=extract_folder, page=page)
+
+
+@mcp.tool()
+def pbi_create_page(
+    extract_folder: str,
+    display_name: str,
+    width: int = 1280,
+    height: int = 720,
+) -> dict[str, Any]:
+    """Create a new report page."""
+    return _run(
+        "pbi_create_page",
+        pbi_create_page_tool,
+        extract_folder=extract_folder,
+        display_name=display_name,
+        width=width,
+        height=height,
+    )
+
+
+@mcp.tool()
+def pbi_delete_page(extract_folder: str, page: str) -> dict[str, Any]:
+    """Delete a report page."""
+    return _run("pbi_delete_page", pbi_delete_page_tool, extract_folder=extract_folder, page=page)
+
+
+@mcp.tool()
+def pbi_set_page_size(extract_folder: str, page: str, width: int, height: int) -> dict[str, Any]:
+    """Resize a report page."""
+    return _run(
+        "pbi_set_page_size",
+        pbi_set_page_size_tool,
+        extract_folder=extract_folder,
+        page=page,
+        width=width,
+        height=height,
+    )
+
+
+@mcp.tool()
+def pbi_add_card(
+    extract_folder: str,
+    page: str,
+    measure: str,
+    x: int,
+    y: int,
+    width: int = 200,
+    height: int = 120,
+    title: str = "",
+) -> dict[str, Any]:
+    """Add a card visual to a report page."""
+    return _run(
+        "pbi_add_card",
+        pbi_add_card_tool,
+        extract_folder=extract_folder,
+        page=page,
+        measure=measure,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+    )
+
+
+@mcp.tool()
+def pbi_add_bar_chart(
+    extract_folder: str,
+    page: str,
+    category_column: str,
+    value_measure: str,
+    x: int,
+    y: int,
+    width: int = 400,
+    height: int = 300,
+    title: str = "",
+    legend_column: str | None = None,
+) -> dict[str, Any]:
+    """Add a clustered bar chart visual."""
+    return _run(
+        "pbi_add_bar_chart",
+        pbi_add_bar_chart_tool,
+        extract_folder=extract_folder,
+        page=page,
+        category_column=category_column,
+        value_measure=value_measure,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+        legend_column=legend_column,
+    )
+
+
+@mcp.tool()
+def pbi_add_line_chart(
+    extract_folder: str,
+    page: str,
+    axis_column: str,
+    value_measures: list[str],
+    x: int,
+    y: int,
+    width: int = 420,
+    height: int = 300,
+    title: str = "",
+) -> dict[str, Any]:
+    """Add a line chart visual."""
+    return _run(
+        "pbi_add_line_chart",
+        pbi_add_line_chart_tool,
+        extract_folder=extract_folder,
+        page=page,
+        axis_column=axis_column,
+        value_measures=value_measures,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+    )
+
+
+@mcp.tool()
+def pbi_add_donut_chart(
+    extract_folder: str,
+    page: str,
+    category_column: str,
+    value_measure: str,
+    x: int,
+    y: int,
+    width: int = 320,
+    height: int = 280,
+    title: str = "",
+) -> dict[str, Any]:
+    """Add a donut chart visual."""
+    return _run(
+        "pbi_add_donut_chart",
+        pbi_add_donut_chart_tool,
+        extract_folder=extract_folder,
+        page=page,
+        category_column=category_column,
+        value_measure=value_measure,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+    )
+
+
+@mcp.tool()
+def pbi_add_table_visual(
+    extract_folder: str,
+    page: str,
+    columns: list[str],
+    x: int,
+    y: int,
+    width: int = 520,
+    height: int = 320,
+    title: str = "",
+) -> dict[str, Any]:
+    """Add a table visual."""
+    return _run(
+        "pbi_add_table_visual",
+        pbi_add_table_visual_tool,
+        extract_folder=extract_folder,
+        page=page,
+        columns=columns,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+    )
+
+
+@mcp.tool()
+def pbi_add_waterfall(
+    extract_folder: str,
+    page: str,
+    category_column: str,
+    value_measure: str,
+    x: int,
+    y: int,
+    width: int = 420,
+    height: int = 300,
+    title: str = "",
+) -> dict[str, Any]:
+    """Add a waterfall chart visual."""
+    return _run(
+        "pbi_add_waterfall",
+        pbi_add_waterfall_tool,
+        extract_folder=extract_folder,
+        page=page,
+        category_column=category_column,
+        value_measure=value_measure,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+    )
+
+
+@mcp.tool()
+def pbi_add_slicer(
+    extract_folder: str,
+    page: str,
+    column: str,
+    x: int,
+    y: int,
+    width: int = 220,
+    height: int = 120,
+    slicer_type: str = "dropdown",
+) -> dict[str, Any]:
+    """Add a slicer visual."""
+    return _run(
+        "pbi_add_slicer",
+        pbi_add_slicer_tool,
+        extract_folder=extract_folder,
+        page=page,
+        column=column,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        slicer_type=slicer_type,
+    )
+
+
+@mcp.tool()
+def pbi_add_gauge(
+    extract_folder: str,
+    page: str,
+    measure: str,
+    x: int,
+    y: int,
+    width: int = 280,
+    height: int = 220,
+    title: str = "",
+    target_measure: str | None = None,
+) -> dict[str, Any]:
+    """Add a gauge visual."""
+    return _run(
+        "pbi_add_gauge",
+        pbi_add_gauge_tool,
+        extract_folder=extract_folder,
+        page=page,
+        measure=measure,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+        target_measure=target_measure,
+    )
+
+
+@mcp.tool()
+def pbi_add_text_box(
+    extract_folder: str,
+    page: str,
+    text: str,
+    x: int,
+    y: int,
+    width: int = 280,
+    height: int = 80,
+    font_size: int = 16,
+    bold: bool = False,
+    color: str = "#222222",
+) -> dict[str, Any]:
+    """Add a text box visual."""
+    return _run(
+        "pbi_add_text_box",
+        pbi_add_text_box_tool,
+        extract_folder=extract_folder,
+        page=page,
+        text=text,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        font_size=font_size,
+        bold=bold,
+        color=color,
+    )
+
+
+@mcp.tool()
+def pbi_remove_visual(extract_folder: str, page: str, visual_id: str) -> dict[str, Any]:
+    """Remove a visual from a report page."""
+    return _run(
+        "pbi_remove_visual",
+        pbi_remove_visual_tool,
+        extract_folder=extract_folder,
+        page=page,
+        visual_id=visual_id,
+    )
+
+
+@mcp.tool()
+def pbi_move_visual(
+    extract_folder: str,
+    page: str,
+    visual_id: str,
+    x: int,
+    y: int,
+    width: int | None = None,
+    height: int | None = None,
+) -> dict[str, Any]:
+    """Move or resize a visual."""
+    return _run(
+        "pbi_move_visual",
+        pbi_move_visual_tool,
+        extract_folder=extract_folder,
+        page=page,
+        visual_id=visual_id,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+    )
+
+
+@mcp.tool()
+def pbi_apply_theme(extract_folder: str, theme_json_path: str) -> dict[str, Any]:
+    """Apply a theme JSON to an extracted report."""
+    return _run(
+        "pbi_apply_theme",
+        pbi_apply_theme_tool,
+        extract_folder=extract_folder,
+        theme_json_path=theme_json_path,
+    )
+
+
+@mcp.tool()
+def pbi_build_dashboard(extract_folder: str, page: str, layout: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build a dashboard page from a bulk layout specification."""
+    return _run(
+        "pbi_build_dashboard",
+        pbi_build_dashboard_tool,
+        extract_folder=extract_folder,
+        page=page,
+        layout=layout,
     )
 
 
