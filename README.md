@@ -129,36 +129,43 @@ excel_create_workbook -> excel_write_range -> pbi_create_import_query
 -> pbi_execute_dax
 ```
 
-## Configuration
+## Compatible Tools
 
-Add to your project's `.claude/settings.json`:
+Works with any MCP-compatible AI tool or IDE:
+
+| Tool | Transport | Config |
+|---|---|---|
+| **Claude Code** (CLI) | stdio | `.claude/settings.json` |
+| **Claude Desktop** | stdio | `%APPDATA%\Claude\claude_desktop_config.json` |
+| **Codex CLI** (OpenAI) | stdio | `~/.codex/config.json` |
+| **Gemini CLI** (Google) | stdio | `~/.gemini/settings.json` |
+| **Cursor** | stdio or sse | `.cursor/mcp.json` |
+| **VS Code** (Continue/Cline) | stdio or sse | `.vscode/mcp.json` |
+| **JetBrains** (IntelliJ, PyCharm) | stdio or sse | Settings > AI Assistant > MCP |
+| **Windsurf / Cline** | stdio | `.mcp/config.json` |
+
+See **[docs/SETUP.md](docs/SETUP.md)** for detailed config per platform.
+
+### Quick Config (Claude Code)
 
 ```json
 {
   "mcpServers": {
-    "powerbi-desktop": {
+    "powerbi": {
       "command": "python",
-      "args": ["server.py"]
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"]
     }
   }
 }
 ```
 
-Or globally in `%APPDATA%\Claude\claude_desktop_config.json`:
+### SSE Mode (for IDEs)
 
-```json
-{
-  "mcpServers": {
-    "powerbi-desktop": {
-      "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"],
-      "env": {
-        "PYTHONPATH": "C:\\Program Files\\Microsoft Power BI Desktop\\bin"
-      }
-    }
-  }
-}
+```powershell
+python server.py --transport sse --port 8765
 ```
+
+Then point your IDE to `http://localhost:8765/sse`.
 
 ## Project Structure
 

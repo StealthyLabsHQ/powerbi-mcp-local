@@ -646,7 +646,28 @@ def pbi_bulk_import_excel(
 
 
 def main() -> None:
-    mcp.run(transport="stdio")
+    """Entry point — supports stdio (default) and sse transport."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Power BI Desktop MCP Server")
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse"],
+        default="stdio",
+        help="MCP transport: stdio (CLI tools) or sse (web/IDE clients)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Port for SSE transport (default: 8765)",
+    )
+    args = parser.parse_args()
+
+    if args.transport == "sse":
+        mcp.run(transport="sse", sse_params={"port": args.port})
+    else:
+        mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":
