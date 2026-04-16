@@ -37,10 +37,13 @@ from tools import (
     pbi_model_info_tool,
     pbi_refresh_tool,
     pbi_set_format_tool,
-    pbi_get_power_query_tool,
-    pbi_set_power_query_tool,
-    pbi_create_import_query_tool,
     pbi_bulk_import_excel_tool,
+    pbi_create_csv_import_query_tool,
+    pbi_create_folder_import_query_tool,
+    pbi_create_import_query_tool,
+    pbi_get_power_query_tool,
+    pbi_list_power_queries_tool,
+    pbi_set_power_query_tool,
 )
 
 
@@ -49,8 +52,9 @@ mcp = FastMCP(
     instructions=(
         "Connects to the local Power BI Desktop Analysis Services instance, "
         "lets clients inspect the semantic model, manage measures and "
-        "relationships, run DAX queries, trigger model refreshes, and "
-        "read or write Excel workbooks used in the Power BI pipeline."
+        "relationships, run DAX queries, trigger model refreshes, manage "
+        "Power Query partitions, and read or write Excel workbooks used in "
+        "the Power BI pipeline."
     ),
     json_response=True,
     log_level="INFO",
@@ -508,13 +512,25 @@ def excel_to_pbi_check(file_path: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def pbi_get_power_query(table: str) -> dict[str, Any]:
+def pbi_get_power_query(table: str, partition_name: str | None = None) -> dict[str, Any]:
     """Read the Power Query (M) expression for a table."""
     return _run(
         "pbi_get_power_query",
         pbi_get_power_query_tool,
         CONNECTION_MANAGER,
         table=table,
+        partition_name=partition_name,
+    )
+
+
+@mcp.tool()
+def pbi_list_power_queries(include_hidden: bool = False) -> dict[str, Any]:
+    """List table partitions with their current source expressions."""
+    return _run(
+        "pbi_list_power_queries",
+        pbi_list_power_queries_tool,
+        CONNECTION_MANAGER,
+        include_hidden=include_hidden,
     )
 
 
@@ -522,6 +538,7 @@ def pbi_get_power_query(table: str) -> dict[str, Any]:
 def pbi_set_power_query(
     table: str,
     m_expression: str,
+    partition_name: str | None = None,
     refresh_after: bool = False,
 ) -> dict[str, Any]:
     """Write or update the Power Query (M) expression for a table."""
@@ -531,6 +548,7 @@ def pbi_set_power_query(
         CONNECTION_MANAGER,
         table=table,
         m_expression=m_expression,
+        partition_name=partition_name,
         refresh_after=refresh_after,
     )
 
@@ -540,6 +558,7 @@ def pbi_create_import_query(
     table: str,
     excel_path: str,
     sheet_name: str,
+    partition_name: str | None = None,
     promote_headers: bool = True,
     refresh_after: bool = True,
 ) -> dict[str, Any]:
@@ -551,7 +570,58 @@ def pbi_create_import_query(
         table=table,
         excel_path=excel_path,
         sheet_name=sheet_name,
+        partition_name=partition_name,
         promote_headers=promote_headers,
+        refresh_after=refresh_after,
+    )
+
+
+@mcp.tool()
+def pbi_create_csv_import_query(
+    table: str,
+    csv_path: str,
+    partition_name: str | None = None,
+    delimiter: str = ",",
+    encoding: int = 65001,
+    quote_style: str = "csv",
+    promote_headers: bool = True,
+    refresh_after: bool = True,
+) -> dict[str, Any]:
+    """Generate and inject a CSV import Power Query for a table."""
+    return _run(
+        "pbi_create_csv_import_query",
+        pbi_create_csv_import_query_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        csv_path=csv_path,
+        partition_name=partition_name,
+        delimiter=delimiter,
+        encoding=encoding,
+        quote_style=quote_style,
+        promote_headers=promote_headers,
+        refresh_after=refresh_after,
+    )
+
+
+@mcp.tool()
+def pbi_create_folder_import_query(
+    table: str,
+    folder_path: str,
+    partition_name: str | None = None,
+    extension_filter: str | None = None,
+    include_hidden_files: bool = False,
+    refresh_after: bool = True,
+) -> dict[str, Any]:
+    """Generate and inject a folder import Power Query for a table."""
+    return _run(
+        "pbi_create_folder_import_query",
+        pbi_create_folder_import_query_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        folder_path=folder_path,
+        partition_name=partition_name,
+        extension_filter=extension_filter,
+        include_hidden_files=include_hidden_files,
         refresh_after=refresh_after,
     )
 
@@ -575,5 +645,9 @@ def pbi_bulk_import_excel(
     )
 
 
-if __name__ == "__main__":
+def main() -> None:
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

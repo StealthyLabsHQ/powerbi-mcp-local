@@ -445,6 +445,23 @@ class PowerBIConnectionManager:
             raise last_error
         raise PowerBIConnectionError(f"Read operation '{operation_name}' failed unexpectedly.")
 
+    def execute_read(
+        self,
+        operation_name: str | Callable[[ConnectionState, Any, Any], Any],
+        reader: Callable[[ConnectionState, Any, Any], Any] | None = None,
+    ) -> Any:
+        """Compatibility wrapper mirroring execute_write for read operations."""
+        if reader is None:
+            reader_fn = operation_name
+            name = getattr(reader_fn, "__name__", "read")
+        else:
+            reader_fn = reader
+            name = operation_name
+        return self.run_read(
+            str(name),
+            lambda state: reader_fn(state, state.database, state.database.Model),
+        )
+
     def execute_write(
         self,
         operation_name: str,
@@ -997,4 +1014,3 @@ class PowerBIConnectionManager:
                 return True
         except OSError:
             return False
-
