@@ -6,7 +6,7 @@ Operating guide for AI coding agents (Codex, Claude Code, etc.) contributing to 
 
 ## Repository purpose
 
-MCP server exposing ~57 tools that connect to a running Power BI Desktop local engine (Analysis Services via TOM/ADOMD.NET) and automate model, query, Power Query, Excel, and report-layout operations.
+MCP server exposing 58 tools that connect to a running Power BI Desktop local engine (Analysis Services via TOM/ADOMD.NET) and automate model, query, Power Query, Excel, and report-layout operations.
 
 Target OS: Windows. Runtime: Python 3.11+ with `pythonnet` (.NET bridge).
 
@@ -29,7 +29,7 @@ src/
     visuals.py         # Report extract/compile, pages, visuals, themes
 docs/                  # Multi-platform setup guides
 specs/                 # Technical specs for new tool layers
-tests/                 # LOCAL-ONLY — not tracked in git
+tests/                 # LOCAL-ONLY - ignored by git in this repository
 CHANGELOG.md
 README.md
 SECURITY.md
@@ -39,7 +39,7 @@ SECURITY.md
 
 ## Hard rules
 
-1. **Never add, modify, or commit anything under `tests/`.** The folder is gitignored and kept local-only. If a task asks for test coverage, write tests locally to validate your work but do not `git add` them.
+1. **Never commit anything under `tests/`.** The folder is gitignored and local-only in this repository. If a task asks for test coverage, you can create/modify tests locally for validation, but do not `git add` them.
 
 2. **Never commit files matching `.gitignore`.** Check `.gitignore` before staging.
 
@@ -76,7 +76,7 @@ When adding a new `pbi_*_tool` or `excel_*_tool`:
 
 1. Define the function in the appropriate `src/tools/*.py` file.
 2. Export it in `src/tools/__init__.py`.
-3. Register it in `src/server.py` with the correct `@mcp.tool()` wrapper (read vs write — `is_read_tool` list in `security.py`).
+3. Register it in `src/server.py` with the correct `@mcp.tool()` wrapper (read vs write - update `READ_TOOLS`/`WRITE_TOOLS`/`DESTRUCTIVE_TOOLS` in `security.py` as needed).
 4. Update the tool count in `README.md` (badge + catalog section).
 5. Add a `CHANGELOG.md` entry under `[Unreleased]`.
 
@@ -94,7 +94,7 @@ When adding a new `pbi_*_tool` or `excel_*_tool`:
 
 - **`SecurityBindings` must be stripped** whenever rebuilding a PBIX ZIP. It is a DPAPI blob tied to the original Layout bytes and invalidates the file if left alongside a modified Layout.
 
-- **`pbi-tools compile` fails with "Compiling a project containing a data model into a PBIX file is not supported"** whenever the extract folder has a `DataModel` entry. The workaround is to patch only the `Report/Layout` entry back into the original PBIX ZIP (see `pbi_patch_layout` tool).
+- **`pbi-tools compile` fails with "Compiling a project containing a data model into a PBIX file is not supported"** whenever the extract folder has a `DataModel` entry. Current workaround: patch only the `Report/Layout` entry back into the original PBIX ZIP manually (there is no built-in `pbi_patch_layout` tool in this repo).
 
 - **Power BI Desktop locks the PBIX file.** Writes fail with `PermissionError` until the process is closed. Tools that write PBIX should accept a `force: bool = False` argument that runs `taskkill /F /IM PBIDesktop.exe` on Windows before writing.
 
