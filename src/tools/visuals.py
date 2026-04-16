@@ -244,13 +244,18 @@ def _page_next_z(section: dict[str, Any]) -> int:
     return (max(z_values) + 1) if z_values else 0
 
 
+def _query_ref(reference: str) -> str:
+    """Return the short queryRef name (column part only, without table prefix)."""
+    return reference.split(".", 1)[1] if "." in reference else reference
+
+
 def _build_select_entry(reference: str, aliases: dict[str, str]) -> dict[str, Any]:
     if "." in reference:
         table, column = _split_column_ref(reference)
         alias = aliases.setdefault(table, f"s{len(aliases)}")
         return {
             "Column": {"Expression": {"SourceRef": {"Source": alias}}, "Property": column},
-            "Name": reference,
+            "Name": column,  # PBI expects short name without table prefix
             "NativeReferenceName": column,
         }
     alias = aliases.setdefault("$Measures", f"s{len(aliases)}")
@@ -595,10 +600,10 @@ def pbi_add_bar_chart_tool(
     title: str = "",
     legend_column: str | None = None,
 ) -> dict[str, Any]:
-    projections = {"Category": [{"queryRef": category_column}], "Y": [{"queryRef": value_measure}]}
+    projections = {"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]}
     references = [category_column, value_measure]
     if legend_column:
-        projections["Series"] = [{"queryRef": legend_column}]
+        projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
         references.append(legend_column)
     return _append_visual(
         extract_folder,
@@ -642,8 +647,8 @@ def pbi_add_line_chart_tool(
             height=height,
             title=title or None,
             projections={
-                "Category": [{"queryRef": axis_column}],
-                "Y": [{"queryRef": measure} for measure in value_measures],
+                "Category": [{"queryRef": _query_ref(axis_column)}],
+                "Y": [{"queryRef": _query_ref(measure)} for measure in value_measures],
             },
             references=[axis_column, *value_measures],
         ),
@@ -662,7 +667,7 @@ def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: st
             width=width,
             height=height,
             title=title or None,
-            projections={"Category": [{"queryRef": category_column}], "Y": [{"queryRef": value_measure}]},
+            projections={"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]},
             references=[category_column, value_measure],
         ),
     )
@@ -682,7 +687,7 @@ def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str]
             width=width,
             height=height,
             title=title or None,
-            projections={"Values": [{"queryRef": item} for item in columns]},
+            projections={"Values": [{"queryRef": _query_ref(item)} for item in columns]},
             references=list(columns),
         ),
     )
@@ -700,7 +705,7 @@ def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str,
             width=width,
             height=height,
             title=title or None,
-            projections={"Category": [{"queryRef": category_column}], "Y": [{"queryRef": value_measure}]},
+            projections={"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]},
             references=[category_column, value_measure],
         ),
     )
@@ -721,7 +726,7 @@ def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: 
             width=width,
             height=height,
             title=None,
-            projections={"Values": [{"queryRef": column}]},
+            projections={"Values": [{"queryRef": _query_ref(column)}]},
             references=[column],
             extra_single_visual={"slicerType": slicer_kind},
         ),
@@ -729,10 +734,10 @@ def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: 
 
 
 def pbi_add_gauge_tool(extract_folder: str, page: str, measure: str, x: int, y: int, width: int = 280, height: int = 220, title: str = "", target_measure: str | None = None) -> dict[str, Any]:
-    projections = {"Value": [{"queryRef": measure}]}
+    projections = {"Y": [{"queryRef": _query_ref(measure)}]}
     references = [measure]
     if target_measure:
-        projections["Goal"] = [{"queryRef": target_measure}]
+        projections["Goal"] = [{"queryRef": _query_ref(target_measure)}]
         references.append(target_measure)
     return _append_visual(
         extract_folder,
@@ -848,40 +853,40 @@ def _create_visual_from_spec(section: dict[str, Any], spec: dict[str, Any]) -> d
     height = int(spec.get("height", DEFAULT_VISUAL_SIZES.get(visual_type, (400, 300))[1]))
     title = spec.get("title")
     if visual_type == "card":
-        return _create_chart_container(section, visual_type="card", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": spec["measure"]}]}, references=[spec["measure"]])
+        return _create_chart_container(section, visual_type="card", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["measure"]])
     if visual_type in {"bar_chart", "bar"}:
-        projections = {"Category": [{"queryRef": spec["category"]}], "Y": [{"queryRef": spec["measure"]}]}
+        projections = {"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}
         references = [spec["category"], spec["measure"]]
         if spec.get("legend"):
-            projections["Series"] = [{"queryRef": spec["legend"]}]
+            projections["Series"] = [{"queryRef": _query_ref(spec["legend"])}]
             references.append(spec["legend"])
         return _create_chart_container(section, visual_type="clusteredBarChart", x=x, y=y, width=width, height=height, title=title, projections=projections, references=references)
     if visual_type in {"line_chart", "line"}:
         measures = list(spec.get("measures") or [spec.get("measure")])
-        return _create_chart_container(section, visual_type="lineChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": spec["axis"]}], "Y": [{"queryRef": item} for item in measures]}, references=[spec["axis"], *measures])
+        return _create_chart_container(section, visual_type="lineChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["axis"])}], "Y": [{"queryRef": _query_ref(item)} for item in measures]}, references=[spec["axis"], *measures])
     if visual_type in {"donut", "donut_chart", "pie", "pie_chart"}:
-        return _create_chart_container(section, visual_type="donutChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": spec["category"]}], "Y": [{"queryRef": spec["measure"]}]}, references=[spec["category"], spec["measure"]])
+        return _create_chart_container(section, visual_type="donutChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["category"], spec["measure"]])
     if visual_type in {"table", "table_visual"}:
-        return _create_chart_container(section, visual_type="tableEx", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": item} for item in spec["columns"]]}, references=list(spec["columns"]))
+        return _create_chart_container(section, visual_type="tableEx", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": _query_ref(item)} for item in spec["columns"]]}, references=list(spec["columns"]))
     if visual_type == "waterfall":
-        return _create_chart_container(section, visual_type="waterfallChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": spec["category"]}], "Y": [{"queryRef": spec["measure"]}]}, references=[spec["category"], spec["measure"]])
+        return _create_chart_container(section, visual_type="waterfallChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["category"], spec["measure"]])
     if visual_type == "slicer":
-        return _make_visual_container(section=section, visual_type="slicer", x=x, y=y, width=width, height=height, projections={"Values": [{"queryRef": spec["column"]}]}, references=[spec["column"]], extra_single_visual={"slicerType": str(spec.get("slicer_type", "dropdown")).casefold()})
+        return _make_visual_container(section=section, visual_type="slicer", x=x, y=y, width=width, height=height, projections={"Values": [{"queryRef": _query_ref(spec["column"])}]}, references=[spec["column"]], extra_single_visual={"slicerType": str(spec.get("slicer_type", "dropdown")).casefold()})
     if visual_type in {"text", "text_box"}:
         return _make_visual_container(section=section, visual_type="textbox", x=x, y=y, width=width, height=height, extra_single_visual={"textContent": spec["text"], "textStyle": {"fontSize": int(spec.get("font_size", 16)), "bold": bool(spec.get("bold", False)), "color": str(spec.get("color", "#222222"))}, "prototypeQuery": {"Version": 2, "From": [], "Select": []}})
     if visual_type == "gauge":
-        return _create_chart_container(section, visual_type="gauge", x=x, y=y, width=width, height=height, title=title, projections={"Value": [{"queryRef": spec["measure"]}]}, references=[spec["measure"]])
+        return _create_chart_container(section, visual_type="gauge", x=x, y=y, width=width, height=height, title=title, projections={"Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["measure"]])
     if visual_type == "kpi":
         measures = [spec["measure"]]
         if spec.get("target_measure"):
             measures.append(spec["target_measure"])
-        return _create_chart_container(section, visual_type="kpi", x=x, y=y, width=width, height=height, title=title, projections={"Value": [{"queryRef": spec["measure"]}], "Goal": [{"queryRef": spec["target_measure"]}]} if spec.get("target_measure") else {"Value": [{"queryRef": spec["measure"]}]}, references=measures)
+        return _create_chart_container(section, visual_type="kpi", x=x, y=y, width=width, height=height, title=title, projections={"Value": [{"queryRef": _query_ref(spec["measure"])}], "Goal": [{"queryRef": _query_ref(spec["target_measure"])}]} if spec.get("target_measure") else {"Value": [{"queryRef": _query_ref(spec["measure"])}]}, references=measures)
     if visual_type == "map":
         refs = [spec["location"]]
-        projections = {"Category": [{"queryRef": spec["location"]}]}
+        projections = {"Category": [{"queryRef": _query_ref(spec["location"])}]}
         if spec.get("measure"):
             refs.append(spec["measure"])
-            projections["Y"] = [{"queryRef": spec["measure"]}]
+            projections["Y"] = [{"queryRef": _query_ref(spec["measure"])}]
         return _create_chart_container(section, visual_type="map", x=x, y=y, width=width, height=height, title=title, projections=projections, references=refs)
     raise PowerBIValidationError("Unsupported dashboard visual type.", details={"type": visual_type})
 
