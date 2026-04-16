@@ -4,47 +4,62 @@
 
 **Local-first MCP server for Power BI Desktop automation**
 
-Automate your semantic model, DAX, Power Query, Excel pipeline, and report layout from any MCP-capable AI client.
+Automate semantic model changes, DAX, Power Query, Excel, and report layout from MCP-capable AI clients.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 56](https://img.shields.io/badge/tools-56-orange)](#tool-catalog-56-tools)
+[![Tools 56](https://img.shields.io/badge/tools-56-orange)](#tool-catalog-en-56-tools)
 
 </div>
 
-## What this gives you
+## Quick Links
 
-- Connect AI tools directly to a running Power BI Desktop local engine.
-- Ship model changes faster: tables, columns, measures, relationships.
-- Run DAX and refresh from the same interface.
+| Start | Setup | Demo | Tools | Security | FR |
+| --- | --- | --- | --- | --- | --- |
+| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-56-tools) | [Security](#security-en) | [Version francaise](#francais) |
+
+<a id="demo-60s"></a>
+## Demo (60s)
+
+![powerbi-mcp-local demo](docs/assets/demo.gif)
+
+```powershell
+# 1) Start the MCP server
+python src/server.py
+
+# 2) In your MCP client, run prompts like:
+"Connect to Power BI and list all tables with columns."
+"Create a measure called Total Sales in table Sales."
+"Run this DAX query and show top 20 rows."
+```
+
+Expected flow:
+- MCP client calls `pbi_connect`
+- server auto-discovers local Power BI Desktop SSAS port
+- model/query/report tools become available
+
+---
+
+## English
+
+### What this gives you
+
+- Connect AI tools directly to a running local Power BI Desktop engine.
+- Automate tables, columns, measures, and relationships.
+- Execute DAX and refresh without leaving your MCP client.
 - Generate and patch Power Query (M) programmatically.
-- Edit report pages and visuals through JSON + `pbi-tools`.
+- Edit report pages and visuals via JSON + `pbi-tools`.
 
 No Power BI Pro license is required for this local workflow.
 
-## Who this is for
+### Who this is for
 
 - Analytics engineers maintaining large Power BI models.
 - BI developers who want repeatable model/report changes.
 - Teams building AI-assisted BI workflows in editors and IDEs.
-- Anyone who wants Power BI + Excel + MCP in one automation layer.
 
-## Use cases
-
-### 1) AI pair-programming for BI
-Use Codex/Claude/Cursor prompts to list tables, add measures, fix DAX, and validate results in one loop.
-
-### 2) Excel to Power BI pipelines
-Create or update workbooks, generate M imports, refresh, then verify measures and row-level outputs.
-
-### 3) Bulk report layout generation
-Extract a `.pbix`, create pages and visuals (`card`, `bar`, `line`, `table`, `gauge`, `slicer`, `map`), apply theme, and compile back.
-
-### 4) Safe automation in local environments
-Enforce allowed directories, query guardrails, and readonly mode when needed.
-
-## Architecture
+### Architecture
 
 ```text
 Any MCP Client  --(stdio or sse)-->  src/server.py
@@ -56,7 +71,7 @@ Any MCP Client  --(stdio or sse)-->  src/server.py
                                       +-- security -> path, query, and payload safeguards
 ```
 
-## Requirements
+### Requirements
 
 | Requirement | Why it is needed | Install |
 | --- | --- | --- |
@@ -70,9 +85,10 @@ Notes:
 - ADOMD.NET ships with Power BI Desktop.
 - If `pbi-tools` is not on `PATH`, set `PBI_TOOLS_PATH`.
 
-## 5-minute quick start
+<a id="quick-start-en"></a>
+### 5-minute quick start (EN)
 
-### 1) Install
+1. Install dependencies.
 
 ```powershell
 git clone https://github.com/StealthyLabsHQ/powerbi-mcp-local.git
@@ -80,43 +96,31 @@ cd powerbi-mcp-local
 pip install -r requirements.txt
 ```
 
-### 2) Open Power BI Desktop with a `.pbix`
+2. Open Power BI Desktop with a `.pbix` file.
 
-Keep it running so the local Analysis Services instance is available.
-
-### 3) Verify connectivity
+3. Verify connectivity.
 
 ```powershell
 python tests/test_connection.py
 ```
 
-Expected output includes:
-
-```text
-Connected to PBI Desktop on port XXXXX
-Database: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-Tables: N
-```
-
-### 4) Start MCP server
+4. Start server.
 
 ```powershell
 python src/server.py
 ```
 
-Optional modes:
+Optional:
 
 ```powershell
-# SSE transport
 python src/server.py --transport sse --port 8765
-
-# Readonly mode
 python src/server.py --readonly
 ```
 
-## MCP client setup
+<a id="mcp-client-setup-en"></a>
+### MCP client setup (EN)
 
-### Standard `stdio` config
+Standard `stdio` config:
 
 ```json
 {
@@ -129,15 +133,13 @@ python src/server.py --readonly
 }
 ```
 
-### SSE config
-
-Run:
+SSE mode:
 
 ```powershell
 python src/server.py --transport sse --port 8765
 ```
 
-Then configure your client endpoint as:
+Endpoint:
 
 ```text
 http://localhost:8765/sse
@@ -147,17 +149,17 @@ Guides:
 - [docs/SETUP.md](docs/SETUP.md)
 - [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)
 
-## First prompts to try
+### First prompts to try
 
 - `Connect to Power BI and list all tables with columns.`
 - `Create a measure called Total Sales in table Sales.`
 - `Run this DAX query and show top 20 rows.`
 - `Extract report, add a new page, place 3 visuals, then compile.`
 
-## Tool catalog (56 tools)
+<a id="tool-catalog-en-56-tools"></a>
+### Tool catalog (EN, 56 tools)
 
-### Core model discovery (6)
-
+Core model discovery (6):
 - `pbi_connect`
 - `pbi_list_instances`
 - `pbi_list_tables`
@@ -165,8 +167,7 @@ Guides:
 - `pbi_list_relationships`
 - `pbi_model_info`
 
-### Model mutations (6)
-
+Model mutations (6):
 - `pbi_create_measure`
 - `pbi_delete_measure`
 - `pbi_set_format`
@@ -174,15 +175,13 @@ Guides:
 - `pbi_create_table`
 - `pbi_create_column`
 
-### Query and import (4)
-
+Query and import (4):
 - `pbi_execute_dax`
 - `pbi_refresh`
 - `pbi_import_dax_file`
 - `pbi_export_model`
 
-### Power Query (M) tools (7)
-
+Power Query (M) tools (7):
 - `pbi_get_power_query`
 - `pbi_list_power_queries`
 - `pbi_set_power_query`
@@ -191,8 +190,7 @@ Guides:
 - `pbi_create_folder_import_query`
 - `pbi_bulk_import_excel`
 
-### Excel tools (13)
-
+Excel tools (13):
 - `excel_list_sheets`
 - `excel_read_sheet`
 - `excel_read_cell`
@@ -207,8 +205,7 @@ Guides:
 - `excel_workbook_info`
 - `excel_to_pbi_check`
 
-### Report and visual tools (20)
-
+Report and visual tools (20):
 - `pbi_extract_report`
 - `pbi_compile_report`
 - `pbi_list_pages`
@@ -230,23 +227,7 @@ Guides:
 - `pbi_apply_theme`
 - `pbi_build_dashboard`
 
-## What is automated vs. what remains manual
-
-| Automated via MCP | Requires manual action |
-| --- | --- |
-| Data source setup (Power Query M) | Custom visuals marketplace management |
-| DAX measures — create, update, bulk import | Live visual preview during layout edits |
-| Relationships, calculated tables, calculated columns | Report publishing to Power BI Service (requires Pro license) |
-| Excel read, write, format, validate | |
-| Visual formatting — colors, axes, fonts, borders (via extract + JSON + compile) | |
-| Power Query expressions (M) | |
-| Report extract / compile / page and visual CRUD | |
-| Standard visuals — card, bar, line, donut, gauge, table, waterfall, slicer, text, map | |
-| Drillthrough and bookmarks (via Layout JSON in extracted report) | |
-| Theme application | |
-| Model export to JSON | |
-
-## End-to-end automation flow
+### End-to-end automation flow
 
 ```text
 1) Build or update Excel input      -> excel_create_workbook / excel_write_range
@@ -260,7 +241,7 @@ Guides:
 9) Compile pbix                     -> pbi_compile_report
 ```
 
-## Troubleshooting
+### Troubleshooting (EN)
 
 | Symptom | Fix |
 | --- | --- |
@@ -270,27 +251,17 @@ Guides:
 | `PermissionError` on `.xlsx` | Close Excel; workbook files are locked while open |
 | Path blocked by policy | Configure `PBI_MCP_ALLOWED_DIRS` |
 
-## FAQ
+### FAQ (EN)
 
-### Does this work without Power BI Pro?
-Yes. This project targets local Power BI Desktop automation.
+- Does this work without Power BI Pro? Yes, local Power BI Desktop workflow.
+- Linux/macOS support? Not for full functionality. Power BI Desktop local engine is Windows-only.
+- Is `pbi-tools` needed for all tools? No, only report extract/compile and visual-layout tooling.
+- Can I run readonly? Yes, use `python src/server.py --readonly`.
 
-### Does it support Linux/macOS?
-Not for full functionality. Power BI Desktop local engine is Windows-only.
-
-### Do I need `pbi-tools` for every tool?
-No. `pbi-tools` is required only for report extract/compile and visual-layout tooling.
-
-### Can I run in readonly mode?
-Yes. Start with `python src/server.py --readonly`.
-
-### Is this safe to use on real files?
-It includes security middleware (path restrictions, query guards, SSRF protections, audit logging). Review [SECURITY.md](SECURITY.md) before production use.
-
-## Security
+<a id="security-en"></a>
+### Security (EN)
 
 Security middleware includes:
-
 - local path restrictions and traversal protection
 - DAX/DMV injection and unsafe-query guards
 - Power Query SSRF protections
@@ -300,17 +271,131 @@ Security middleware includes:
 
 Details: [SECURITY.md](SECURITY.md)
 
-## Development
-
-Run tests:
+### Development
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Notes:
-- Some tests are local-only and do not require a live Power BI instance.
-- Some integration scenarios require Power BI Desktop to be open.
+---
+
+<a id="francais"></a>
+## Francais
+
+### Resume
+
+`powerbi-mcp-local` est un serveur MCP pour automatiser Power BI Desktop en local:
+
+- modele semantique (tables, colonnes, mesures, relations)
+- execution DAX et refresh
+- Power Query (M)
+- pipeline Excel
+- pages/visuels de rapport via `pbi-tools`
+
+### Demarrage rapide (FR)
+
+1. Installer le projet.
+
+```powershell
+git clone https://github.com/StealthyLabsHQ/powerbi-mcp-local.git
+cd powerbi-mcp-local
+pip install -r requirements.txt
+```
+
+2. Ouvrir Power BI Desktop avec un fichier `.pbix`.
+
+3. Verifier la connexion.
+
+```powershell
+python tests/test_connection.py
+```
+
+4. Lancer le serveur.
+
+```powershell
+python src/server.py
+```
+
+Options:
+
+```powershell
+python src/server.py --transport sse --port 8765
+python src/server.py --readonly
+```
+
+### Configuration client MCP (FR)
+
+Configuration `stdio`:
+
+```json
+{
+  "mcpServers": {
+    "powerbi": {
+      "command": "python",
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
+    }
+  }
+}
+```
+
+Configuration SSE:
+
+```powershell
+python src/server.py --transport sse --port 8765
+```
+
+Endpoint:
+
+```text
+http://localhost:8765/sse
+```
+
+Guides:
+- [docs/SETUP.md](docs/SETUP.md)
+- [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)
+
+### Exemples de prompts (FR)
+
+- `Connecte-toi a Power BI et liste toutes les tables avec leurs colonnes.`
+- `Cree une mesure Total Sales dans la table Sales.`
+- `Execute cette requete DAX et affiche les 20 premieres lignes.`
+- `Extrait le rapport, ajoute une page et 3 visuels, puis recompile.`
+
+### Catalogue des outils (FR)
+
+Le projet expose **56 tools MCP**.
+Les noms et categories sont identiques a la section anglaise:
+
+- Core model discovery (6)
+- Model mutations (6)
+- Query and import (4)
+- Power Query (M) tools (7)
+- Excel tools (13)
+- Report and visual tools (20)
+
+Voir le detail complet ici: [Tool catalog (EN)](#tool-catalog-en-56-tools)
+
+### Depannage (FR)
+
+| Probleme | Correctif |
+| --- | --- |
+| `No module named 'clr'` | Installer .NET 6+ puis redemarrer le terminal |
+| `No running PBI Desktop instance found` | Ouvrir un `.pbix` dans Power BI Desktop |
+| `pbi-tools not found` | Ajouter au `PATH` ou definir `PBI_TOOLS_PATH` |
+| `PermissionError` sur `.xlsx` | Fermer Excel (fichier verrouille) |
+| Chemin bloque | Configurer `PBI_MCP_ALLOWED_DIRS` |
+
+### Securite (FR)
+
+Le middleware de securite couvre:
+- restrictions de chemins locaux
+- protections sur requetes DAX/DMV
+- protections SSRF pour Power Query
+- redaction d'exports sensibles
+- protections zip
+- audit des appels tools
+
+Details: [SECURITY.md](SECURITY.md)
 
 ## Repository layout
 
