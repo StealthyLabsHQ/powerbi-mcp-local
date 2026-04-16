@@ -1088,7 +1088,7 @@ def main() -> None:
         help="Disable write and destructive tools for this server process.",
     )
     args = parser.parse_args()
-    SECURITY.policy(reload=True, cwd=Path.cwd())
+    SECURITY.policy(reload=True, cwd=Path(__file__).parent)
     if args.readonly:
         SECURITY.set_runtime_readonly(True)
         logger.info("SECURITY: readonly mode enabled via --readonly")
