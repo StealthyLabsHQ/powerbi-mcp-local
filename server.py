@@ -37,6 +37,10 @@ from tools import (
     pbi_model_info_tool,
     pbi_refresh_tool,
     pbi_set_format_tool,
+    pbi_get_power_query_tool,
+    pbi_set_power_query_tool,
+    pbi_create_import_query_tool,
+    pbi_bulk_import_excel_tool,
 )
 
 
@@ -497,6 +501,77 @@ def excel_to_pbi_check(file_path: str) -> dict[str, Any]:
         excel_to_pbi_check_tool,
         file_path=file_path,
         manager=CONNECTION_MANAGER,
+    )
+
+
+# ── Power Query tools ────────────────────────────────────────────────
+
+
+@mcp.tool()
+def pbi_get_power_query(table: str) -> dict[str, Any]:
+    """Read the Power Query (M) expression for a table."""
+    return _run(
+        "pbi_get_power_query",
+        pbi_get_power_query_tool,
+        CONNECTION_MANAGER,
+        table=table,
+    )
+
+
+@mcp.tool()
+def pbi_set_power_query(
+    table: str,
+    m_expression: str,
+    refresh_after: bool = False,
+) -> dict[str, Any]:
+    """Write or update the Power Query (M) expression for a table."""
+    return _run(
+        "pbi_set_power_query",
+        pbi_set_power_query_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        m_expression=m_expression,
+        refresh_after=refresh_after,
+    )
+
+
+@mcp.tool()
+def pbi_create_import_query(
+    table: str,
+    excel_path: str,
+    sheet_name: str,
+    promote_headers: bool = True,
+    refresh_after: bool = True,
+) -> dict[str, Any]:
+    """Generate and inject an Excel import Power Query for a table."""
+    return _run(
+        "pbi_create_import_query",
+        pbi_create_import_query_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        excel_path=excel_path,
+        sheet_name=sheet_name,
+        promote_headers=promote_headers,
+        refresh_after=refresh_after,
+    )
+
+
+@mcp.tool()
+def pbi_bulk_import_excel(
+    excel_path: str,
+    sheet_table_map: dict[str, str] | None = None,
+    promote_headers: bool = True,
+    refresh_after: bool = True,
+) -> dict[str, Any]:
+    """Bulk-create Excel import queries for multiple tables at once."""
+    return _run(
+        "pbi_bulk_import_excel",
+        pbi_bulk_import_excel_tool,
+        CONNECTION_MANAGER,
+        excel_path=excel_path,
+        sheet_table_map=sheet_table_map,
+        promote_headers=promote_headers,
+        refresh_after=refresh_after,
     )
 
 
