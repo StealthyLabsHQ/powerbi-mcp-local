@@ -35,6 +35,16 @@ def pbi_connect_tool(
     )
 
 
+def pbi_list_instances_tool(manager: Any) -> dict[str, Any]:
+    """List discovered Power BI Desktop instances without forcing a connection."""
+    instances = manager.list_instances()
+    return ok(
+        "Power BI Desktop instances listed successfully.",
+        instances=instances,
+        count=len(instances),
+    )
+
+
 def pbi_list_tables_tool(
     manager: Any,
     *,
@@ -315,4 +325,3 @@ def pbi_create_column_tool(
         save_result=payload["save_result"],
         connection=payload["connection"],
     )
-
