@@ -42,6 +42,28 @@ from .power_query import (
 )
 from .query import pbi_execute_dax_tool, pbi_refresh_tool
 from .relationships import pbi_create_relationship_tool, pbi_list_relationships_tool
+from .visuals import (
+    pbi_add_bar_chart_tool,
+    pbi_add_card_tool,
+    pbi_add_donut_chart_tool,
+    pbi_add_gauge_tool,
+    pbi_add_line_chart_tool,
+    pbi_add_slicer_tool,
+    pbi_add_table_visual_tool,
+    pbi_add_text_box_tool,
+    pbi_add_waterfall_tool,
+    pbi_apply_theme_tool,
+    pbi_build_dashboard_tool,
+    pbi_compile_report_tool,
+    pbi_create_page_tool,
+    pbi_delete_page_tool,
+    pbi_extract_report_tool,
+    pbi_get_page_tool,
+    pbi_list_pages_tool,
+    pbi_move_visual_tool,
+    pbi_remove_visual_tool,
+    pbi_set_page_size_tool,
+)
 
 __all__ = [
     "excel_list_sheets_tool",
@@ -80,4 +102,24 @@ __all__ = [
     "pbi_create_csv_import_query_tool",
     "pbi_create_folder_import_query_tool",
     "pbi_bulk_import_excel_tool",
+    "pbi_extract_report_tool",
+    "pbi_compile_report_tool",
+    "pbi_list_pages_tool",
+    "pbi_get_page_tool",
+    "pbi_create_page_tool",
+    "pbi_delete_page_tool",
+    "pbi_set_page_size_tool",
+    "pbi_add_card_tool",
+    "pbi_add_bar_chart_tool",
+    "pbi_add_line_chart_tool",
+    "pbi_add_donut_chart_tool",
+    "pbi_add_gauge_tool",
+    "pbi_add_table_visual_tool",
+    "pbi_add_waterfall_tool",
+    "pbi_add_slicer_tool",
+    "pbi_add_text_box_tool",
+    "pbi_remove_visual_tool",
+    "pbi_move_visual_tool",
+    "pbi_apply_theme_tool",
+    "pbi_build_dashboard_tool",
 ]

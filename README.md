@@ -10,7 +10,7 @@ Read, write, and automate your data model — no Pro license required.
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools](https://img.shields.io/badge/tools-36-orange)](#tools-36)
+[![Tools](https://img.shields.io/badge/tools-56-orange)](#tools-56)
 
 </div>
 
@@ -22,12 +22,13 @@ Read, write, and automate your data model — no Pro license required.
 Any AI Tool ──(MCP)──> server.py
                          ├──(TOM/.NET)──────> Power BI Desktop (local SSAS)
                          ├──(Power Query M)──> workbook / CSV / folder sources
-                         └──(openpyxl)───────> Excel files (.xlsx)
+                         ├──(openpyxl)───────> Excel files (.xlsx)
+                         └──(pbi-tools)──────> Report pages, visuals, and themes
 ```
 
 Power BI Desktop runs a local Analysis Services engine on a random port.
 This server finds the port automatically (MSI, Microsoft Store, or process scan)
-and exposes the full data model through 36 MCP tools.
+and exposes the full data model, file pipeline, and report layer through 56 MCP tools.
 
 ---
 
@@ -92,7 +93,7 @@ Full setup guide: **[docs/SETUP.md](docs/SETUP.md)**
 
 ---
 
-## Tools (36)
+## Tools (56)
 
 ### Power BI Core
 
@@ -155,11 +156,36 @@ Full setup guide: **[docs/SETUP.md](docs/SETUP.md)**
 | `excel_workbook_info` | Return workbook metadata, named ranges, and dimensions |
 | `excel_to_pbi_check` | Compare Excel sheets against the current PBI model |
 
+### Visual Tools
+
+| Tool | Description |
+|:---|:---|
+| `pbi_extract_report` | Extract a `.pbix` into a pbi-tools report folder |
+| `pbi_compile_report` | Compile an extracted report folder back into a `.pbix` |
+| `pbi_list_pages` | List pages in an extracted report |
+| `pbi_get_page` | Inspect a page and all of its visuals |
+| `pbi_create_page` | Create a new report page |
+| `pbi_delete_page` | Delete a report page |
+| `pbi_set_page_size` | Resize a report page |
+| `pbi_add_card` | Add a KPI card visual |
+| `pbi_add_bar_chart` | Add a clustered bar chart visual |
+| `pbi_add_line_chart` | Add a line chart visual |
+| `pbi_add_donut_chart` | Add a donut chart visual |
+| `pbi_add_gauge` | Add a gauge visual |
+| `pbi_add_table_visual` | Add a table visual |
+| `pbi_add_waterfall` | Add a waterfall chart visual |
+| `pbi_add_slicer` | Add a slicer visual |
+| `pbi_add_text_box` | Add a text box visual |
+| `pbi_remove_visual` | Remove a visual from a page |
+| `pbi_move_visual` | Move or resize a visual |
+| `pbi_apply_theme` | Apply a theme JSON to an extracted report |
+| `pbi_build_dashboard` | Build a full page from a layout spec |
+
 ---
 
 ## Full Automation Workflow
 
-The complete data pipeline — only visuals remain manual:
+The complete data pipeline is now automatable end to end:
 
 ```
  1. Excel source          excel_create_workbook / excel_write_range
@@ -167,7 +193,10 @@ The complete data pipeline — only visuals remain manual:
  3. Relationships         pbi_create_relationship
  4. DAX measures          pbi_import_dax_file / pbi_create_measure
  5. Refresh & validate    pbi_refresh -> pbi_execute_dax
- 6. Visuals               (manual in PBI Desktop)
+ 6. Report extract        pbi_extract_report
+ 7. Pages & visuals       pbi_create_page / pbi_build_dashboard / pbi_add_*
+ 8. Theme                 pbi_apply_theme
+ 9. Compile               pbi_compile_report
 ```
 
 ---
@@ -177,10 +206,13 @@ The complete data pipeline — only visuals remain manual:
 | Automated via MCP | Still manual in PBI Desktop |
 |:---|:---|
 | Data source setup (Power Query M) | Visual Power Query editor |
-| DAX measures (create, update, bulk import) | Chart and card creation |
-| Relationships between tables | Page layout and formatting |
-| Calculated tables and columns | Theme import (JSON) |
-| Excel read, write, format, validate | Report publishing |
+| DAX measures (create, update, bulk import) | Advanced visual formatting edge cases |
+| Relationships between tables | Drillthrough, bookmarks, and complex interactions |
+| Calculated tables and columns | Custom visuals marketplace management |
+| Excel read, write, format, validate | Live visual preview while editing layout |
+| Report extract / compile / page CRUD | Report publishing |
+| Standard visuals (card, charts, table, slicer, text) | |
+| Theme file application | |
 | Model export to JSON | |
 
 ---
@@ -189,7 +221,7 @@ The complete data pipeline — only visuals remain manual:
 
 ```
 powerbi-mcp-local/
-├── server.py               36 MCP tools (stdio + sse transport)
+├── server.py               56 MCP tools (stdio + sse transport)
 ├── pbi_connection.py       Connection manager (port discovery, TOM, ADOMD)
 ├── security.py             Security policy, validation, and redaction helpers
 ├── SECURITY.md             Threat model and hardening guide
@@ -200,14 +232,17 @@ powerbi-mcp-local/
 │   ├── relationships.py    Relationships CRUD
 │   ├── query.py            DAX execution, data refresh
 │   ├── power_query.py      Power Query (M) partition tools
-│   └── excel.py            Excel read/write/format/pipeline
+│   ├── excel.py            Excel read/write/format/pipeline
+│   └── visuals.py          Report pages, visuals, themes, and pbi-tools bridge
 ├── test_connection.py      PBI connectivity test
 ├── test_excel.py           Excel tools test suite
 ├── test_power_query.py     Power Query tools test suite (7 tests)
+├── test_visuals.py         Visual layout tool test suite
 ├── docs/
 │   └── SETUP.md            Multi-platform setup guide
 ├── CLAUDE.md               Build instructions for Claude Code
-└── EXCEL_SPEC.md           Excel extension spec
+├── EXCEL_SPEC.md           Excel extension spec
+└── VISUAL_SPEC.md          Visual layer extension spec
 ```
 
 ---
@@ -221,6 +256,7 @@ powerbi-mcp-local/
 | [`pbi-pyadomd`](https://pypi.org/project/pbi-pyadomd/) | 1.4.3 | ADOMD.NET wrapper (DAX queries) |
 | [`pythonnet`](https://pypi.org/project/pythonnet/) | 3.0.5 | .NET bridge (TOM model writes) |
 | [`psutil`](https://pypi.org/project/psutil/) | 7.2.2 | Process port discovery |
+| `pbi-tools` | external CLI | Report extract / compile for visual automation |
 
 ## Requirements
 
