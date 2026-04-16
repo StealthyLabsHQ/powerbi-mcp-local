@@ -2,9 +2,39 @@
 
 from __future__ import annotations
 
+import os
+import re
 from typing import Any
 
 from pbi_connection import PowerBINotFoundError, find_named, map_enum, ok
+
+
+# ── DAX safety ───────────────────────────────────────────────────────
+
+# DMV queries that expose server internals — blocked by default
+_DMV_BLOCKED_PATTERNS = [
+    re.compile(r"\$SYSTEM\.", re.IGNORECASE),
+    re.compile(r"DISCOVER_", re.IGNORECASE),
+    re.compile(r"DBSCHEMA_", re.IGNORECASE),
+    re.compile(r"MDSCHEMA_", re.IGNORECASE),
+]
+
+# Allow override via env var (set to "1" to allow DMV for advanced users)
+_ALLOW_DMV = os.environ.get("PBI_MCP_ALLOW_DMV", "0") == "1"
+
+
+def _validate_dax_query(query: str) -> None:
+    """Block dangerous DMV/system queries unless explicitly allowed."""
+    if _ALLOW_DMV:
+        return
+    stripped = query.strip()
+    for pattern in _DMV_BLOCKED_PATTERNS:
+        if pattern.search(stripped):
+            raise ValueError(
+                f"DMV/system query blocked for security. "
+                f"Set PBI_MCP_ALLOW_DMV=1 to allow. "
+                f"Matched: {pattern.pattern}"
+            )
 
 
 def pbi_execute_dax_tool(
@@ -14,6 +44,7 @@ def pbi_execute_dax_tool(
     max_rows: int = 1000,
 ) -> dict[str, Any]:
     """Execute a DAX or DMV query."""
+    _validate_dax_query(query)
     result = manager.run_adomd_query(query, max_rows=max_rows)
     return ok(
         "Query executed successfully.",
