@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import difflib
-import os
 from contextlib import contextmanager
 from copy import copy
 from datetime import date, datetime
@@ -24,6 +23,7 @@ except ImportError:  # pragma: no cover - dependency is optional until installed
     get_column_letter = range_boundaries = None  # type: ignore[assignment]
 
 from pbi_connection import PowerBIError, error_payload, normalize_token, ok, serialize_value
+from security import ALLOWED_BASE_DIRS, SECURITY, configure_allowed_dirs, inspect_excel_archive, resolve_local_path
 
 LARGE_FILE_BYTES = 10 * 1024 * 1024
 DEFAULT_READ_LIMIT = 500
@@ -45,43 +45,17 @@ def _ensure_openpyxl() -> None:
     if not OPENPYXL_AVAILABLE:
         raise ExcelDependencyError("openpyxl is not installed. Install it with 'pip install openpyxl'.")
 
-ALLOWED_BASE_DIRS: list[Path] = []
-
-def configure_allowed_dirs(dirs: list[str]) -> None:
-    """Set allowed base directories for Excel file access.
-    If empty, defaults to CWD. Set via PBI_MCP_ALLOWED_DIRS env var
-    (semicolon-separated) or call this function at startup."""
-    ALLOWED_BASE_DIRS.clear()
-    ALLOWED_BASE_DIRS.extend(Path(d).resolve() for d in dirs if d.strip())
-
-# Initialize from env var
-_env_dirs = os.environ.get("PBI_MCP_ALLOWED_DIRS", "")
-if _env_dirs:
-    configure_allowed_dirs(_env_dirs.split(";"))
-
-
-def _resolve_path(file_path: str) -> Path:
-    text = str(file_path).strip()
-    if not text:
-        raise ExcelValidationError("file_path cannot be empty.")
-    normalized = os.path.normpath(text.replace("\\", os.sep))
-    path = Path(normalized).expanduser()
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    resolved = path.resolve(strict=False)
-
-    # Path traversal guard: must be inside an allowed directory
-    allowed = ALLOWED_BASE_DIRS if ALLOWED_BASE_DIRS else [Path.cwd().resolve()]
-    for base in allowed:
-        try:
-            resolved.relative_to(base)
-            return resolved
-        except ValueError:
-            continue
-    raise ExcelValidationError(
-        f"Path traversal blocked: '{resolved}' is outside allowed directories.",
-        details={"path": str(resolved), "allowed": [str(b) for b in allowed]},
-    )
+def _resolve_path(file_path: str, *, must_exist: bool = False) -> Path:
+    try:
+        return resolve_local_path(
+            file_path,
+            must_exist=must_exist,
+            allowed_extensions=SECURITY.policy().allowed_excel_extensions,
+        )
+    except Exception as exc:
+        if isinstance(exc, PowerBIError):
+            raise ExcelValidationError(exc.message, details=exc.details) from exc
+        raise
 
 def _require_file(path: Path) -> None:
     if not path.exists(): raise ExcelFileNotFoundError(f"Workbook not found: {path}", details={"path": str(path)})
@@ -97,7 +71,15 @@ def _open_workbook(
     for_write: bool = False,
 ) -> Iterator[tuple[Any, Path, bool]]:
     _ensure_openpyxl()
-    path = _resolve_path(file_path)
+    try:
+        if for_write:
+            path = _resolve_path(file_path)
+            if path.exists():
+                inspect_excel_archive(path)
+        else:
+            path = inspect_excel_archive(file_path)
+    except PowerBIError as exc:
+        raise ExcelValidationError(exc.message, details=exc.details) from exc
     if not for_write:
         _require_file(path)
     effective_read_only = False if for_write else _streaming(path) if read_only is None else read_only
@@ -107,6 +89,8 @@ def _open_workbook(
         raise ExcelFileNotFoundError(f"Workbook not found: {path}", details={"path": str(path)}) from exc
     except PermissionError as exc:
         raise ExcelFileLockedError("File locked by Excel, close it first.", details={"path": str(path)}) from exc
+    except PowerBIError as exc:
+        raise ExcelValidationError(exc.message, details=exc.details) from exc
     try:
         yield workbook, path, effective_read_only
     finally:
@@ -206,6 +190,7 @@ def excel_read_sheet_tool(
     def _impl() -> dict[str, Any]:
         if limit < 1:
             raise ExcelValidationError("limit must be >= 1.", details={"limit": limit})
+        scan_limit = SECURITY.policy().max_excel_cells_scanned
         with _open_workbook(file_path, data_only=True) as (workbook, path, read_only):
             worksheet = _sheet(workbook, sheet)
             bounds = range_boundaries(range) if range else (1, 1, worksheet.max_column, worksheet.max_row)
@@ -229,10 +214,16 @@ def excel_read_sheet_tool(
                     total_rows=0,
                     returned_rows=0,
                     truncated=False,
+                    scan_limit_hit=False,
                 )
             headers = [_header_name(value, index) for index, value in enumerate(first_row, start=1)]
-            rows, total_rows = [], 0
+            rows, total_rows, scanned_cells = [], 0, len(first_row)
+            scan_limit_hit = False
             for row in rows_iter:
+                scanned_cells += len(row)
+                if scanned_cells > scan_limit:
+                    scan_limit_hit = True
+                    break
                 total_rows += 1
                 if len(rows) < limit:
                     rows.append([serialize_value(value) for value in row])
@@ -246,7 +237,8 @@ def excel_read_sheet_tool(
                 rows=rows,
                 total_rows=total_rows,
                 returned_rows=len(rows),
-                truncated=total_rows > len(rows),
+                truncated=total_rows > len(rows) or scan_limit_hit,
+                scan_limit_hit=scan_limit_hit,
             )
     return _run(_impl)
 
@@ -275,12 +267,17 @@ def excel_search_tool(file_path: str, query: str, sheet: str | None = None) -> d
         needle = query.casefold().strip()
         if not needle:
             raise ExcelValidationError("query cannot be empty.")
+        scan_limit = SECURITY.policy().max_excel_cells_scanned
         with _open_workbook(file_path, data_only=True) as (workbook, path, read_only):
-            results, truncated = [], False
+            results, truncated, scanned_cells = [], False, 0
             for sheet_name in [sheet] if sheet else workbook.sheetnames:
                 worksheet = _sheet(workbook, sheet_name)
                 for row in worksheet.iter_rows():
                     for cell in row:
+                        scanned_cells += 1
+                        if scanned_cells > scan_limit:
+                            truncated = True
+                            break
                         value = cell.value
                         if value is not None and needle in str(serialize_value(value)).casefold():
                             if len(results) >= MAX_SEARCH_RESULTS:
@@ -299,6 +296,7 @@ def excel_search_tool(file_path: str, query: str, sheet: str | None = None) -> d
                 results=results,
                 total_matches=len(results),
                 truncated=truncated,
+                scan_limit_hit=scanned_cells > scan_limit,
             )
     return _run(_impl)
 

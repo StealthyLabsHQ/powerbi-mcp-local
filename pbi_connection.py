@@ -348,6 +348,7 @@ class PowerBIConnectionManager:
         self._tom: Any | None = None
         self._adomd_client: Any | None = None
         self._dll_search_paths: set[str] = set()
+        self._dll_directory_handles: list[Any] = []
 
     def list_instances(self) -> list[dict[str, Any]]:
         """Return discovered Power BI Desktop instances."""
@@ -790,7 +791,15 @@ class PowerBIConnectionManager:
         for env_name in ("PBI_DESKTOP_BIN", "PBI_DLL_DIR"):
             value = os.getenv(env_name)
             if value:
-                dirs.append(value)
+                candidate = Path(value).expanduser()
+                if candidate.is_absolute():
+                    dirs.append(str(candidate))
+                else:
+                    self._logger.warning(
+                        "Ignoring %s because it is not an absolute path: %s",
+                        env_name,
+                        value,
+                    )
 
         if instance.process_exe:
             dirs.append(str(Path(instance.process_exe).parent))
@@ -819,29 +828,31 @@ class PowerBIConnectionManager:
         for directory in dirs:
             if not directory:
                 continue
-            if directory not in seen and Path(directory).exists():
-                deduped.append(directory)
-                seen.add(directory)
+            resolved = str(Path(directory).expanduser().resolve())
+            if resolved not in seen and Path(resolved).is_dir():
+                deduped.append(resolved)
+                seen.add(resolved)
         return deduped
 
     def _add_dll_search_path(self, directory: str) -> None:
         if directory in self._dll_search_paths:
             return
         self._dll_search_paths.add(directory)
-        if directory not in sys.path:
-            sys.path.append(directory)
-        os.environ["PATH"] = directory + os.pathsep + os.environ.get("PATH", "")
+        add_dll_directory = getattr(os, "add_dll_directory", None)
+        if callable(add_dll_directory):
+            try:
+                handle = add_dll_directory(directory)
+            except OSError:
+                handle = None
+            if handle is not None:
+                self._dll_directory_handles.append(handle)
 
     def _try_add_reference(self, assembly_name: str, directory: str) -> bool:
         assert self._clr is not None
-        try:
-            self._clr.AddReference(assembly_name)
+        dll_path = os.path.join(directory, f"{assembly_name}.dll")
+        if os.path.exists(dll_path):
+            self._clr.AddReference(dll_path)
             return True
-        except Exception:
-            dll_path = os.path.join(directory, f"{assembly_name}.dll")
-            if os.path.exists(dll_path):
-                self._clr.AddReference(dll_path)
-                return True
         return False
 
     def _select_database(self, server: Any) -> Any:

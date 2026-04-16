@@ -191,6 +191,8 @@ The complete data pipeline — only visuals remain manual:
 powerbi-mcp-local/
 ├── server.py               36 MCP tools (stdio + sse transport)
 ├── pbi_connection.py       Connection manager (port discovery, TOM, ADOMD)
+├── security.py             Security policy, validation, and redaction helpers
+├── SECURITY.md             Threat model and hardening guide
 ├── pyproject.toml          PyPI packaging metadata
 ├── tools/
 │   ├── model.py            Tables, columns, export, model info

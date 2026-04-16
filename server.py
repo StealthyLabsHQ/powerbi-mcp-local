@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from pbi_connection import PowerBIConnectionManager, error_payload, logger
+from security import SECURITY
 from tools import (
     excel_auto_width_tool,
     excel_create_sheet_tool,
@@ -63,20 +65,17 @@ mcp = FastMCP(
 CONNECTION_MANAGER = PowerBIConnectionManager(logger)
 
 
-def _sanitize_kwarg(key: str, value: Any) -> Any:
-    """Redact sensitive values for logging."""
-    if key in ("m_expression", "expression", "query") and isinstance(value, str) and len(value) > 200:
-        return f"{value[:200]}... ({len(value)} chars)"
-    return value
-
-
 def _run(tool_name: str, callback: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
     """Execute a tool callback with audit logging and error normalization."""
     # Audit log: every tool call, before execution
-    safe_kwargs = {k: _sanitize_kwarg(k, v) for k, v in kwargs.items()
-                   if k != "manager" and not k.startswith("_")}
+    safe_kwargs = {
+        key: SECURITY.sanitize_for_logging(value)
+        for key, value in kwargs.items()
+        if key != "manager" and not key.startswith("_")
+    }
     logger.info("TOOL_CALL tool=%s params=%s", tool_name, safe_kwargs)
     try:
+        SECURITY.validate_tool_call(tool_name, kwargs)
         result = callback(*args, **kwargs)
         status = result.get("status", "unknown") if isinstance(result, dict) else "ok"
         logger.info("TOOL_OK tool=%s status=%s", tool_name, status)
@@ -682,7 +681,16 @@ def main() -> None:
         default="127.0.0.1",
         help="Host for SSE transport (default: 127.0.0.1 — localhost only)",
     )
+    parser.add_argument(
+        "--readonly",
+        action="store_true",
+        help="Disable write and destructive tools for this server process.",
+    )
     args = parser.parse_args()
+    SECURITY.policy(reload=True, cwd=Path.cwd())
+    if args.readonly:
+        SECURITY.set_runtime_readonly(True)
+        logger.info("SECURITY: readonly mode enabled via --readonly")
 
     if args.transport == "sse":
         logger.info(

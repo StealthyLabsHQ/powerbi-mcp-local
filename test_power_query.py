@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -159,7 +160,7 @@ class PowerQueryToolTests(unittest.TestCase):
         )
         manager = FakeManager(FakeModel([sales, hidden, sharded]))
 
-        with patch("tools.power_query._ensure_file", return_value="dummy.xlsx"), patch(
+        with patch("tools.power_query.inspect_excel_archive", return_value=Path("dummy.xlsx")), patch(
             "tools.power_query._load_excel_sheet_names",
             return_value=["Sales", "HiddenTable", "Sharded", "Missing"],
         ):

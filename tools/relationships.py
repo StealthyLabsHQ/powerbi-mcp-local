@@ -13,6 +13,7 @@ from pbi_connection import (
     ok,
     serialize_value,
 )
+from security import validate_model_object_name
 
 
 def pbi_list_relationships_tool(manager: Any) -> dict[str, Any]:
@@ -60,6 +61,12 @@ def pbi_create_relationship_tool(
     relationship_name: str | None = None,
 ) -> dict[str, Any]:
     """Create a single-column relationship."""
+    validate_model_object_name(from_table)
+    validate_model_object_name(from_column)
+    validate_model_object_name(to_table)
+    validate_model_object_name(to_column)
+    if relationship_name:
+        validate_model_object_name(relationship_name)
 
     def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
         tom = manager.tom
@@ -168,4 +175,3 @@ def _map_direction(tom: Any, direction: str) -> Any:
         "direction must be one of: oneDirection, bothDirections, automatic.",
         details={"direction": direction},
     )
-
