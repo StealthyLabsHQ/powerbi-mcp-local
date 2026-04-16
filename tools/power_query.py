@@ -16,6 +16,7 @@ from pbi_connection import (
     ok,
     serialize_value,
 )
+from security import inspect_excel_archive, resolve_local_path, validate_expression_text, validate_model_object_name
 
 
 def _m_string(value: str) -> str:
@@ -30,6 +31,8 @@ _M_BLOCKED_FUNCTIONS = [
     re.compile(r"\bWeb\.Contents\b", re.IGNORECASE),
     re.compile(r"\bWeb\.Page\b", re.IGNORECASE),
     re.compile(r"\bWeb\.BrowserContents\b", re.IGNORECASE),
+    re.compile(r"\bExpression\.Evaluate\b", re.IGNORECASE),
+    re.compile(r"\bValue\.NativeQuery\b", re.IGNORECASE),
     re.compile(r"\bOData\.Feed\b", re.IGNORECASE),
     re.compile(r"\bSql\.Database\b", re.IGNORECASE),
     re.compile(r"\bSql\.Databases\b", re.IGNORECASE),
@@ -45,11 +48,8 @@ _M_BLOCKED_FUNCTIONS = [
     re.compile(r"\bAzureStorage\.\w+", re.IGNORECASE),
 ]
 
-# Allow override via env var for advanced users who need external sources
-_ALLOW_EXTERNAL_M = os.environ.get("PBI_MCP_ALLOW_EXTERNAL_M", "0") == "1"
-
-
 def _validate_m_expression(expression: str) -> None:
+    validate_expression_text(expression)
     text = expression.strip()
     if not text:
         raise PowerBIValidationError("m_expression cannot be empty.")
@@ -88,7 +88,7 @@ def _validate_m_expression(expression: str) -> None:
         raise PowerBIValidationError("M expression starts with 'let' but has no matching 'in' clause.")
 
     # Security check: block external/network M functions
-    if not _ALLOW_EXTERNAL_M:
+    if os.environ.get("PBI_MCP_ALLOW_EXTERNAL_M", "0") != "1":
         for pattern in _M_BLOCKED_FUNCTIONS:
             match = pattern.search(text)
             if match:
@@ -214,9 +214,7 @@ def _load_excel_sheet_names(excel_path: str) -> list[str]:
         from openpyxl import load_workbook
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise PowerBIConfigurationError("openpyxl is required for Excel import query helpers.") from exc
-    path = Path(excel_path).expanduser()
-    if not path.exists():
-        raise PowerBINotFoundError(f"Excel workbook '{path}' was not found.", details={"path": str(path)})
+    path = inspect_excel_archive(excel_path)
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
         return list(workbook.sheetnames)
@@ -226,16 +224,16 @@ def _load_excel_sheet_names(excel_path: str) -> list[str]:
             close()
 
 
-def _ensure_file(path_value: str, *, kind: str) -> str:
-    path = Path(path_value).expanduser()
-    if not path.exists() or not path.is_file():
+def _ensure_file(path_value: str, *, kind: str, allowed_extensions: set[str] | None = None) -> str:
+    path = resolve_local_path(path_value, must_exist=True, allowed_extensions=allowed_extensions)
+    if not path.is_file():
         raise PowerBINotFoundError(f"{kind} '{path}' was not found.", details={"path": str(path)})
     return str(path)
 
 
 def _ensure_folder(path_value: str) -> str:
-    path = Path(path_value).expanduser()
-    if not path.exists() or not path.is_dir():
+    path = resolve_local_path(path_value, must_exist=True)
+    if not path.is_dir():
         raise PowerBINotFoundError(f"Folder '{path}' was not found.", details={"path": str(path)})
     return str(path)
 
@@ -309,6 +307,9 @@ def _build_auto_sheet_map(model: Any, sheet_names: list[str]) -> dict[str, str]:
 
 def pbi_get_power_query_tool(manager: Any, *, table: str, partition_name: str | None = None) -> dict[str, Any]:
     """Read the M expression for a specific table partition."""
+    validate_model_object_name(table)
+    if partition_name:
+        validate_model_object_name(partition_name)
 
     def _reader(state: Any) -> dict[str, Any]:
         tbl, partition = _get_target_partition(state.database.Model, table, partition_name)
@@ -360,6 +361,9 @@ def pbi_set_power_query_tool(
     refresh_after: bool = False,
 ) -> dict[str, Any]:
     """Write or update an M expression on a table partition."""
+    validate_model_object_name(table)
+    if partition_name:
+        validate_model_object_name(partition_name)
     _validate_m_expression(m_expression)
 
     def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
@@ -400,7 +404,10 @@ def pbi_create_import_query_tool(
     refresh_after: bool = True,
 ) -> dict[str, Any]:
     """Generate and inject an Excel import Power Query for a table."""
-    workbook_path = _ensure_file(excel_path, kind="Excel workbook")
+    validate_model_object_name(table)
+    if partition_name:
+        validate_model_object_name(partition_name)
+    workbook_path = str(inspect_excel_archive(excel_path))
     available_sheets = _load_excel_sheet_names(workbook_path)
     if sheet_name not in available_sheets:
         raise PowerBINotFoundError(
@@ -433,7 +440,10 @@ def pbi_create_csv_import_query_tool(
     refresh_after: bool = True,
 ) -> dict[str, Any]:
     """Generate and inject a CSV import Power Query for a table."""
-    csv_file = _ensure_file(csv_path, kind="CSV file")
+    validate_model_object_name(table)
+    if partition_name:
+        validate_model_object_name(partition_name)
+    csv_file = _ensure_file(csv_path, kind="CSV file", allowed_extensions={".csv", ".txt"})
     m_expression = _build_csv_m(
         csv_file,
         delimiter=delimiter,
@@ -464,6 +474,9 @@ def pbi_create_folder_import_query_tool(
     refresh_after: bool = True,
 ) -> dict[str, Any]:
     """Generate and inject a folder import Power Query for a table."""
+    validate_model_object_name(table)
+    if partition_name:
+        validate_model_object_name(partition_name)
     folder = _ensure_folder(folder_path)
     m_expression = _build_folder_m(
         folder,
@@ -491,7 +504,7 @@ def pbi_bulk_import_excel_tool(
     refresh_after: bool = True,
 ) -> dict[str, Any]:
     """Bulk-create Excel import queries for multiple tables."""
-    workbook_path = _ensure_file(excel_path, kind="Excel workbook")
+    workbook_path = str(inspect_excel_archive(excel_path))
     available_sheets = _load_excel_sheet_names(workbook_path)
 
     def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:

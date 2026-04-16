@@ -16,6 +16,12 @@ from pbi_connection import (
     ok,
     serialize_value,
 )
+from security import (
+    resolve_local_path,
+    validate_measure_name,
+    validate_model_expression,
+    validate_model_object_name,
+)
 
 
 def pbi_list_measures_tool(
@@ -67,10 +73,9 @@ def pbi_create_measure_tool(
     overwrite: bool = True,
 ) -> dict[str, Any]:
     """Create or update a DAX measure."""
-    if not name.strip():
-        raise PowerBIValidationError("Measure name cannot be empty.")
-    if not expression.strip():
-        raise PowerBIValidationError("Measure expression cannot be empty.")
+    validate_model_object_name(table)
+    validate_measure_name(name)
+    validate_model_expression(expression, kind="measure expression")
 
     def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
         target_table = find_named(model.Tables, table)
@@ -127,6 +132,8 @@ def pbi_create_measure_tool(
 
 def pbi_delete_measure_tool(manager: Any, *, table: str, name: str) -> dict[str, Any]:
     """Delete a DAX measure."""
+    validate_model_object_name(table)
+    validate_measure_name(name)
 
     def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
         target_table = find_named(model.Tables, table)
@@ -165,6 +172,9 @@ def pbi_set_format_tool(
     """Batch-apply format strings to measures or columns."""
     if not names:
         raise PowerBIValidationError("At least one object name is required.")
+    validate_model_object_name(table)
+    for object_name in names:
+        validate_model_object_name(object_name)
     normalized_type = object_type.strip().casefold()
     if normalized_type not in {"measure", "column"}:
         raise PowerBIValidationError(
@@ -226,7 +236,9 @@ def pbi_import_dax_file_tool(
     stop_on_error: bool = False,
 ) -> dict[str, Any]:
     """Parse a .dax file and bulk-create measures."""
-    measures = _parse_dax_file(Path(path))
+    validate_model_object_name(table)
+    resolved_path = resolve_local_path(path, must_exist=True, allowed_extensions={".dax"})
+    measures = _parse_dax_file(resolved_path)
     results = []
     created = 0
     updated = 0
@@ -270,7 +282,7 @@ def pbi_import_dax_file_tool(
     return ok(
         f"Imported {created + updated} measure(s) from '{path}'.",
         table=table,
-        source_path=str(Path(path).expanduser()),
+        source_path=str(resolved_path),
         parsed_count=len(measures),
         created=created,
         updated=updated,
@@ -279,14 +291,15 @@ def pbi_import_dax_file_tool(
     )
 
 
-def _parse_dax_file(path: Path) -> list[dict[str, str]]:
-    if not path.exists():
-        raise PowerBINotFoundError(f"DAX file '{path}' was not found.", details={"path": str(path)})
+def _parse_dax_file(path: str | Path) -> list[dict[str, str]]:
+    resolved = resolve_local_path(str(path), must_exist=True, allowed_extensions={".dax"})
+    if not resolved.exists():
+        raise PowerBINotFoundError(f"DAX file '{resolved}' was not found.", details={"path": str(resolved)})
 
-    raw_text = path.read_text(encoding="utf-8")
+    raw_text = resolved.read_text(encoding="utf-8")
     blocks = [block.strip() for block in re.split(r"(?:\r?\n){2,}", raw_text) if block.strip()]
     if not blocks:
-        raise PowerBIValidationError(f"DAX file '{path}' is empty.", details={"path": str(path)})
+        raise PowerBIValidationError(f"DAX file '{resolved}' is empty.", details={"path": str(resolved)})
 
     parsed: list[dict[str, str]] = []
     for index, block in enumerate(blocks, start=1):
@@ -296,7 +309,7 @@ def _parse_dax_file(path: Path) -> list[dict[str, str]]:
         if not match:
             raise PowerBIValidationError(
                 f"Invalid measure header in block {index}: '{header}'. Expected 'MeasureName ='",
-                details={"path": str(path), "block": index},
+                details={"path": str(resolved), "block": index},
             )
 
         name = match.group("name").strip()
@@ -310,15 +323,16 @@ def _parse_dax_file(path: Path) -> list[dict[str, str]]:
         if not name:
             raise PowerBIValidationError(
                 f"Block {index} is missing a measure name.",
-                details={"path": str(path), "block": index},
+                details={"path": str(resolved), "block": index},
             )
         if not expression:
             raise PowerBIValidationError(
                 f"Block {index} is missing a DAX expression for measure '{name}'.",
-                details={"path": str(path), "block": index, "measure": name},
+                details={"path": str(resolved), "block": index, "measure": name},
             )
+        validate_measure_name(name)
+        validate_model_expression(expression, kind="measure expression")
 
         parsed.append({"name": name, "expression": expression})
 
     return parsed
-

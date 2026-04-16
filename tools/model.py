@@ -16,6 +16,12 @@ from pbi_connection import (
     ok,
     serialize_value,
 )
+from security import (
+    redact_sensitive_data,
+    resolve_local_path,
+    validate_model_expression,
+    validate_model_object_name,
+)
 
 
 def pbi_connect_tool(
@@ -152,14 +158,16 @@ def pbi_export_model_tool(
         include_hidden=include_hidden,
         include_row_counts=include_row_counts,
     )
-    model_json = {
+    model_json = redact_sensitive_data(
+        {
         "tables": snapshot["tables"],
         "measures": snapshot["measures"],
         "relationships": snapshot["relationships"],
-    }
+        }
+    )
     written_path = None
     if path:
-        output_path = Path(path).expanduser()
+        output_path = resolve_local_path(path, must_exist=False, allowed_extensions={".json"})
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(
             json.dumps(model_json, indent=2, ensure_ascii=False),
@@ -185,10 +193,8 @@ def pbi_create_table_tool(
     refresh_after_create: bool = True,
 ) -> dict[str, Any]:
     """Create or update a calculated table."""
-    if not name.strip():
-        raise PowerBIValidationError("Table name cannot be empty.")
-    if not expression.strip():
-        raise PowerBIValidationError("Calculated table expression cannot be empty.")
+    validate_model_object_name(name)
+    validate_model_expression(expression, kind="calculated table expression")
 
     def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
         tom = manager.tom
@@ -207,6 +213,11 @@ def pbi_create_table_tool(
         else:
             table = existing
             action = "updated"
+            if int(table.Partitions.Count) > 1:
+                raise PowerBIValidationError(
+                    f"Table '{name}' has multiple partitions. Refusing to overwrite it automatically.",
+                    details={"table": name, "partition_count": int(table.Partitions.Count)},
+                )
             if table.Partitions.Count > 0:
                 source = table.Partitions[0].Source
                 if type(source).__name__ != "CalculatedPartitionSource":
@@ -263,10 +274,9 @@ def pbi_create_column_tool(
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """Create or update a calculated column."""
-    if not name.strip():
-        raise PowerBIValidationError("Column name cannot be empty.")
-    if not expression.strip():
-        raise PowerBIValidationError("Calculated column expression cannot be empty.")
+    validate_model_object_name(table)
+    validate_model_object_name(name)
+    validate_model_expression(expression, kind="calculated column expression")
 
     def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
         tom = manager.tom

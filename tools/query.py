@@ -6,7 +6,8 @@ import os
 import re
 from typing import Any
 
-from pbi_connection import PowerBINotFoundError, find_named, map_enum, ok
+from pbi_connection import PowerBINotFoundError, PowerBIValidationError, find_named, map_enum, ok
+from security import SECURITY, validate_query_text
 
 
 # ── DAX safety ───────────────────────────────────────────────────────
@@ -19,21 +20,19 @@ _DMV_BLOCKED_PATTERNS = [
     re.compile(r"MDSCHEMA_", re.IGNORECASE),
 ]
 
-# Allow override via env var (set to "1" to allow DMV for advanced users)
-_ALLOW_DMV = os.environ.get("PBI_MCP_ALLOW_DMV", "0") == "1"
-
-
 def _validate_dax_query(query: str) -> None:
     """Block dangerous DMV/system queries unless explicitly allowed."""
-    if _ALLOW_DMV:
+    validate_query_text(query, max_length=SECURITY.policy().max_query_length)
+    if os.environ.get("PBI_MCP_ALLOW_DMV", "0") == "1":
         return
     stripped = query.strip()
     for pattern in _DMV_BLOCKED_PATTERNS:
         if pattern.search(stripped):
-            raise ValueError(
+            raise PowerBIValidationError(
                 f"DMV/system query blocked for security. "
                 f"Set PBI_MCP_ALLOW_DMV=1 to allow. "
-                f"Matched: {pattern.pattern}"
+                f"Matched: {pattern.pattern}",
+                details={"pattern": pattern.pattern},
             )
 
 
@@ -45,6 +44,12 @@ def pbi_execute_dax_tool(
 ) -> dict[str, Any]:
     """Execute a DAX or DMV query."""
     _validate_dax_query(query)
+    limit = SECURITY.policy().max_rows_for_dax
+    if max_rows > limit:
+        raise PowerBIValidationError(
+            f"max_rows {max_rows} exceeds the configured limit of {limit}.",
+            details={"max_rows": max_rows, "limit": limit},
+        )
     result = manager.run_adomd_query(query, max_rows=max_rows)
     return ok(
         "Query executed successfully.",
@@ -94,4 +99,3 @@ def pbi_refresh_tool(
         save_result=payload["save_result"],
         connection=payload["connection"],
     )
-
