@@ -29,6 +29,7 @@ from tools import (
     pbi_create_relationship_tool,
     pbi_create_table_tool,
     pbi_delete_measure_tool,
+    pbi_execute_dax_as_role_tool,
     pbi_execute_dax_tool,
     pbi_export_model_tool,
     pbi_import_dax_file_tool,
@@ -39,6 +40,7 @@ from tools import (
     pbi_model_info_tool,
     pbi_refresh_tool,
     pbi_set_format_tool,
+    pbi_trace_query_tool,
     pbi_bulk_import_excel_tool,
     pbi_create_csv_import_query_tool,
     pbi_create_folder_import_query_tool,
@@ -179,6 +181,30 @@ def pbi_execute_dax(query: str, max_rows: int = 1000) -> dict[str, Any]:
         CONNECTION_MANAGER,
         query=query,
         max_rows=max_rows,
+    )
+
+
+@mcp.tool()
+def pbi_execute_dax_as_role(query: str, role: str, username: str | None = None) -> dict[str, Any]:
+    """Execute a DAX query under a specific RLS role and optional effective user."""
+    return _run(
+        "pbi_execute_dax_as_role",
+        pbi_execute_dax_as_role_tool,
+        CONNECTION_MANAGER,
+        query=query,
+        role=role,
+        username=username,
+    )
+
+
+@mcp.tool()
+def pbi_trace_query(query: str) -> dict[str, Any]:
+    """Execute a DAX query and return rows plus performance diagnostics."""
+    return _run(
+        "pbi_trace_query",
+        pbi_trace_query_tool,
+        CONNECTION_MANAGER,
+        query=query,
     )
 
 

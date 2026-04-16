@@ -26,6 +26,8 @@ READ_TOOLS = {
     "pbi_list_relationships",
     "pbi_model_info",
     "pbi_execute_dax",
+    "pbi_execute_dax_as_role",
+    "pbi_trace_query",
     "pbi_get_power_query",
     "pbi_list_power_queries",
     "excel_list_sheets",
@@ -109,6 +111,8 @@ MODEL_NAME_PARAM_KEYS = {
     "column",
     "partition_name",
     "relationship_name",
+    "role",
+    "username",
     "sheet_name",
     "sheet",
 }
