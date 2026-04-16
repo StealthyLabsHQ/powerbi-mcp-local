@@ -132,75 +132,68 @@ Call pbi_list_tables to see all tables in the model
 
 ---
 
-## 6. ALTI & BIKE Workflow
+## 6. Example Workflow
 
 ### Step 1 — Import Excel data
 
-Open PBI Desktop > blank file > save as `alti_bike.pbix`.
+Open PBI Desktop > blank file > save as `my_report.pbix`.
 
-Import the data manually (one-time):
+Import manually (one-time):
 - Home > Get Data > Excel
-- Select `alti_bike_data.xlsx` from the alti-bike-sae repo
-- Check all 14 sheets (skip `_KPI`) > Load
+- Select your `.xlsx` file
+- Check the sheets you need > Load
 
-Or use the MCP (after import):
+Or use the MCP after tables exist:
 ```
-Use pbi_bulk_import_excel to point all tables to alti_bike_data.xlsx, then pbi_refresh
+Use pbi_bulk_import_excel to point all tables to my_data.xlsx, then pbi_refresh
 ```
 
 ### Step 2 — Create relationships
 
 Tell Claude Code:
 ```
+Create relationships between my fact and dimension tables
+```
+
+Or be explicit:
+```
 Create these relationships:
-- FaitsCA[Annee] -> Dim_Temps[Annee]
-- FaitsCA[Famille] -> Dim_Famille[Famille]
-- FaitsVar[Annee] -> Dim_Temps[Annee]
-- FaitsDept[Annee] -> Dim_Temps[Annee]
-- CompteResultat[Annee] -> Dim_Temps[Annee]
-- Bilan[Annee] -> Dim_Temps[Annee]
+- Sales[DateKey] -> Dates[DateKey]
+- Sales[ProductID] -> Products[ProductID]
 ```
 
 ### Step 3 — Import DAX measures
 
-Tell Claude Code:
 ```
-Import all measures from C:\path\to\alti-bike-sae\powerbi\mesures_DAX.dax into table FaitsCA
+Import all measures from C:\path\to\my_measures.dax into table Sales
 ```
 
 ### Step 4 — Validate
 
 ```
-Execute this DAX query: EVALUATE ROW("CA 2025", [CA Total])
+Execute this DAX query: EVALUATE ROW("Total", [Total Sales])
 ```
-
-Should return 1,765,000.
 
 ### Step 5 — Apply theme
 
 ```
-Apply the theme from C:\path\to\alti-bike-sae\powerbi\theme\alti_bike_theme.json
+Apply the theme from C:\path\to\my_theme.json
 ```
 
-### Step 6 — Build the 4 dashboards
+### Step 6 — Build dashboards (requires pbi-tools)
 
-Option A — manual (follow `guide_visuels.md`):
-Create each visual by hand using the guide.
-
-Option B — via MCP (requires pbi-tools):
 ```
 Close PBI Desktop, then:
-1. Extract the .pbix: pbi_extract_report("alti_bike.pbix")
-2. Create 4 pages: TB1 Commercial, TB2 Performance, TB3 Financement, TB4 RSE
-3. Use pbi_build_dashboard for each page with the visual layout
-4. Apply theme
-5. Compile back: pbi_compile_report
-6. Reopen in PBI Desktop to verify
+1. Extract the .pbix: pbi_extract_report("my_report.pbix")
+2. Create pages and add visuals with pbi_build_dashboard
+3. Apply theme
+4. Compile back: pbi_compile_report
+5. Reopen in PBI Desktop to verify
 ```
 
-### Step 7 — Save and push
+### Step 7 — Save
 
-Save the `.pbix`, take screenshots for the rapport, push to GitHub.
+Save the `.pbix` and share or publish as needed.
 
 ---
 
@@ -259,7 +252,7 @@ If you get "PermissionError" on Excel tools, close Excel first. PBI Desktop does
 By default, Excel tools only access files in the current directory. To allow other directories:
 
 ```powershell
-set PBI_MCP_ALLOWED_DIRS=C:\Projects\alti-bike-sae\data;C:\Projects\powerbi-mcp-local
+set PBI_MCP_ALLOWED_DIRS=C:\Projects\my-data;C:\Projects\powerbi-mcp-local
 ```
 
 ---
