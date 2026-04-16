@@ -45,6 +45,21 @@ def _ensure_openpyxl() -> None:
     if not OPENPYXL_AVAILABLE:
         raise ExcelDependencyError("openpyxl is not installed. Install it with 'pip install openpyxl'.")
 
+ALLOWED_BASE_DIRS: list[Path] = []
+
+def configure_allowed_dirs(dirs: list[str]) -> None:
+    """Set allowed base directories for Excel file access.
+    If empty, defaults to CWD. Set via PBI_MCP_ALLOWED_DIRS env var
+    (semicolon-separated) or call this function at startup."""
+    ALLOWED_BASE_DIRS.clear()
+    ALLOWED_BASE_DIRS.extend(Path(d).resolve() for d in dirs if d.strip())
+
+# Initialize from env var
+_env_dirs = os.environ.get("PBI_MCP_ALLOWED_DIRS", "")
+if _env_dirs:
+    configure_allowed_dirs(_env_dirs.split(";"))
+
+
 def _resolve_path(file_path: str) -> Path:
     text = str(file_path).strip()
     if not text:
@@ -53,7 +68,20 @@ def _resolve_path(file_path: str) -> Path:
     path = Path(normalized).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
-    return path.resolve(strict=False)
+    resolved = path.resolve(strict=False)
+
+    # Path traversal guard: must be inside an allowed directory
+    allowed = ALLOWED_BASE_DIRS if ALLOWED_BASE_DIRS else [Path.cwd().resolve()]
+    for base in allowed:
+        try:
+            resolved.relative_to(base)
+            return resolved
+        except ValueError:
+            continue
+    raise ExcelValidationError(
+        f"Path traversal blocked: '{resolved}' is outside allowed directories.",
+        details={"path": str(resolved), "allowed": [str(b) for b in allowed]},
+    )
 
 def _require_file(path: Path) -> None:
     if not path.exists(): raise ExcelFileNotFoundError(f"Workbook not found: {path}", details={"path": str(path)})

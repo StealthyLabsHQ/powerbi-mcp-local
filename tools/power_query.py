@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -21,10 +22,39 @@ def _m_string(value: str) -> str:
     return '"' + str(value).replace('"', '""') + '"'
 
 
+# ── M expression security ────────────────────────────────────────────
+
+# M functions that can make network calls or access external databases.
+# Blocked by default to prevent SSRF and data exfiltration.
+_M_BLOCKED_FUNCTIONS = [
+    re.compile(r"\bWeb\.Contents\b", re.IGNORECASE),
+    re.compile(r"\bWeb\.Page\b", re.IGNORECASE),
+    re.compile(r"\bWeb\.BrowserContents\b", re.IGNORECASE),
+    re.compile(r"\bOData\.Feed\b", re.IGNORECASE),
+    re.compile(r"\bSql\.Database\b", re.IGNORECASE),
+    re.compile(r"\bSql\.Databases\b", re.IGNORECASE),
+    re.compile(r"\bOracle\.Database\b", re.IGNORECASE),
+    re.compile(r"\bPostgreSQL\.Database\b", re.IGNORECASE),
+    re.compile(r"\bMySQL\.Database\b", re.IGNORECASE),
+    re.compile(r"\bOdbc\.DataSource\b", re.IGNORECASE),
+    re.compile(r"\bOdbc\.Query\b", re.IGNORECASE),
+    re.compile(r"\bOleDb\.DataSource\b", re.IGNORECASE),
+    re.compile(r"\bOleDb\.Query\b", re.IGNORECASE),
+    re.compile(r"\bSharePoint\.\w+", re.IGNORECASE),
+    re.compile(r"\bActiveDirectory\.\w+", re.IGNORECASE),
+    re.compile(r"\bAzureStorage\.\w+", re.IGNORECASE),
+]
+
+# Allow override via env var for advanced users who need external sources
+_ALLOW_EXTERNAL_M = os.environ.get("PBI_MCP_ALLOW_EXTERNAL_M", "0") == "1"
+
+
 def _validate_m_expression(expression: str) -> None:
     text = expression.strip()
     if not text:
         raise PowerBIValidationError("m_expression cannot be empty.")
+
+    # Syntax check: balanced delimiters
     stack: list[tuple[str, int]] = []
     pairs = {"(": ")", "[": "]", "{": "}"}
     in_string = False
@@ -56,6 +86,18 @@ def _validate_m_expression(expression: str) -> None:
         )
     if re.match(r"^\s*let\b", text, flags=re.IGNORECASE) and re.search(r"\bin\b", text, flags=re.IGNORECASE) is None:
         raise PowerBIValidationError("M expression starts with 'let' but has no matching 'in' clause.")
+
+    # Security check: block external/network M functions
+    if not _ALLOW_EXTERNAL_M:
+        for pattern in _M_BLOCKED_FUNCTIONS:
+            match = pattern.search(text)
+            if match:
+                raise PowerBIValidationError(
+                    f"M expression contains blocked function '{match.group()}'. "
+                    f"Network/external database access is disabled by default. "
+                    f"Set PBI_MCP_ALLOW_EXTERNAL_M=1 to allow.",
+                    details={"blocked_function": match.group(), "position": match.start()},
+                )
 
 
 def _source_type_token(partition: Any) -> str:

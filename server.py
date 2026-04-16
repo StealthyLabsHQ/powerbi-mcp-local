@@ -63,11 +63,26 @@ mcp = FastMCP(
 CONNECTION_MANAGER = PowerBIConnectionManager(logger)
 
 
+def _sanitize_kwarg(key: str, value: Any) -> Any:
+    """Redact sensitive values for logging."""
+    if key in ("m_expression", "expression", "query") and isinstance(value, str) and len(value) > 200:
+        return f"{value[:200]}... ({len(value)} chars)"
+    return value
+
+
 def _run(tool_name: str, callback: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
-    """Execute a tool callback and normalize failures to JSON."""
+    """Execute a tool callback with audit logging and error normalization."""
+    # Audit log: every tool call, before execution
+    safe_kwargs = {k: _sanitize_kwarg(k, v) for k, v in kwargs.items()
+                   if k != "manager" and not k.startswith("_")}
+    logger.info("TOOL_CALL tool=%s params=%s", tool_name, safe_kwargs)
     try:
-        return callback(*args, **kwargs)
-    except Exception as exc:  # pragma: no cover - exercised on Windows
+        result = callback(*args, **kwargs)
+        status = result.get("status", "unknown") if isinstance(result, dict) else "ok"
+        logger.info("TOOL_OK tool=%s status=%s", tool_name, status)
+        return result
+    except Exception as exc:
+        logger.warning("TOOL_FAIL tool=%s error=%s", tool_name, str(exc)[:300])
         logger.exception("Tool '%s' failed", tool_name)
         return error_payload(exc)
 
@@ -662,10 +677,25 @@ def main() -> None:
         default=8765,
         help="Port for SSE transport (default: 8765)",
     )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host for SSE transport (default: 127.0.0.1 — localhost only)",
+    )
     args = parser.parse_args()
 
     if args.transport == "sse":
-        mcp.run(transport="sse", sse_params={"port": args.port})
+        logger.info(
+            "SSE server starting on %s:%d (localhost-only by default)",
+            args.host, args.port,
+        )
+        if args.host != "127.0.0.1":
+            logger.warning(
+                "SECURITY: SSE bound to %s — exposed beyond localhost. "
+                "Ensure network is trusted or use --host 127.0.0.1",
+                args.host,
+            )
+        mcp.run(transport="sse", sse_params={"host": args.host, "port": args.port})
     else:
         mcp.run(transport="stdio")
 
