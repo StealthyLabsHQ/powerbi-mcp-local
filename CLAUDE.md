@@ -1,137 +1,137 @@
-# MCP Power BI Desktop — Serveur local
+# MCP Power BI Desktop — Local Server
 
-## Objectif
+## Goal
 
-Construire un serveur MCP (Model Context Protocol) en Python qui se connecte
-à Power BI Desktop en local via son instance Analysis Services intégrée.
+Build a Python MCP (Model Context Protocol) server that connects to
+Power BI Desktop locally via its embedded Analysis Services instance.
 
-Ce MCP permet à Claude Code (ou tout client MCP) de :
-- Lire le modèle de données (tables, colonnes, relations, mesures)
-- Créer des mesures DAX
-- Créer des relations entre tables
-- Exécuter des requêtes DAX
-- Automatiser la construction d'un rapport Power BI
+This MCP enables Claude Code (or any MCP client) to:
+- Read the data model (tables, columns, relationships, measures)
+- Create DAX measures
+- Create relationships between tables
+- Execute DAX queries
+- Automate Power BI report model construction
 
-## Contexte technique
+## Technical Background
 
-Quand Power BI Desktop est ouvert avec un fichier `.pbix`, il lance une
-instance locale d'Analysis Services (SSAS) sur un port aléatoire. On peut
-retrouver ce port et s'y connecter via le protocole XMLA/ADOMD.NET.
+When Power BI Desktop is open with a `.pbix` file, it spawns a local
+Analysis Services (SSAS) instance on a random port. We can find this port
+and connect via the XMLA/ADOMD.NET protocol.
 
-### Où trouver le port
+### Finding the port
 
 ```
 %LOCALAPPDATA%\Microsoft\Power BI Desktop\AnalysisServicesWorkspaces\
 ```
 
-Dans ce dossier, il y a un sous-dossier par instance. Le fichier
-`msmdsrv.port.txt` contient le numéro de port.
+Inside this folder there is a subfolder per instance. The file
+`msmdsrv.port.txt` contains the port number.
 
-Alternative : chercher le processus `msmdsrv.exe` et son port d'écoute.
+Alternative: find the `msmdsrv.exe` process and its listening port.
 
 ## Architecture
 
 ```
-claude-code (client MCP)
+claude-code (MCP client)
     │
     ▼
 mcp-powerbi-server (Python, stdio)
     │
     ▼
-Power BI Desktop (SSAS local, port dynamique)
+Power BI Desktop (local SSAS, dynamic port)
 ```
 
-## Stack technique
+## Tech Stack
 
 - **Python 3.11+**
-- **`mcp[cli]`** — SDK MCP officiel Anthropic (pip install mcp[cli])
-- **`pyadomd`** — Connexion ADOMD.NET à SSAS (pip install pyadomd)
-  - Nécessite .NET Framework installé (déjà présent sur Windows)
-  - Alternative : `clr` via `pythonnet` + Microsoft.AnalysisServices.Tabular
-- **`psutil`** — Pour trouver le port PBI automatiquement
+- **`mcp[cli]`** — Anthropic's official MCP SDK (pip install mcp[cli])
+- **`pyadomd`** — ADOMD.NET connection to SSAS (pip install pyadomd)
+  - Requires .NET Framework (already present on Windows)
+  - Alternative: `clr` via `pythonnet` + Microsoft.AnalysisServices.Tabular
+- **`psutil`** — To auto-discover the PBI port
 
-## Dépendances à installer
+## Dependencies
 
 ```powershell
 pip install "mcp[cli]" pyadomd psutil
 ```
 
-Si `pyadomd` ne s'installe pas, utiliser `pythonnet` + TOM :
+If `pyadomd` fails to install, use `pythonnet` + TOM instead:
 
 ```powershell
 pip install pythonnet psutil "mcp[cli]"
 ```
 
-Avec pythonnet, il faut aussi les DLL Microsoft :
+With pythonnet you also need the Microsoft DLLs:
 - `Microsoft.AnalysisServices.Tabular.dll`
 - `Microsoft.AnalysisServices.AdomdClient.dll`
 
-Ces DLL se trouvent dans le dossier d'installation de Power BI Desktop :
+These are in the Power BI Desktop install folder:
 ```
 C:\Program Files\Microsoft Power BI Desktop\bin\
 ```
 
-## Structure du projet
+## Project Structure
 
 ```
 powerbi-mcp-local/
-├── CLAUDE.md           (ce fichier — instructions pour Claude Code)
-├── server.py           (serveur MCP principal)
-├── pbi_connection.py   (connexion à SSAS / PBI Desktop)
+├── CLAUDE.md           (this file — build instructions for Claude Code)
+├── server.py           (main MCP server)
+├── pbi_connection.py   (SSAS / PBI Desktop connection logic)
 ├── tools/
 │   ├── __init__.py
-│   ├── model.py        (lecture du modèle : tables, colonnes, relations)
-│   ├── measures.py     (CRUD mesures DAX)
-│   ├── relationships.py (CRUD relations)
-│   └── query.py        (exécution DAX)
+│   ├── model.py        (read model: tables, columns, relationships)
+│   ├── measures.py     (CRUD DAX measures)
+│   ├── relationships.py (CRUD relationships)
+│   └── query.py        (DAX query execution)
 ├── requirements.txt
 ├── .gitignore
 └── README.md
 ```
 
-## Outils MCP à implémenter
+## MCP Tools to Implement
 
 ### 1. `pbi_connect`
-Trouve et se connecte à l'instance PBI Desktop en cours.
+Find and connect to the running PBI Desktop instance.
 - Scan `%LOCALAPPDATA%\Microsoft\Power BI Desktop\AnalysisServicesWorkspaces\`
-- Lit `msmdsrv.port.txt`
-- Ouvre la connexion ADOMD
-- Retourne : nom de la base, port, statut
+- Read `msmdsrv.port.txt`
+- Open ADOMD connection
+- Returns: database name, port, status
 
 ### 2. `pbi_list_tables`
-Liste toutes les tables du modèle avec leurs colonnes.
-- Retourne : `[{name, columns: [{name, dataType}], rowCount}]`
+List all tables in the model with their columns.
+- Returns: `[{name, columns: [{name, dataType}], rowCount}]`
 
 ### 3. `pbi_list_measures`
-Liste toutes les mesures DAX existantes.
-- Retourne : `[{name, table, expression, formatString}]`
+List all existing DAX measures.
+- Returns: `[{name, table, expression, formatString}]`
 
 ### 4. `pbi_list_relationships`
-Liste toutes les relations du modèle.
-- Retourne : `[{from_table, from_column, to_table, to_column, cardinality, direction}]`
+List all relationships in the model.
+- Returns: `[{from_table, from_column, to_table, to_column, cardinality, direction}]`
 
 ### 5. `pbi_execute_dax(query: str)`
-Exécute une requête DAX et retourne les résultats.
-- Input : requête DAX (ex: `EVALUATE SUMMARIZE(FaitsCA, Dim_Temps[Annee], "CA", [CA Total])`)
-- Retourne : tableau de résultats (JSON)
+Execute a DAX query and return results.
+- Input: DAX query (e.g. `EVALUATE SUMMARIZE(Sales, Dates[Year], "Total", [Total Sales])`)
+- Returns: result table (JSON)
 
 ### 6. `pbi_create_measure(table: str, name: str, expression: str, format_string?: str)`
-Crée une nouvelle mesure DAX dans une table.
-- Input : nom de la table cible, nom de la mesure, expression DAX, format optionnel
-- Retourne : confirmation ou erreur de syntaxe DAX
+Create a new DAX measure in a table.
+- Input: target table name, measure name, DAX expression, optional format string
+- Returns: confirmation or DAX syntax error
 
 ### 7. `pbi_create_relationship(from_table: str, from_column: str, to_table: str, to_column: str, cardinality?: str)`
-Crée une relation entre deux tables.
-- cardinality : "oneToMany" (défaut), "manyToOne", "oneToOne"
-- Retourne : confirmation
+Create a relationship between two tables.
+- cardinality: "oneToMany" (default), "manyToOne", "oneToOne"
+- Returns: confirmation
 
 ### 8. `pbi_delete_measure(table: str, name: str)`
-Supprime une mesure existante.
+Delete an existing measure.
 
 ### 9. `pbi_model_info`
-Retourne un résumé complet du modèle (tables, mesures, relations) en une seule requête.
+Return a full model summary (tables, measures, relationships) in one call.
 
-## Implémentation — server.py (squelette)
+## Implementation — server.py (skeleton)
 
 ```python
 """MCP Server — Power BI Desktop local connection."""
@@ -143,13 +143,13 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("powerbi-desktop")
 
-# ── Connexion globale ────────────────────────
+# ── Global connection state ──────────────────
 
 _connection = None
 _server = None
 
 def find_pbi_port():
-    """Trouve le port SSAS de PBI Desktop via le fichier port."""
+    """Find the SSAS port of the running PBI Desktop instance."""
     base = os.path.join(
         os.environ["LOCALAPPDATA"],
         "Microsoft", "Power BI Desktop", "AnalysisServicesWorkspaces"
@@ -161,14 +161,14 @@ def find_pbi_port():
     if not port_files:
         raise FileNotFoundError("No running PBI Desktop instance found")
 
-    # Prendre le plus récent si plusieurs instances
+    # Pick the most recent if multiple instances
     port_file = max(port_files, key=os.path.getmtime)
     with open(port_file) as f:
         return int(f.read().strip())
 
 
 def get_connection():
-    """Retourne la connexion ADOMD active, la crée si nécessaire."""
+    """Return the active ADOMD connection, create if needed."""
     global _connection
     if _connection is not None:
         return _connection
@@ -176,7 +176,7 @@ def get_connection():
     port = find_pbi_port()
     conn_str = f"Provider=MSOLAP;Data Source=localhost:{port};"
 
-    # Méthode 1 : pyadomd
+    # Method 1: pyadomd
     try:
         from pyadomd import Pyadomd
         _connection = Pyadomd(conn_str)
@@ -185,7 +185,7 @@ def get_connection():
     except ImportError:
         pass
 
-    # Méthode 2 : pythonnet + ADOMD.NET
+    # Method 2: pythonnet + ADOMD.NET
     import clr
     clr.AddReference("Microsoft.AnalysisServices.AdomdClient")
     from Microsoft.AnalysisServices.AdomdClient import AdomdConnection
@@ -195,14 +195,14 @@ def get_connection():
 
 
 def get_tom_server():
-    """Retourne un objet TOM Server pour manipuler le modèle."""
+    """Return a TOM Server object for model manipulation."""
     global _server
     if _server is not None:
         return _server
 
     port = find_pbi_port()
     import clr
-    # Ajouter le chemin des DLL PBI si nécessaire
+    # Add PBI DLL path if needed
     pbi_bin = r"C:\Program Files\Microsoft Power BI Desktop\bin"
     if os.path.exists(pbi_bin):
         import sys
@@ -215,21 +215,21 @@ def get_tom_server():
     return _server
 
 
-# ── Tools MCP ────────────────────────────────
+# ── MCP Tools ────────────────────────────────
 
 @mcp.tool()
 def pbi_connect() -> str:
-    """Trouve et se connecte à Power BI Desktop."""
+    """Find and connect to Power BI Desktop."""
     port = find_pbi_port()
     server = get_tom_server()
     db = server.Databases[0]
-    return f"Connecté à PBI Desktop sur le port {port}. Base : {db.Name}. " \
-           f"Tables : {db.Model.Tables.Count}. Mesures existantes."
+    return f"Connected to PBI Desktop on port {port}. Database: {db.Name}. " \
+           f"Tables: {db.Model.Tables.Count}."
 
 
 @mcp.tool()
 def pbi_list_tables() -> list:
-    """Liste toutes les tables du modèle avec colonnes."""
+    """List all tables in the model with columns."""
     server = get_tom_server()
     db = server.Databases[0]
     result = []
@@ -242,7 +242,7 @@ def pbi_list_tables() -> list:
 
 @mcp.tool()
 def pbi_list_measures() -> list:
-    """Liste toutes les mesures DAX."""
+    """List all DAX measures."""
     server = get_tom_server()
     db = server.Databases[0]
     result = []
@@ -260,16 +260,15 @@ def pbi_list_measures() -> list:
 @mcp.tool()
 def pbi_create_measure(table: str, name: str, expression: str,
                        format_string: str = "") -> str:
-    """Crée une mesure DAX dans la table spécifiée."""
+    """Create a DAX measure in the specified table."""
     server = get_tom_server()
     db = server.Databases[0]
     model = db.Model
 
     target_table = model.Tables.Find(table)
     if target_table is None:
-        return f"Erreur : table '{table}' introuvable"
+        return f"Error: table '{table}' not found"
 
-    # Vérifier si la mesure existe déjà
     existing = target_table.Measures.Find(name)
     if existing:
         existing.Expression = expression
@@ -285,13 +284,13 @@ def pbi_create_measure(table: str, name: str, expression: str,
         target_table.Measures.Add(m)
 
     model.SaveChanges()
-    return f"Mesure '{name}' créée/mise à jour dans '{table}'"
+    return f"Measure '{name}' created/updated in '{table}'"
 
 
 @mcp.tool()
 def pbi_create_relationship(from_table: str, from_column: str,
                             to_table: str, to_column: str) -> str:
-    """Crée une relation entre deux tables."""
+    """Create a relationship between two tables."""
     server = get_tom_server()
     db = server.Databases[0]
     model = db.Model
@@ -299,12 +298,12 @@ def pbi_create_relationship(from_table: str, from_column: str,
     ft = model.Tables.Find(from_table)
     tt = model.Tables.Find(to_table)
     if not ft or not tt:
-        return f"Erreur : table introuvable ({from_table} ou {to_table})"
+        return f"Error: table not found ({from_table} or {to_table})"
 
     fc = ft.Columns.Find(from_column)
     tc = tt.Columns.Find(to_column)
     if not fc or not tc:
-        return f"Erreur : colonne introuvable"
+        return f"Error: column not found"
 
     from Microsoft.AnalysisServices.Tabular import (
         SingleColumnRelationship, RelationshipEndCardinality,
@@ -320,21 +319,21 @@ def pbi_create_relationship(from_table: str, from_column: str,
 
     model.Relationships.Add(rel)
     model.SaveChanges()
-    return f"Relation créée : {from_table}[{from_column}] → {to_table}[{to_column}]"
+    return f"Relationship created: {from_table}[{from_column}] -> {to_table}[{to_column}]"
 
 
 @mcp.tool()
 def pbi_execute_dax(query: str) -> list:
-    """Exécute une requête DAX et retourne les résultats."""
+    """Execute a DAX query and return results."""
     conn = get_connection()
-    # pyadomd
+    # pyadomd path
     if hasattr(conn, 'cursor'):
         cursor = conn.cursor()
         cursor.execute(query)
         columns = [col.name for col in cursor.description]
         rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
         return rows
-    # pythonnet ADOMD
+    # pythonnet ADOMD path
     else:
         from Microsoft.AnalysisServices.AdomdClient import AdomdCommand
         cmd = AdomdCommand(query, conn)
@@ -349,7 +348,7 @@ def pbi_execute_dax(query: str) -> list:
 
 @mcp.tool()
 def pbi_model_info() -> dict:
-    """Résumé complet du modèle PBI."""
+    """Full model summary: tables, measures, relationships."""
     tables = pbi_list_tables()
     measures = pbi_list_measures()
     server = get_tom_server()
@@ -367,9 +366,9 @@ if __name__ == "__main__":
     mcp.run(transport="stdio")
 ```
 
-## Configuration Claude Code
+## Claude Code Configuration
 
-### Option 1 — Claude Code CLI (`.claude/settings.json` du projet)
+### Option 1 — Claude Code CLI (project `.claude/settings.json`)
 
 ```json
 {
@@ -389,7 +388,7 @@ if __name__ == "__main__":
   "mcpServers": {
     "powerbi-desktop": {
       "command": "python",
-      "args": ["C:\\chemin\\vers\\powerbi-mcp-local\\server.py"],
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"],
       "env": {
         "PYTHONPATH": "C:\\Program Files\\Microsoft Power BI Desktop\\bin"
       }
@@ -398,46 +397,46 @@ if __name__ == "__main__":
 }
 ```
 
-## Workflow type
+## Typical Workflow
 
-Une fois le MCP construit et PBI Desktop ouvert avec un `.pbix` :
+Once the MCP is built and PBI Desktop is open with a `.pbix`:
 
 ```
-1. pbi_connect()                           → vérifie la connexion
-2. pbi_list_tables()                       → voir les tables importées
-3. pbi_create_relationship(...)            → créer les relations
-4. pbi_create_measure("FaitsCA", "CA Total", "SUM(FaitsCA[Montant])")
-5. pbi_execute_dax("EVALUATE ROW(...)") → valider
-6. pbi_model_info()                        → résumé final
+1. pbi_connect()                              -> verify connection
+2. pbi_list_tables()                          -> see imported tables
+3. pbi_create_relationship(...)               -> create relationships
+4. pbi_create_measure("Sales", "Total", "SUM(Sales[Amount])")
+5. pbi_execute_dax("EVALUATE ROW(...)")       -> validate
+6. pbi_model_info()                           -> final summary
 ```
 
-## Limites connues
+## Known Limitations
 
-1. **Visuels** : l'API SSAS ne gère que le modèle de données (tables, mesures,
-   relations). La couche visuelle (graphiques, mises en page) n'est pas
-   accessible par API. Les visuels doivent être créés manuellement.
+1. **Visuals**: the SSAS API only manages the data model (tables, measures,
+   relationships). The visual layer (charts, layouts, pages) is not
+   accessible via API. Visuals must be created manually in PBI Desktop.
 
-2. **Import de données** : l'import Excel initial doit être fait manuellement
-   dans PBI Desktop. L'API ne permet pas de créer de nouvelles sources.
+2. **Data import**: the initial Excel import must be done manually in
+   PBI Desktop. The API cannot create new data sources.
 
-3. **Thème** : l'import du thème JSON doit être fait manuellement
-   (Affichage → Thèmes → Parcourir).
+3. **Theme**: theme JSON import must be done manually
+   (View -> Themes -> Browse).
 
-4. **Port dynamique** : le port SSAS change à chaque ouverture de PBI.
-   Le serveur MCP le retrouve automatiquement.
+4. **Dynamic port**: the SSAS port changes every time PBI Desktop is opened.
+   The MCP server auto-discovers it.
 
-5. **Windows uniquement** : Power BI Desktop ne tourne que sur Windows.
-   Le MCP doit donc tourner sur la même machine Windows.
+5. **Windows only**: Power BI Desktop only runs on Windows. The MCP server
+   must run on the same Windows machine.
 
-## Tests
+## Testing
 
-Avant de connecter à Claude Code, tester en standalone :
+Before connecting to Claude Code, test standalone:
 
 ```powershell
-# 1. Vérifier que PBI Desktop est ouvert avec un fichier .pbix
-# 2. Tester la détection du port
+# 1. Make sure PBI Desktop is open with a .pbix file
+# 2. Test port detection
 python -c "from server import find_pbi_port; print(find_pbi_port())"
 
-# 3. Tester le serveur MCP en mode inspection
+# 3. Test MCP server in dev mode
 mcp dev server.py
 ```
