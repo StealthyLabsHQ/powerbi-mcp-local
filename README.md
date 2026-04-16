@@ -34,16 +34,54 @@ and exposes the full data model, file pipeline, and report layer through 56 MCP 
 
 ## Quick Start
 
+### 1. Prerequisites
+
+| Requirement | Why | Install |
+|:---|:---|:---|
+| **Windows** | Power BI Desktop is Windows-only | — |
+| **Power BI Desktop** | Local Analysis Services engine | `winget install Microsoft.PowerBIDesktop` |
+| **Python 3.11+** | Server runtime | `winget install Python.Python.3.11` |
+| **.NET 6+ Runtime** | Required by `pythonnet` and `pbi-pyadomd` | `winget install Microsoft.DotNet.Runtime.6` |
+| **pbi-tools** | Visual layer tools only | `winget install pbi-tools` or `dotnet tool install -g pbi-tools` |
+
+> **ADOMD.NET** is bundled with Power BI Desktop — no separate install needed.
+
+### 2. Install
+
 ```powershell
 git clone https://github.com/StealthyLabsHQ/powerbi-mcp-local.git
 cd powerbi-mcp-local
 pip install -r requirements.txt
+```
 
-# Open Power BI Desktop with any .pbix, then:
+### 3. Verify
+
+Open Power BI Desktop with any `.pbix` file, then:
+
+```powershell
 python tests/test_connection.py
 ```
 
+Expected output:
+```
+Connected to PBI Desktop on port XXXXX
+Database: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+Tables: N
+```
+
 > **Tell your AI tool:** *"Connect to Power BI and list all tables"*
+
+### Common install issues
+
+| Error | Fix |
+|:---|:---|
+| `No module named 'clr'` | .NET Runtime not found — install .NET 6+ and restart terminal |
+| `No running PBI Desktop instance found` | Open PBI Desktop with a `.pbix` file first |
+| `pbi-tools not found` | Add pbi-tools to PATH or set `PBI_TOOLS_PATH=C:\path\to\pbi-tools.exe` |
+| `PermissionError` on Excel files | Close Excel — it locks `.xlsx` files |
+| Path blocked by security policy | Set `PBI_MCP_ALLOWED_DIRS=C:\your\data\folder` |
+
+See **[docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)** for the full step-by-step guide.
 
 ---
 
@@ -240,7 +278,7 @@ powerbi-mcp-local/
 │   ├── test_security.py        Security controls (8 tests)
 │   ├── test_excel.py           Excel tools
 │   ├── test_power_query.py     Power Query tools (7 tests)
-│   └── test_visuals.py         Visual layout tools (5 tests)
+│   └── test_visuals.py         Visual layout tools (18 tests)
 ├── docs/                       Guides
 │   ├── SETUP.md                Multi-platform setup
 │   └── WINDOWS_SETUP.md        Step-by-step Windows install
@@ -271,9 +309,10 @@ powerbi-mcp-local/
 ## Requirements
 
 - **Windows** — Power BI Desktop only runs on Windows
-- **Power BI Desktop** (free) — installed and open with a `.pbix` file
+- **Power BI Desktop** (free) — must be open with a `.pbix` file before starting the server
 - **Python 3.11+**
-- **pbi-tools** (optional) — only needed for visual layer tools
+- **.NET 6+ Runtime** — required by `pythonnet` and `pbi-pyadomd` (`winget install Microsoft.DotNet.Runtime.6`)
+- **pbi-tools** — required for visual layer tools (`winget install pbi-tools`)
 
 ---
 
