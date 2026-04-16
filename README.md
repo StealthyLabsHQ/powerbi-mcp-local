@@ -40,7 +40,7 @@ cd powerbi-mcp-local
 pip install -r requirements.txt
 
 # Open Power BI Desktop with any .pbix, then:
-python test_connection.py
+python tests/test_connection.py
 ```
 
 > **Tell your AI tool:** *"Connect to Power BI and list all tables"*
@@ -70,7 +70,7 @@ Works with **any** MCP-compatible AI tool or IDE:
   "mcpServers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"]
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
     }
   }
 }
@@ -82,7 +82,7 @@ Works with **any** MCP-compatible AI tool or IDE:
 <summary><strong>SSE mode (for IDEs)</strong></summary>
 
 ```powershell
-python server.py --transport sse --port 8765
+python src/server.py --transport sse --port 8765
 ```
 
 Point your IDE to `http://localhost:8765/sse`
@@ -223,30 +223,36 @@ The complete data pipeline is now automatable end to end:
 
 ```
 powerbi-mcp-local/
-├── server.py               56 MCP tools (stdio + sse transport)
-├── pbi_connection.py       Connection manager (port discovery, TOM, ADOMD)
-├── security.py             Security policy, validation, and redaction helpers
-├── SECURITY.md             Threat model and hardening guide
-├── pyproject.toml          PyPI packaging metadata
-├── tools/
-│   ├── model.py            Tables, columns, export, model info
-│   ├── measures.py         Measures CRUD, .dax bulk import
-│   ├── relationships.py    Relationships CRUD
-│   ├── query.py            DAX execution, data refresh
-│   ├── power_query.py      Power Query (M) partition tools
-│   ├── excel.py            Excel read/write/format/pipeline
-│   └── visuals.py          Report pages, visuals, themes, and pbi-tools bridge
-├── test_connection.py      PBI connectivity test
-├── test_security.py        Security controls test suite (8 tests)
-├── test_excel.py           Excel tools test suite
-├── test_power_query.py     Power Query tools test suite (7 tests)
-├── test_visuals.py         Visual layout tool test suite (5 tests)
-├── docs/
-│   ├── SETUP.md            Multi-platform setup guide
-│   └── WINDOWS_SETUP.md    Step-by-step Windows install
-├── CLAUDE.md               Build instructions for Claude Code
-├── EXCEL_SPEC.md           Excel extension spec
-└── VISUAL_SPEC.md          Visual layer extension spec
+├── src/                        Source code
+│   ├── server.py               56 MCP tools (stdio + sse transport)
+│   ├── pbi_connection.py       Connection manager (port discovery, TOM, ADOMD)
+│   ├── security.py             Security policy, validation, and redaction
+│   └── tools/
+│       ├── model.py            Tables, columns, export, model info
+│       ├── measures.py         Measures CRUD, .dax bulk import
+│       ├── relationships.py    Relationships CRUD
+│       ├── query.py            DAX execution, data refresh
+│       ├── power_query.py      Power Query (M) partition tools
+│       ├── excel.py            Excel read/write/format/pipeline
+│       └── visuals.py          Report pages, visuals, themes (pbi-tools)
+├── tests/                      Test suites
+│   ├── test_connection.py      PBI connectivity test
+│   ├── test_security.py        Security controls (8 tests)
+│   ├── test_excel.py           Excel tools
+│   ├── test_power_query.py     Power Query tools (7 tests)
+│   └── test_visuals.py         Visual layout tools (5 tests)
+├── docs/                       Guides
+│   ├── SETUP.md                Multi-platform setup
+│   └── WINDOWS_SETUP.md        Step-by-step Windows install
+├── specs/                      Technical specs
+│   ├── EXCEL_SPEC.md           Excel extension spec
+│   └── VISUAL_SPEC.md          Visual layer spec
+├── CLAUDE.md                   Build instructions for Claude Code
+├── README.md
+├── SECURITY.md                 Threat model and hardening guide
+├── pyproject.toml              PyPI packaging metadata
+├── requirements.txt
+└── .gitignore
 ```
 
 ---

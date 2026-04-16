@@ -68,7 +68,7 @@ pip install -r requirements.txt
 Open Power BI Desktop with any `.pbix` file (or create a blank one), then:
 
 ```powershell
-python test_connection.py
+python tests/test_connection.py
 ```
 
 Expected output:
@@ -99,7 +99,7 @@ Write this content into `.claude\settings.json`:
   "mcpServers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\Projects\\powerbi-mcp-local\\server.py"]
+      "args": ["C:\\Projects\\powerbi-mcp-local\\src\\server.py"]
     }
   }
 }

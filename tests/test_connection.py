@@ -1,8 +1,8 @@
 """Standalone Power BI Desktop connection test.
 
 Usage on Windows:
-    python test_connection.py
-    python test_connection.py --port 52789
+    python tests/test_connection.py
+    python tests/test_connection.py --port 52789
 """
 
 from __future__ import annotations
@@ -10,6 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from pbi_connection import PowerBIConnectionManager, error_payload
 

@@ -35,10 +35,11 @@ Homepage = "https://github.com/StealthyLabsHQ/powerbi-mcp-local"
 Repository = "https://github.com/StealthyLabsHQ/powerbi-mcp-local"
 
 [project.scripts]
-powerbi-mcp-local = "server:main"
+powerbi-mcp-local = "src.server:main"
 
 [tool.setuptools]
-py-modules = ["server", "pbi_connection"]
+py-modules = []
 
 [tool.setuptools.packages.find]
-include = ["tools*"]
+where = ["."]
+include = ["src*"]
