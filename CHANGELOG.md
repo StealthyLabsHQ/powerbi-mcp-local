@@ -5,18 +5,13 @@ All notable changes to this project are documented here.
 ## [Unreleased] — 2026-04-16
 
 ### Added
-- `_query_ref()` helper — strips table prefix from a `Table.Column` reference, returns the column name only
+- `pbi_patch_layout`: direct PBIX Layout patch tool that swaps `Report/Layout`, removes `SecurityBindings`, preserves ZIP entry metadata, and supports `force=True` auto-kill on Windows.
 
 ### Fixed
-- `pbi_build_dashboard`: all `queryRef` values now go through `_query_ref()` so table-prefixed references emit the short name expected by the prototypeQuery parser
-- `pbi_build_dashboard`: gauge projection role corrected (`"Value"` → `"Y"`)
-- All individual visual tools: same `_query_ref()` fix applied for consistent query generation
-- `_build_select_entry`: `Select[Name]` now emits the short column name instead of the full qualified reference
-- Security policy path resolution, pbi-tools discovery, and Layout ZIP extraction
-- Windows: support for split DLL locations and alternate assembly names
-
-### Refactored
-- Project reorganized into `src/` / `tests/` / `specs/` structure
+- Visual query generation now resolves measure home tables from extract metadata (`Model/tables/*/measures/*.dax`) so `prototypeQuery.From[]` uses the real table entity instead of `"$Measures"` when available.
+- Measure fallback now logs a warning and uses `"$Measures"` only when extract metadata is missing or disconnected.
+- `.dax` import parsing now strips `//` and `/* ... */` comments safely while preserving quoted strings and measure block boundaries.
+- `pbi_compile_report` now accepts `force: bool = False` and can auto-kill `PBIDesktop.exe` on Windows before write operations.
 
 ---
 

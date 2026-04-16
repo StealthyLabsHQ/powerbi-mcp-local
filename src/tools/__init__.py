@@ -61,6 +61,7 @@ from .visuals import (
     pbi_get_page_tool,
     pbi_list_pages_tool,
     pbi_move_visual_tool,
+    pbi_patch_layout_tool,
     pbi_remove_visual_tool,
     pbi_set_page_size_tool,
 )
@@ -106,6 +107,7 @@ __all__ = [
     "pbi_bulk_import_excel_tool",
     "pbi_extract_report_tool",
     "pbi_compile_report_tool",
+    "pbi_patch_layout_tool",
     "pbi_list_pages_tool",
     "pbi_get_page_tool",
     "pbi_create_page_tool",

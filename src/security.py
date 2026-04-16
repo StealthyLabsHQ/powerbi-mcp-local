@@ -61,6 +61,7 @@ WRITE_TOOLS = {
     "excel_create_workbook",
     "pbi_extract_report",
     "pbi_compile_report",
+    "pbi_patch_layout",
     "pbi_create_page",
     "pbi_set_page_size",
     "pbi_add_card",

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
+import tempfile
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -18,6 +21,7 @@ DEFAULT_PAGE_WIDTH = 1280
 DEFAULT_PAGE_HEIGHT = 720
 LAYOUT_RELATIVE_PATH = Path("Report") / "Layout"
 THEMES_RELATIVE_DIR = Path("Report") / "StaticResources" / "Themes"
+MODEL_TABLES_RELATIVE_DIR = Path("Model") / "tables"
 DEFAULT_VISUAL_SIZES = {
     "card": (200, 120),
     "bar_chart": (400, 300),
@@ -31,6 +35,8 @@ DEFAULT_VISUAL_SIZES = {
     "kpi": (260, 140),
     "map": (420, 320),
 }
+
+logger = logging.getLogger(__name__)
 
 
 class VisualToolError(PowerBIError):
@@ -249,7 +255,41 @@ def _query_ref(reference: str) -> str:
     return reference.split(".", 1)[1] if "." in reference else reference
 
 
-def _build_select_entry(reference: str, aliases: dict[str, str]) -> dict[str, Any]:
+def _scan_measure_home_tables(extract_folder: Path) -> dict[str, str]:
+    """Map measure name -> home table from extract metadata folders."""
+    table_root = extract_folder / MODEL_TABLES_RELATIVE_DIR
+    if not table_root.is_dir():
+        return {}
+
+    measure_home_map: dict[str, str] = {}
+    for table_dir in table_root.iterdir():
+        if not table_dir.is_dir():
+            continue
+        measures_dir = table_dir / "measures"
+        if not measures_dir.is_dir():
+            continue
+        for dax_file in measures_dir.glob("*.dax"):
+            measure_name = dax_file.stem.strip()
+            if not measure_name:
+                continue
+            existing = measure_home_map.get(measure_name)
+            if existing and existing != table_dir.name:
+                logger.warning(
+                    "Measure '%s' found in multiple tables ('%s', '%s'); keeping first.",
+                    measure_name,
+                    existing,
+                    table_dir.name,
+                )
+                continue
+            measure_home_map[measure_name] = table_dir.name
+    return measure_home_map
+
+
+def _build_select_entry(
+    reference: str,
+    aliases: dict[str, str],
+    measure_home_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     if "." in reference:
         table, column = _split_column_ref(reference)
         alias = aliases.setdefault(table, f"s{len(aliases)}")
@@ -258,7 +298,13 @@ def _build_select_entry(reference: str, aliases: dict[str, str]) -> dict[str, An
             "Name": column,  # PBI expects short name without table prefix
             "NativeReferenceName": column,
         }
-    alias = aliases.setdefault("$Measures", f"s{len(aliases)}")
+    measure_entity = (measure_home_map or {}).get(reference) or "$Measures"
+    if measure_entity == "$Measures":
+        logger.warning(
+            "Measure '%s' home table not found in extract metadata; using '$Measures' fallback.",
+            reference,
+        )
+    alias = aliases.setdefault(measure_entity, f"s{len(aliases)}")
     return {
         "Measure": {"Expression": {"SourceRef": {"Source": alias}}, "Property": reference},
         "Name": reference,
@@ -266,9 +312,12 @@ def _build_select_entry(reference: str, aliases: dict[str, str]) -> dict[str, An
     }
 
 
-def _build_prototype_query(references: list[str]) -> dict[str, Any]:
+def _build_prototype_query(
+    references: list[str],
+    measure_home_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     aliases: dict[str, str] = {}
-    select = [_build_select_entry(reference, aliases) for reference in references]
+    select = [_build_select_entry(reference, aliases, measure_home_map) for reference in references]
     from_entries = [{"Name": alias, "Entity": entity} for entity, alias in aliases.items()]
     return {"Version": 2, "From": from_entries, "Select": select}
 
@@ -299,6 +348,7 @@ def _base_visual_config(
     width: int,
     height: int,
     references: list[str] | None = None,
+    measure_home_map: dict[str, str] | None = None,
     projections: dict[str, list[dict[str, str]]] | None = None,
     title: str | None = None,
     extra_single_visual: dict[str, Any] | None = None,
@@ -307,7 +357,7 @@ def _base_visual_config(
     single_visual = {
         "visualType": visual_type,
         "projections": projections or {},
-        "prototypeQuery": _build_prototype_query(references or []),
+        "prototypeQuery": _build_prototype_query(references or [], measure_home_map),
         "objects": {},
     }
     if title:
@@ -340,6 +390,7 @@ def _make_visual_container(
     width: int,
     height: int,
     references: list[str] | None = None,
+    measure_home_map: dict[str, str] | None = None,
     projections: dict[str, list[dict[str, str]]] | None = None,
     title: str | None = None,
     filters: Any | None = None,
@@ -355,6 +406,7 @@ def _make_visual_container(
         width=width,
         height=height,
         references=references,
+        measure_home_map=measure_home_map,
         projections=projections,
         title=title,
         extra_single_visual=extra_single_visual,
@@ -417,11 +469,16 @@ def _find_visual(section: dict[str, Any], visual_id: str) -> tuple[int, dict[str
     )
 
 
-def _append_visual(extract_folder: str, page: str, factory: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+def _append_visual(
+    extract_folder: str,
+    page: str,
+    factory: Callable[[dict[str, Any], dict[str, str]], dict[str, Any]],
+    measure_home_map: dict[str, str],
+) -> dict[str, Any]:
     folder, layout = _load_layout(extract_folder)
     section = _find_page(layout, page)
     section.setdefault("visualContainers", [])
-    container = factory(section)
+    container = factory(section, measure_home_map)
     section["visualContainers"].append(container)
     _save_layout(folder, layout)
     visual = _visual_payload(container)
@@ -443,6 +500,7 @@ def _create_chart_container(
     title: str | None,
     projections: dict[str, list[dict[str, str]]],
     references: list[str],
+    measure_home_map: dict[str, str] | None = None,
     extra_single_visual: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _make_visual_container(
@@ -455,6 +513,7 @@ def _create_chart_container(
         title=title,
         projections=projections,
         references=references,
+        measure_home_map=measure_home_map,
         extra_single_visual=extra_single_visual,
     )
 
@@ -484,11 +543,112 @@ def pbi_extract_report_tool(pbix_path: str, extract_folder: str | None = None) -
     return _run(_impl)
 
 
-def pbi_compile_report_tool(extract_folder: str, output_path: str) -> dict[str, Any]:
+def _maybe_force_close_powerbi(force: bool) -> None:
+    if not force:
+        return
+    if os.name != "nt":
+        logger.debug("force=True ignored on non-Windows platform for PBIDesktop termination.")
+        return
+    try:
+        subprocess.run(
+            ["taskkill", "/F", "/IM", "PBIDesktop.exe"],
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+        )
+    except Exception:
+        # Best effort: process may not exist or taskkill may be unavailable.
+        pass
+    time.sleep(1.5)
+
+
+def _page_names_from_layout_bytes(layout_bytes: bytes) -> list[str]:
+    try:
+        layout = json.loads(layout_bytes.decode("utf-16-le"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ReportLayoutError("Report/Layout content is invalid UTF-16-LE JSON.") from exc
+    if not isinstance(layout, dict):
+        raise ReportLayoutError("Report/Layout root must be a JSON object.")
+    names: list[str] = []
+    for section in layout.get("sections", []):
+        if not isinstance(section, dict):
+            continue
+        names.append(str(section.get("displayName") or section.get("name") or ""))
+    return names
+
+
+def pbi_patch_layout_tool(
+    extract_folder: str,
+    pbix_path: str,
+    force: bool = False,
+) -> dict[str, Any]:
+    def _impl() -> dict[str, Any]:
+        folder = _resolve_extract_folder(extract_folder, must_exist=True)
+        pbix = _resolve_pbix_path(pbix_path, must_exist=True)
+        layout_path = _layout_path(folder)
+        if not layout_path.exists():
+            raise ReportLayoutError("Report/Layout file was not found in the extract folder.", details={"path": str(layout_path)})
+
+        _maybe_force_close_powerbi(force)
+
+        layout_bytes = layout_path.read_bytes()
+        pages = _page_names_from_layout_bytes(layout_bytes)
+
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pbix", dir=str(pbix.parent)) as tmp_file:
+                temp_path = Path(tmp_file.name)
+            with zipfile.ZipFile(pbix, "r") as source_zip, zipfile.ZipFile(temp_path, "w") as target_zip:
+                layout_written = False
+                for info in source_zip.infolist():
+                    name = info.filename
+                    if name == "SecurityBindings":
+                        continue
+                    payload = layout_bytes if name == "Report/Layout" else source_zip.read(name)
+                    if name == "Report/Layout":
+                        layout_written = True
+                    target_info = zipfile.ZipInfo(name, date_time=info.date_time)
+                    target_info.compress_type = info.compress_type
+                    target_info.comment = info.comment
+                    target_info.extra = info.extra
+                    target_info.internal_attr = info.internal_attr
+                    target_info.external_attr = info.external_attr
+                    target_info.create_system = info.create_system
+                    target_info.create_version = info.create_version
+                    target_info.extract_version = info.extract_version
+                    target_info.volume = info.volume
+                    target_info.flag_bits = info.flag_bits
+                    target_zip.writestr(target_info, payload)
+                if not layout_written:
+                    target_info = zipfile.ZipInfo("Report/Layout")
+                    target_info.compress_type = zipfile.ZIP_DEFLATED
+                    target_zip.writestr(target_info, layout_bytes)
+
+            temp_size = temp_path.stat().st_size
+            temp_path.replace(pbix)
+        finally:
+            if temp_path and temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+
+        return ok(
+            "Layout patched into PBIX successfully.",
+            extract_folder=str(folder),
+            pbix_path=str(pbix),
+            bytes_written=temp_size,
+            layout_size=len(layout_bytes),
+            pages=pages,
+        )
+
+    return _run(_impl)
+
+
+def pbi_compile_report_tool(extract_folder: str, output_path: str, force: bool = False) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         folder = _resolve_extract_folder(extract_folder, must_exist=True)
         output = _resolve_pbix_path(output_path, must_exist=False)
         output.parent.mkdir(parents=True, exist_ok=True)
+        _maybe_force_close_powerbi(force)
         _run_pbi_tools(["compile", str(folder), "-outPath", str(output), "-overwrite"])
         return ok(
             "Report compiled successfully.",
@@ -571,10 +731,11 @@ def pbi_set_page_size_tool(extract_folder: str, page: str, width: int, height: i
 
 
 def pbi_add_card_tool(extract_folder: str, page: str, measure: str, x: int, y: int, width: int = 200, height: int = 120, title: str = "") -> dict[str, Any]:
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
         page,
-        lambda section: _create_chart_container(
+        lambda section, home_map: _create_chart_container(
             section,
             visual_type="card",
             x=x,
@@ -582,9 +743,11 @@ def pbi_add_card_tool(extract_folder: str, page: str, measure: str, x: int, y: i
             width=width,
             height=height,
             title=title or None,
-            projections={"Values": [{"queryRef": measure}]},
+            projections={"Values": [{"queryRef": _query_ref(measure)}]},
             references=[measure],
+            measure_home_map=home_map,
         ),
+        measure_home_map,
     )
 
 
@@ -600,6 +763,7 @@ def pbi_add_bar_chart_tool(
     title: str = "",
     legend_column: str | None = None,
 ) -> dict[str, Any]:
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     projections = {"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]}
     references = [category_column, value_measure]
     if legend_column:
@@ -608,7 +772,7 @@ def pbi_add_bar_chart_tool(
     return _append_visual(
         extract_folder,
         page,
-        lambda section: _create_chart_container(
+        lambda section, home_map: _create_chart_container(
             section,
             visual_type="clusteredBarChart",
             x=x,
@@ -618,7 +782,9 @@ def pbi_add_bar_chart_tool(
             title=title or None,
             projections=projections,
             references=references,
+            measure_home_map=home_map,
         ),
+        measure_home_map,
     )
 
 
@@ -635,10 +801,11 @@ def pbi_add_line_chart_tool(
 ) -> dict[str, Any]:
     if not value_measures:
         raise PowerBIValidationError("value_measures must contain at least one measure.")
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
         page,
-        lambda section: _create_chart_container(
+        lambda section, home_map: _create_chart_container(
             section,
             visual_type="lineChart",
             x=x,
@@ -651,15 +818,18 @@ def pbi_add_line_chart_tool(
                 "Y": [{"queryRef": _query_ref(measure)} for measure in value_measures],
             },
             references=[axis_column, *value_measures],
+            measure_home_map=home_map,
         ),
+        measure_home_map,
     )
 
 
 def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 320, height: int = 280, title: str = "") -> dict[str, Any]:
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
         page,
-        lambda section: _create_chart_container(
+        lambda section, home_map: _create_chart_container(
             section,
             visual_type="donutChart",
             x=x,
@@ -669,17 +839,20 @@ def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: st
             title=title or None,
             projections={"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]},
             references=[category_column, value_measure],
+            measure_home_map=home_map,
         ),
+        measure_home_map,
     )
 
 
 def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str], x: int, y: int, width: int = 520, height: int = 320, title: str = "") -> dict[str, Any]:
     if not columns:
         raise PowerBIValidationError("columns must contain at least one field or measure.")
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
         page,
-        lambda section: _create_chart_container(
+        lambda section, home_map: _create_chart_container(
             section,
             visual_type="tableEx",
             x=x,
@@ -689,15 +862,18 @@ def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str]
             title=title or None,
             projections={"Values": [{"queryRef": _query_ref(item)} for item in columns]},
             references=list(columns),
+            measure_home_map=home_map,
         ),
+        measure_home_map,
     )
 
 
 def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 420, height: int = 300, title: str = "") -> dict[str, Any]:
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
         page,
-        lambda section: _create_chart_container(
+        lambda section, home_map: _create_chart_container(
             section,
             visual_type="waterfallChart",
             x=x,
@@ -707,7 +883,9 @@ def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str,
             title=title or None,
             projections={"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]},
             references=[category_column, value_measure],
+            measure_home_map=home_map,
         ),
+        measure_home_map,
     )
 
 
@@ -715,10 +893,11 @@ def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: 
     slicer_kind = slicer_type.strip().casefold()
     if slicer_kind not in {"dropdown", "list", "range"}:
         raise PowerBIValidationError("slicer_type must be one of: dropdown, list, range.", details={"slicer_type": slicer_type})
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
         page,
-        lambda section: _create_chart_container(
+        lambda section, home_map: _create_chart_container(
             section,
             visual_type="slicer",
             x=x,
@@ -728,12 +907,15 @@ def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: 
             title=None,
             projections={"Values": [{"queryRef": _query_ref(column)}]},
             references=[column],
+            measure_home_map=home_map,
             extra_single_visual={"slicerType": slicer_kind},
         ),
+        measure_home_map,
     )
 
 
 def pbi_add_gauge_tool(extract_folder: str, page: str, measure: str, x: int, y: int, width: int = 280, height: int = 220, title: str = "", target_measure: str | None = None) -> dict[str, Any]:
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     projections = {"Y": [{"queryRef": _query_ref(measure)}]}
     references = [measure]
     if target_measure:
@@ -742,7 +924,7 @@ def pbi_add_gauge_tool(extract_folder: str, page: str, measure: str, x: int, y: 
     return _append_visual(
         extract_folder,
         page,
-        lambda section: _create_chart_container(
+        lambda section, home_map: _create_chart_container(
             section,
             visual_type="gauge",
             x=x,
@@ -752,7 +934,9 @@ def pbi_add_gauge_tool(extract_folder: str, page: str, measure: str, x: int, y: 
             title=title or None,
             projections=projections,
             references=references,
+            measure_home_map=home_map,
         ),
+        measure_home_map,
     )
 
 
@@ -768,10 +952,11 @@ def pbi_add_text_box_tool(
     bold: bool = False,
     color: str = "#222222",
 ) -> dict[str, Any]:
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
         page,
-        lambda section: _make_visual_container(
+        lambda section, home_map: _make_visual_container(
             section=section,
             visual_type="textbox",
             x=x,
@@ -779,6 +964,7 @@ def pbi_add_text_box_tool(
             width=width,
             height=height,
             references=[],
+            measure_home_map=home_map,
             projections={},
             extra_single_visual={
                 "textContent": text,
@@ -787,6 +973,7 @@ def pbi_add_text_box_tool(
                 "objects": {"paragraphs": [{"text": text, "fontSize": font_size, "bold": bold, "color": color}]},
             },
         ),
+        measure_home_map,
     )
 
 
@@ -845,7 +1032,11 @@ def pbi_apply_theme_tool(extract_folder: str, theme_json_path: str) -> dict[str,
     return _run(_impl)
 
 
-def _create_visual_from_spec(section: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any]:
+def _create_visual_from_spec(
+    section: dict[str, Any],
+    spec: dict[str, Any],
+    measure_home_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     visual_type = str(spec.get("type", "")).strip().casefold()
     x = int(spec.get("x", 0))
     y = int(spec.get("y", 0))
@@ -853,41 +1044,41 @@ def _create_visual_from_spec(section: dict[str, Any], spec: dict[str, Any]) -> d
     height = int(spec.get("height", DEFAULT_VISUAL_SIZES.get(visual_type, (400, 300))[1]))
     title = spec.get("title")
     if visual_type == "card":
-        return _create_chart_container(section, visual_type="card", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["measure"]])
+        return _create_chart_container(section, visual_type="card", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["measure"]], measure_home_map=measure_home_map)
     if visual_type in {"bar_chart", "bar"}:
         projections = {"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}
         references = [spec["category"], spec["measure"]]
         if spec.get("legend"):
             projections["Series"] = [{"queryRef": _query_ref(spec["legend"])}]
             references.append(spec["legend"])
-        return _create_chart_container(section, visual_type="clusteredBarChart", x=x, y=y, width=width, height=height, title=title, projections=projections, references=references)
+        return _create_chart_container(section, visual_type="clusteredBarChart", x=x, y=y, width=width, height=height, title=title, projections=projections, references=references, measure_home_map=measure_home_map)
     if visual_type in {"line_chart", "line"}:
         measures = list(spec.get("measures") or [spec.get("measure")])
-        return _create_chart_container(section, visual_type="lineChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["axis"])}], "Y": [{"queryRef": _query_ref(item)} for item in measures]}, references=[spec["axis"], *measures])
+        return _create_chart_container(section, visual_type="lineChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["axis"])}], "Y": [{"queryRef": _query_ref(item)} for item in measures]}, references=[spec["axis"], *measures], measure_home_map=measure_home_map)
     if visual_type in {"donut", "donut_chart", "pie", "pie_chart"}:
-        return _create_chart_container(section, visual_type="donutChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["category"], spec["measure"]])
+        return _create_chart_container(section, visual_type="donutChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["category"], spec["measure"]], measure_home_map=measure_home_map)
     if visual_type in {"table", "table_visual"}:
-        return _create_chart_container(section, visual_type="tableEx", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": _query_ref(item)} for item in spec["columns"]]}, references=list(spec["columns"]))
+        return _create_chart_container(section, visual_type="tableEx", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": _query_ref(item)} for item in spec["columns"]]}, references=list(spec["columns"]), measure_home_map=measure_home_map)
     if visual_type == "waterfall":
-        return _create_chart_container(section, visual_type="waterfallChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["category"], spec["measure"]])
+        return _create_chart_container(section, visual_type="waterfallChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["category"], spec["measure"]], measure_home_map=measure_home_map)
     if visual_type == "slicer":
-        return _make_visual_container(section=section, visual_type="slicer", x=x, y=y, width=width, height=height, projections={"Values": [{"queryRef": _query_ref(spec["column"])}]}, references=[spec["column"]], extra_single_visual={"slicerType": str(spec.get("slicer_type", "dropdown")).casefold()})
+        return _make_visual_container(section=section, visual_type="slicer", x=x, y=y, width=width, height=height, projections={"Values": [{"queryRef": _query_ref(spec["column"])}]}, references=[spec["column"]], measure_home_map=measure_home_map, extra_single_visual={"slicerType": str(spec.get("slicer_type", "dropdown")).casefold()})
     if visual_type in {"text", "text_box"}:
-        return _make_visual_container(section=section, visual_type="textbox", x=x, y=y, width=width, height=height, extra_single_visual={"textContent": spec["text"], "textStyle": {"fontSize": int(spec.get("font_size", 16)), "bold": bool(spec.get("bold", False)), "color": str(spec.get("color", "#222222"))}, "prototypeQuery": {"Version": 2, "From": [], "Select": []}})
+        return _make_visual_container(section=section, visual_type="textbox", x=x, y=y, width=width, height=height, measure_home_map=measure_home_map, extra_single_visual={"textContent": spec["text"], "textStyle": {"fontSize": int(spec.get("font_size", 16)), "bold": bool(spec.get("bold", False)), "color": str(spec.get("color", "#222222"))}, "prototypeQuery": {"Version": 2, "From": [], "Select": []}})
     if visual_type == "gauge":
-        return _create_chart_container(section, visual_type="gauge", x=x, y=y, width=width, height=height, title=title, projections={"Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["measure"]])
+        return _create_chart_container(section, visual_type="gauge", x=x, y=y, width=width, height=height, title=title, projections={"Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["measure"]], measure_home_map=measure_home_map)
     if visual_type == "kpi":
         measures = [spec["measure"]]
         if spec.get("target_measure"):
             measures.append(spec["target_measure"])
-        return _create_chart_container(section, visual_type="kpi", x=x, y=y, width=width, height=height, title=title, projections={"Value": [{"queryRef": _query_ref(spec["measure"])}], "Goal": [{"queryRef": _query_ref(spec["target_measure"])}]} if spec.get("target_measure") else {"Value": [{"queryRef": _query_ref(spec["measure"])}]}, references=measures)
+        return _create_chart_container(section, visual_type="kpi", x=x, y=y, width=width, height=height, title=title, projections={"Value": [{"queryRef": _query_ref(spec["measure"])}], "Goal": [{"queryRef": _query_ref(spec["target_measure"])}]} if spec.get("target_measure") else {"Value": [{"queryRef": _query_ref(spec["measure"])}]}, references=measures, measure_home_map=measure_home_map)
     if visual_type == "map":
         refs = [spec["location"]]
         projections = {"Category": [{"queryRef": _query_ref(spec["location"])}]}
         if spec.get("measure"):
             refs.append(spec["measure"])
             projections["Y"] = [{"queryRef": _query_ref(spec["measure"])}]
-        return _create_chart_container(section, visual_type="map", x=x, y=y, width=width, height=height, title=title, projections=projections, references=refs)
+        return _create_chart_container(section, visual_type="map", x=x, y=y, width=width, height=height, title=title, projections=projections, references=refs, measure_home_map=measure_home_map)
     raise PowerBIValidationError("Unsupported dashboard visual type.", details={"type": visual_type})
 
 
@@ -896,13 +1087,14 @@ def pbi_build_dashboard_tool(extract_folder: str, page: str, layout: list[dict[s
         if not isinstance(layout, list):
             raise PowerBIValidationError("layout must be a list of visual specifications.")
         folder, report_layout = _load_layout(extract_folder)
+        measure_home_map = _scan_measure_home_tables(folder)
         section = _find_page(report_layout, page)
         section.setdefault("visualContainers", [])
         created = []
         for item in layout:
             if not isinstance(item, dict):
                 raise PowerBIValidationError("Each layout item must be an object.", details={"item": item})
-            container = _create_visual_from_spec(section, item)
+            container = _create_visual_from_spec(section, item, measure_home_map)
             section["visualContainers"].append(container)
             created.append(_visual_payload(container))
         _save_layout(folder, report_layout)
@@ -935,6 +1127,7 @@ __all__ = [
     "pbi_get_page_tool",
     "pbi_list_pages_tool",
     "pbi_move_visual_tool",
+    "pbi_patch_layout_tool",
     "pbi_remove_visual_tool",
     "pbi_set_page_size_tool",
 ]

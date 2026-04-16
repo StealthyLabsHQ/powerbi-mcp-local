@@ -65,6 +65,7 @@ from tools import (
     pbi_list_pages_tool,
     pbi_list_power_queries_tool,
     pbi_move_visual_tool,
+    pbi_patch_layout_tool,
     pbi_remove_visual_tool,
     pbi_set_power_query_tool,
     pbi_set_page_size_tool,
@@ -718,13 +719,26 @@ def pbi_extract_report(pbix_path: str, extract_folder: str | None = None) -> dic
 
 
 @mcp.tool()
-def pbi_compile_report(extract_folder: str, output_path: str) -> dict[str, Any]:
+def pbi_compile_report(extract_folder: str, output_path: str, force: bool = False) -> dict[str, Any]:
     """Compile an extracted report folder back into a .pbix."""
     return _run(
         "pbi_compile_report",
         pbi_compile_report_tool,
         extract_folder=extract_folder,
         output_path=output_path,
+        force=force,
+    )
+
+
+@mcp.tool()
+def pbi_patch_layout(extract_folder: str, pbix_path: str, force: bool = False) -> dict[str, Any]:
+    """Patch Report/Layout directly into an existing .pbix archive."""
+    return _run(
+        "pbi_patch_layout",
+        pbi_patch_layout_tool,
+        extract_folder=extract_folder,
+        pbix_path=pbix_path,
+        force=force,
     )
 
 
