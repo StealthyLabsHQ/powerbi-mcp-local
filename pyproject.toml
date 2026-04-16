@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "powerbi-mcp-local"
+version = "0.1.0"
+description = "FastMCP server for Power BI Desktop model, Excel, and Power Query automation."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "StealthyLabsHQ" }
+]
+dependencies = [
+  "mcp[cli]==1.27.0",
+  "openpyxl==3.1.5",
+  "pbi-pyadomd==1.4.3",
+  "psutil==7.2.2",
+  "pythonnet==3.0.5",
+]
+keywords = ["mcp", "power-bi", "power-query", "excel", "tabular"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/StealthyLabsHQ/powerbi-mcp-local"
+Repository = "https://github.com/StealthyLabsHQ/powerbi-mcp-local"
+
+[project.scripts]
+powerbi-mcp-local = "server:main"
+
+[tool.setuptools]
+py-modules = ["server", "pbi_connection"]
+
+[tool.setuptools.packages.find]
+include = ["tools*"]

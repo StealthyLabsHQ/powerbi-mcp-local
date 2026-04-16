@@ -3,7 +3,7 @@
 MCP server that connects to Power BI Desktop's local Analysis Services instance.
 Lets Claude Code (or any MCP client) read, write, and query your Power BI data model programmatically.
 
-## Tools (29)
+## Tools (36)
 
 ### Power BI Core
 
@@ -36,6 +36,18 @@ Lets Claude Code (or any MCP client) read, write, and query your Power BI data m
 | `pbi_import_dax_file` | Bulk-import measures from a `.dax` file |
 | `pbi_export_model` | Export full model as JSON for version control |
 
+### Power Query Tools
+
+| Tool | Description |
+|---|---|
+| `pbi_get_power_query` | Read the M expression for a specific table partition |
+| `pbi_list_power_queries` | List tables, partitions, source types, and current M expressions |
+| `pbi_set_power_query` | Inject or replace a validated M expression on a partition |
+| `pbi_create_import_query` | Build an Excel-sheet import query and inject it into a partition |
+| `pbi_create_csv_import_query` | Build a CSV import query and inject it into a partition |
+| `pbi_create_folder_import_query` | Build a folder import query and inject it into a partition |
+| `pbi_bulk_import_excel` | Auto-map workbook sheets to model tables and inject queries in bulk |
+
 ### Excel Tools
 
 | Tool | Description |
@@ -59,7 +71,8 @@ Lets Claude Code (or any MCP client) read, write, and query your Power BI data m
 ```
 Claude Code ──(MCP/stdio)──> server.py
                                 ├──(TOM/.NET)──> PBI Desktop (local SSAS)
-                                └──(openpyxl)──> Excel files (.xlsx)
+                                ├──(openpyxl)──> Excel files (.xlsx)
+                                └──(Power Query M)──> workbook / CSV / folder sources
 ```
 
 Power BI Desktop runs a local Analysis Services engine on a random port.
@@ -68,7 +81,7 @@ The server finds the port automatically via:
 2. User-scoped path scan (Microsoft Store install)
 3. `msmdsrv.exe` process fallback
 
-Connection is managed by `PowerBIConnectionManager` — thread-safe, auto-reconnects on port change, hard-resets on write failure. Excel operations use `openpyxl` with structured JSON errors, large-file streaming for workbooks over 10 MB, and graceful handling when Excel has a workbook locked for writing.
+Connection is managed by `PowerBIConnectionManager` — thread-safe, auto-reconnects on port change, hard-resets on write failure. Excel operations use `openpyxl` with structured JSON errors, large-file streaming for workbooks over 10 MB, and graceful handling when Excel has a workbook locked for writing. Power Query operations write validated M expressions onto TOM partitions and handle partition source types explicitly (`m`, `query`, `calculated`, `none`).
 
 ## Requirements
 
@@ -99,6 +112,22 @@ claude
 Then tell Claude Code:
 
 > "Connect to Power BI and inject the relationships and measures from my .dax file."
+
+## Full Automation Workflow
+
+1. Create or inspect the source file with the Excel tools, or point Power BI to an existing workbook, CSV, or folder with the Power Query tools.
+2. Inject the import query into the right table partition with `pbi_create_import_query`, `pbi_create_csv_import_query`, `pbi_create_folder_import_query`, or `pbi_bulk_import_excel`.
+3. Create relationships with `pbi_create_relationship`.
+4. Add measures individually with `pbi_create_measure` or in bulk with `pbi_import_dax_file`.
+5. Trigger `pbi_refresh` and validate the model with `pbi_model_info` or `pbi_execute_dax`.
+
+Example end-to-end sequence:
+
+```text
+excel_create_workbook -> excel_write_range -> pbi_create_import_query
+-> pbi_create_relationship -> pbi_import_dax_file -> pbi_refresh
+-> pbi_execute_dax
+```
 
 ## Configuration
 
@@ -135,17 +164,20 @@ Or globally in `%APPDATA%\Claude\claude_desktop_config.json`:
 
 ```
 powerbi-mcp-local/
-├── server.py              Main MCP server (FastMCP, 29 tools)
+├── server.py              Main MCP server (FastMCP, 36 tools)
 ├── pbi_connection.py      Connection manager (port discovery, TOM, ADOMD)
+├── pyproject.toml         Packaging metadata for PyPI / pip installs
 ├── tools/
 │   ├── __init__.py        Tool exports
 │   ├── excel.py           Excel read/write/format/pipeline tools
 │   ├── model.py           Tables, columns, export, model info
 │   ├── measures.py        Measures CRUD, formatting, .dax bulk import
+│   ├── power_query.py     Power Query (M) import and partition tools
 │   ├── relationships.py   Relationships CRUD
 │   └── query.py           DAX execution, data refresh
 ├── test_connection.py     Standalone connectivity test
 ├── test_excel.py          Standalone Excel tool test suite
+├── test_power_query.py    Standalone Power Query tool test suite
 ├── requirements.txt       Pinned dependencies
 ├── CLAUDE.md              Build instructions for Claude Code
 ├── EXCEL_SPEC.md          Excel extension spec
@@ -158,6 +190,7 @@ powerbi-mcp-local/
 |---|---|
 | DAX measures (create, update, delete, bulk import) | Data import (Excel, CSV) |
 | Excel workbook reads, writes, formatting, validation | Pivot table refresh in the Excel UI |
+| Power Query source setup for workbook, CSV, and folder imports | Visual Power Query editing and step-by-step preview |
 | Relationships between tables | Theme import (JSON) |
 | Calculated tables and columns | Visual creation (charts, cards) |
 | DAX query execution and refresh | Page layout and formatting |
