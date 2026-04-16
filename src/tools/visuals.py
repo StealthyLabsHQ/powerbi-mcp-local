@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -69,9 +70,17 @@ def _find_pbi_tools() -> str:
             "PBI_TOOLS_PATH points to a missing executable.",
             details={"path": str(candidate)},
         )
-    discovered = shutil.which("pbi-tools") or shutil.which("pbi-tools.exe")
+    discovered = shutil.which("pbi-tools") or shutil.which("pbi-tools.exe") or shutil.which("pbi-tools.core.exe")
     if discovered:
         return discovered
+    # Fallback: check common install locations
+    fallback_paths = [
+        Path.home() / "AppData" / "Local" / "pbi-tools" / "full" / "pbi-tools.exe",
+        Path.home() / "AppData" / "Local" / "pbi-tools" / "pbi-tools.core.exe",
+    ]
+    for fallback in fallback_paths:
+        if fallback.exists():
+            return str(fallback)
     raise PBIToolsNotInstalledError(
         "pbi-tools was not found on PATH. Install it with winget or dotnet tool install -g pbi-tools."
     )
@@ -449,8 +458,14 @@ def pbi_extract_report_tool(pbix_path: str, extract_folder: str | None = None) -
     def _impl() -> dict[str, Any]:
         pbix = _resolve_pbix_path(pbix_path, must_exist=True)
         target = _resolve_extract_folder(str(extract_folder or pbix.with_name(f"{pbix.stem}_extracted")), must_exist=False)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _run_pbi_tools(["extract", str(pbix), "-extractFolder", str(target)])
+        target.mkdir(parents=True, exist_ok=True)
+        _run_pbi_tools(["extract", str(pbix), "-extractFolder", str(target), "-modelSerialization", "Legacy"])
+        layout_path = target / LAYOUT_RELATIVE_PATH
+        if not layout_path.exists():
+            layout_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(pbix, "r") as z:
+                if "Report/Layout" in z.namelist():
+                    layout_path.write_bytes(z.read("Report/Layout"))
         _, layout = _load_layout(target)
         pages = [_page_summary(section) for section in layout.get("sections", [])]
         return ok(
@@ -469,7 +484,7 @@ def pbi_compile_report_tool(extract_folder: str, output_path: str) -> dict[str, 
         folder = _resolve_extract_folder(extract_folder, must_exist=True)
         output = _resolve_pbix_path(output_path, must_exist=False)
         output.parent.mkdir(parents=True, exist_ok=True)
-        _run_pbi_tools(["compile", str(folder), "-outPath", str(output)])
+        _run_pbi_tools(["compile", str(folder), "-outPath", str(output), "-overwrite"])
         return ok(
             "Report compiled successfully.",
             extract_folder=str(folder),
