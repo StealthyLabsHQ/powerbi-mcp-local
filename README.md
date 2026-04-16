@@ -17,7 +17,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 
 | Start | Setup | Demo | Tools | Security | FR |
 | --- | --- | --- | --- | --- | --- |
-| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-56-tools) | [Security](#security-en) | [Version francaise](#francais) |
+| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-56-tools) | [Security](#security-en) | [Version française](#francais) |
 
 <a id="demo-60s"></a>
 ## Demo (60s)
@@ -280,19 +280,19 @@ python -m unittest discover -s tests -p "test_*.py" -v
 ---
 
 <a id="francais"></a>
-## Francais
+## Français
 
-### Resume
+### Résumé
 
 `powerbi-mcp-local` est un serveur MCP pour automatiser Power BI Desktop en local:
 
-- modele semantique (tables, colonnes, mesures, relations)
-- execution DAX et refresh
+- modèle sémantique (tables, colonnes, mesures, relations)
+- exécution DAX et refresh
 - Power Query (M)
 - pipeline Excel
 - pages/visuels de rapport via `pbi-tools`
 
-### Demarrage rapide (FR)
+### Démarrage rapide (FR)
 
 1. Installer le projet.
 
@@ -304,7 +304,7 @@ pip install -r requirements.txt
 
 2. Ouvrir Power BI Desktop avec un fichier `.pbix`.
 
-3. Verifier la connexion.
+3. Vérifier la connexion.
 
 ```powershell
 python tests/test_connection.py
@@ -356,15 +356,15 @@ Guides:
 
 ### Exemples de prompts (FR)
 
-- `Connecte-toi a Power BI et liste toutes les tables avec leurs colonnes.`
-- `Cree une mesure Total Sales dans la table Sales.`
-- `Execute cette requete DAX et affiche les 20 premieres lignes.`
+- `Connecte-toi à Power BI et liste toutes les tables avec leurs colonnes.`
+- `Crée une mesure Total Sales dans la table Sales.`
+- `Exécute cette requête DAX et affiche les 20 premières lignes.`
 - `Extrait le rapport, ajoute une page et 3 visuels, puis recompile.`
 
 ### Catalogue des outils (FR)
 
 Le projet expose **56 tools MCP**.
-Les noms et categories sont identiques a la section anglaise:
+Les noms et catégories sont identiques à la section anglaise:
 
 - Core model discovery (6)
 - Model mutations (6)
@@ -373,29 +373,29 @@ Les noms et categories sont identiques a la section anglaise:
 - Excel tools (13)
 - Report and visual tools (20)
 
-Voir le detail complet ici: [Tool catalog (EN)](#tool-catalog-en-56-tools)
+Voir le détail complet ici: [Tool catalog (EN)](#tool-catalog-en-56-tools)
 
-### Depannage (FR)
+### Dépannage (FR)
 
-| Probleme | Correctif |
+| Problème | Correctif |
 | --- | --- |
-| `No module named 'clr'` | Installer .NET 6+ puis redemarrer le terminal |
+| `No module named 'clr'` | Installer .NET 6+ puis redémarrer le terminal |
 | `No running PBI Desktop instance found` | Ouvrir un `.pbix` dans Power BI Desktop |
-| `pbi-tools not found` | Ajouter au `PATH` ou definir `PBI_TOOLS_PATH` |
-| `PermissionError` sur `.xlsx` | Fermer Excel (fichier verrouille) |
-| Chemin bloque | Configurer `PBI_MCP_ALLOWED_DIRS` |
+| `pbi-tools not found` | Ajouter au `PATH` ou définir `PBI_TOOLS_PATH` |
+| `PermissionError` sur `.xlsx` | Fermer Excel (fichier verrouillé) |
+| Chemin bloqué | Configurer `PBI_MCP_ALLOWED_DIRS` |
 
-### Securite (FR)
+### Sécurité (FR)
 
-Le middleware de securite couvre:
+Le middleware de sécurité couvre:
 - restrictions de chemins locaux
-- protections sur requetes DAX/DMV
+- protections sur requêtes DAX/DMV
 - protections SSRF pour Power Query
-- redaction d'exports sensibles
+- rédaction d'exports sensibles
 - protections zip
 - audit des appels tools
 
-Details: [SECURITY.md](SECURITY.md)
+Détails: [SECURITY.md](SECURITY.md)
 
 ## Repository layout
 
