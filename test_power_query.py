@@ -105,20 +105,20 @@ class FakeManager:
 class PowerQueryToolTests(unittest.TestCase):
     def test_build_excel_m_handles_quotes_spaces_and_unicode(self) -> None:
         expression = _build_excel_m(
-            'C:\\Data Files\\Vélo "Premium".xlsx',
-            'Q1 "VTT" spécial',
+            'C:\\Data Files\\Bike "Premium".xlsx',
+            'Q1 "MTB" special',
             promote_headers=True,
         )
-        self.assertIn('File.Contents("C:\\Data Files\\Vélo ""Premium"".xlsx")', expression)
-        self.assertIn('[Item="Q1 ""VTT"" spécial",Kind="Sheet"]', expression)
+        self.assertIn('File.Contents("C:\\Data Files\\Bike ""Premium"".xlsx")', expression)
+        self.assertIn('[Item="Q1 ""MTB"" special",Kind="Sheet"]', expression)
         _validate_m_expression(expression)
 
     def test_build_csv_and_folder_queries_validate(self) -> None:
         csv_expression = _build_csv_m("/tmp/sales data.csv", delimiter=";", quote_style="none")
-        folder_expression = _build_folder_m("/tmp/Vélos source", extension_filter="csv")
+        folder_expression = _build_folder_m("/tmp/bikes source", extension_filter="csv")
         self.assertIn("Csv.Document(", csv_expression)
         self.assertIn("QuoteStyle.None", csv_expression)
-        self.assertIn('Folder.Files("/tmp/Vélos source")', folder_expression)
+        self.assertIn('Folder.Files("/tmp/bikes source")', folder_expression)
         self.assertIn('Text.Lower([Extension]) = ".csv"', folder_expression)
         _validate_m_expression(csv_expression)
         _validate_m_expression(folder_expression)
