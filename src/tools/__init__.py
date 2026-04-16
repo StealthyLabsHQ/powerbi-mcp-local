@@ -40,7 +40,7 @@ from .power_query import (
     pbi_list_power_queries_tool,
     pbi_set_power_query_tool,
 )
-from .query import pbi_execute_dax_tool, pbi_refresh_tool
+from .query import pbi_execute_dax_as_role_tool, pbi_execute_dax_tool, pbi_refresh_tool, pbi_trace_query_tool
 from .relationships import pbi_create_relationship_tool, pbi_list_relationships_tool
 from .visuals import (
     pbi_add_bar_chart_tool,
@@ -85,6 +85,8 @@ __all__ = [
     "pbi_list_measures_tool",
     "pbi_list_relationships_tool",
     "pbi_execute_dax_tool",
+    "pbi_execute_dax_as_role_tool",
+    "pbi_trace_query_tool",
     "pbi_create_measure_tool",
     "pbi_delete_measure_tool",
     "pbi_create_relationship_tool",
