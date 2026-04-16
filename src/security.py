@@ -74,6 +74,7 @@ WRITE_TOOLS = {
     "pbi_add_gauge",
     "pbi_add_text_box",
     "pbi_move_visual",
+    "pbi_apply_design",
     "pbi_apply_theme",
     "pbi_build_dashboard",
 }
@@ -284,6 +285,12 @@ class SecurityManager:
         if env_dirs:
             return [Path(item.strip()).expanduser().resolve() for item in env_dirs.split(";") if item.strip()]
         return [Path.cwd().resolve()]
+
+    def validate_directory(self, path_value: str, *, must_exist: bool = True) -> Path:
+        resolved = resolve_local_path(path_value, must_exist=must_exist, policy=self.policy())
+        if must_exist and not resolved.is_dir():
+            raise SecurityPolicyError("Path must point to a directory.", details={"path": str(resolved)})
+        return resolved
 
     def sanitize_for_logging(self, value: Any, *, max_chars: int = 200) -> Any:
         value = redact_sensitive_data(serialize_value(value))

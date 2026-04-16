@@ -6,6 +6,7 @@ All notable changes to this project are documented here.
 
 ### Added
 - `pbi_patch_layout`: direct PBIX Layout patch tool that swaps `Report/Layout`, removes `SecurityBindings`, preserves ZIP entry metadata, and supports `force=True` auto-kill on Windows.
+- `pbi_apply_design`: one-shot design preset tool that writes the base theme, updates page backgrounds, and applies card container styling.
 
 ### Fixed
 - Visual query generation now resolves measure home tables from extract metadata (`Model/tables/*/measures/*.dax`) so `prototypeQuery.From[]` uses the real table entity instead of `"$Measures"` when available.
