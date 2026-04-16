@@ -1,4 +1,4 @@
-mcp[cli]>=1.0.0
-pyadomd>=0.3.0
-psutil>=5.9.0
-pythonnet>=3.0.0
+mcp[cli]==1.27.0
+pbi-pyadomd==1.4.3
+psutil==7.2.2
+pythonnet==3.0.5
