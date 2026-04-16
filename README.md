@@ -89,7 +89,9 @@ Point your IDE to `http://localhost:8765/sse`
 
 </details>
 
-Full setup guide: **[docs/SETUP.md](docs/SETUP.md)**
+Full setup guides:
+- **[docs/SETUP.md](docs/SETUP.md)** — config for all 8 platforms
+- **[docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)** — step-by-step Windows install
 
 ---
 
@@ -235,11 +237,13 @@ powerbi-mcp-local/
 │   ├── excel.py            Excel read/write/format/pipeline
 │   └── visuals.py          Report pages, visuals, themes, and pbi-tools bridge
 ├── test_connection.py      PBI connectivity test
+├── test_security.py        Security controls test suite (8 tests)
 ├── test_excel.py           Excel tools test suite
 ├── test_power_query.py     Power Query tools test suite (7 tests)
-├── test_visuals.py         Visual layout tool test suite
+├── test_visuals.py         Visual layout tool test suite (5 tests)
 ├── docs/
-│   └── SETUP.md            Multi-platform setup guide
+│   ├── SETUP.md            Multi-platform setup guide
+│   └── WINDOWS_SETUP.md    Step-by-step Windows install
 ├── CLAUDE.md               Build instructions for Claude Code
 ├── EXCEL_SPEC.md           Excel extension spec
 └── VISUAL_SPEC.md          Visual layer extension spec
@@ -263,6 +267,18 @@ powerbi-mcp-local/
 - **Windows** — Power BI Desktop only runs on Windows
 - **Power BI Desktop** (free) — installed and open with a `.pbix` file
 - **Python 3.11+**
+- **pbi-tools** (optional) — only needed for visual layer tools
+
+---
+
+## Security
+
+The server includes a security middleware with path traversal protection,
+DAX/DMV injection blocking, M expression SSRF prevention, audit logging,
+export redaction, ZIP bomb protection, and a configurable security policy.
+
+See **[SECURITY.md](SECURITY.md)** for the full threat model, controls, and
+OWASP/CWE mapping.
 
 ---
 
