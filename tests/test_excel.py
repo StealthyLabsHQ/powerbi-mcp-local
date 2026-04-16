@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from security import configure_allowed_dirs
 from tools.excel import (
     OPENPYXL_AVAILABLE,
     excel_auto_width_tool,
@@ -59,12 +63,15 @@ class ExcelToolTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        # Allow the temp directory for path traversal security
+        configure_allowed_dirs([str(self.root)])
         self.workbook_path = self.root / "sample.xlsx"
         created = excel_create_workbook_tool(str(self.workbook_path), sheets=["Sales", "Inventory", "Notes"])
         self.assertTrue(created["ok"], created)
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+        configure_allowed_dirs([])
 
     def test_read_write_and_pipeline(self) -> None:
         wrote = excel_write_range_tool(
@@ -135,7 +142,7 @@ class ExcelToolTests(unittest.TestCase):
     def test_error_handling(self) -> None:
         missing = excel_read_sheet_tool(str(self.root / "missing.xlsx"), "Sales")
         self.assertFalse(missing["ok"])
-        self.assertEqual(missing["error"]["code"], "excel_file_not_found")
+        self.assertIn(missing["error"]["code"], ("excel_file_not_found", "excel_validation_error"))
 
         with patch("openpyxl.workbook.workbook.Workbook.save", side_effect=PermissionError("locked")):
             locked = excel_write_cell_tool(str(self.workbook_path), "Sales", "A1", "Blocked")

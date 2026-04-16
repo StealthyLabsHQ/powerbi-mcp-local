@@ -75,17 +75,28 @@ C:\Program Files\Microsoft Power BI Desktop\bin\
 
 ```
 powerbi-mcp-local/
-├── CLAUDE.md           (this file — build instructions for Claude Code)
-├── server.py           (main MCP server)
-├── pbi_connection.py   (SSAS / PBI Desktop connection logic)
-├── tools/
-│   ├── __init__.py
-│   ├── model.py        (read model: tables, columns, relationships)
-│   ├── measures.py     (CRUD DAX measures)
-│   ├── relationships.py (CRUD relationships)
-│   └── query.py        (DAX query execution)
+├── src/
+│   ├── server.py           (main MCP server)
+│   ├── pbi_connection.py   (SSAS / PBI Desktop connection logic)
+│   ├── security.py         (security middleware)
+│   └── tools/
+│       ├── model.py        (tables, columns, export)
+│       ├── measures.py     (DAX measures CRUD)
+│       ├── relationships.py (relationships CRUD)
+│       ├── query.py        (DAX query execution)
+│       ├── power_query.py  (Power Query M tools)
+│       ├── excel.py        (Excel read/write)
+│       └── visuals.py      (report visuals via pbi-tools)
+├── tests/
+│   ├── test_connection.py
+│   ├── test_security.py
+│   ├── test_excel.py
+│   ├── test_power_query.py
+│   └── test_visuals.py
+├── docs/
+├── specs/
+├── CLAUDE.md           (this file)
 ├── requirements.txt
-├── .gitignore
 └── README.md
 ```
 
@@ -375,7 +386,7 @@ if __name__ == "__main__":
   "mcpServers": {
     "powerbi-desktop": {
       "command": "python",
-      "args": ["server.py"]
+      "args": ["src/server.py"]
     }
   }
 }
@@ -388,7 +399,7 @@ if __name__ == "__main__":
   "mcpServers": {
     "powerbi-desktop": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"],
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"],
       "env": {
         "PYTHONPATH": "C:\\Program Files\\Microsoft Power BI Desktop\\bin"
       }
@@ -438,5 +449,5 @@ Before connecting to Claude Code, test standalone:
 python -c "from server import find_pbi_port; print(find_pbi_port())"
 
 # 3. Test MCP server in dev mode
-mcp dev server.py
+mcp dev src/server.py
 ```

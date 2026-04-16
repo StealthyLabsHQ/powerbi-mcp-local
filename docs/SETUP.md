@@ -28,7 +28,7 @@ Create `.claude/settings.json` in your project root:
   "mcpServers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"]
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
     }
   }
 }
@@ -43,7 +43,7 @@ Add to `%USERPROFILE%\.claude\\settings.json`:
   "mcpServers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"],
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"],
       "env": {
         "PYTHONPATH": "C:\\Program Files\\Microsoft Power BI Desktop\\bin"
       }
@@ -61,7 +61,7 @@ Add to `%APPDATA%\Claude\claude_desktop_config.json`:
   "mcpServers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"]
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
     }
   }
 }
@@ -80,7 +80,7 @@ Create or edit `~/.codex/config.json`:
   "mcpServers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"]
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
     }
   }
 }
@@ -104,7 +104,7 @@ Create or edit `~/.gemini/settings.json`:
   "mcpServers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"]
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
     }
   }
 }
@@ -130,7 +130,7 @@ Create `.cursor/mcp.json` in your project root:
   "mcpServers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"]
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
     }
   }
 }
@@ -140,7 +140,7 @@ Create `.cursor/mcp.json` in your project root:
 
 Start the server in SSE mode:
 ```powershell
-python server.py --transport sse --port 8765
+python src/server.py --transport sse --port 8765
 ```
 
 Then in Cursor settings (`File > Preferences > Cursor Settings > MCP`):
@@ -170,7 +170,7 @@ Add to `.vscode/mcp.json`:
   "servers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"]
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
     }
   }
 }
@@ -178,7 +178,7 @@ Add to `.vscode/mcp.json`:
 
 ### SSE
 
-Start server: `python server.py --transport sse --port 8765`
+Start server: `python src/server.py --transport sse --port 8765`
 
 ```json
 {
@@ -199,7 +199,7 @@ JetBrains IDEs with AI Assistant support MCP via settings.
 `Settings > AI Assistant > MCP Servers > Add`:
 
 - **Name**: powerbi
-- **Command**: `python C:\path\to\powerbi-mcp-local\server.py`
+- **Command**: `python C:\path\to\powerbi-mcp-local\src\server.py`
 - **Transport**: stdio
 
 Or for SSE:
@@ -218,7 +218,7 @@ Create `.mcp/config.json` in your project root:
   "mcpServers": {
     "powerbi": {
       "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\server.py"]
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
     }
   }
 }
@@ -231,7 +231,7 @@ Create `.mcp/config.json` in your project root:
 For tools that don't support stdio, run the server as an HTTP endpoint:
 
 ```powershell
-python server.py --transport sse --port 8765
+python src/server.py --transport sse --port 8765
 ```
 
 The server exposes:

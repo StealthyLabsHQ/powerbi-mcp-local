@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from pbi_connection import PowerBIValidationError
 from tools.power_query import (
