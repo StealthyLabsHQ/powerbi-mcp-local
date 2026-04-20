@@ -445,6 +445,17 @@ def validate_measure_name(name: str, *, max_length: int = 256) -> None:
         )
 
 
+def validate_connection_string_property_value(value: str, *, field: str) -> None:
+    text = str(value).strip()
+    if not text:
+        raise SecurityPolicyError(f"{field} cannot be empty.")
+    if ";" in text:
+        raise SecurityPolicyError(
+            f"{field} cannot contain ';'.",
+            details={"field": field},
+        )
+
+
 def validate_expression_text(expression: str, *, max_length: int = 200000) -> None:
     text = str(expression).strip()
     if not text:
@@ -630,6 +641,7 @@ __all__ = [
     "secure_tool",
     "tool_category",
     "validate_expression_text",
+    "validate_connection_string_property_value",
     "validate_measure_name",
     "validate_model_expression",
     "validate_model_object_name",

@@ -17,6 +17,7 @@ from pbi_connection import (
     serialize_value,
 )
 from security import (
+    redact_sensitive_data,
     resolve_local_path,
     validate_measure_name,
     validate_model_expression,
@@ -42,7 +43,7 @@ def pbi_list_measures_tool(
                     {
                         "name": str(measure.Name),
                         "table": str(table.Name),
-                        "expression": str(measure.Expression),
+                        "expression": redact_sensitive_data(str(measure.Expression)),
                         "format_string": serialize_value(getattr(measure, "FormatString", "")),
                         "display_folder": serialize_value(getattr(measure, "DisplayFolder", "")),
                         "description": serialize_value(getattr(measure, "Description", "")),
@@ -111,7 +112,7 @@ def pbi_create_measure_tool(
             "measure": {
                 "table": table,
                 "name": name,
-                "expression": expression,
+                "expression": redact_sensitive_data(expression),
                 "format_string": format_string or None,
                 "description": description or None,
                 "display_folder": display_folder or None,
