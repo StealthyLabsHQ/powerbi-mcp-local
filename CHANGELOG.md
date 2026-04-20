@@ -13,6 +13,9 @@ All notable changes to this project are documented here.
 - Measure fallback now logs a warning and uses `"$Measures"` only when extract metadata is missing or disconnected.
 - `.dax` import parsing now strips `//` and `/* ... */` comments safely while preserving quoted strings and measure block boundaries.
 - `pbi_compile_report` now accepts `force: bool = False` and can auto-kill `PBIDesktop.exe` on Windows before write operations.
+- RLS role-scoped execution now rejects `role` / `username` values containing connection-string separators before building the ADOMD connection string.
+- Power Query M validation now blocks `#shared` and rejects function calls outside a strict local-file allowlist unless `PBI_MCP_ALLOW_EXTERNAL_M=1` is set.
+- MCP responses that expose model or Power Query expressions now redact secret-like values before returning them to clients.
 
 ---
 
