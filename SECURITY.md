@@ -125,12 +125,20 @@ Blocked by default:
 - `SharePoint.*`, `ActiveDirectory.*`, `AzureStorage.*`
 - `Expression.Evaluate`
 - `Value.NativeQuery`
+- `#shared`
 
 The validator also performs a basic syntax sanity check:
 
 - balanced `()`, `[]`, `{}`
 - string literal balancing
 - `let ... in ...` structure presence when applicable
+
+In addition, function calls are now checked against a local-file allowlist. Safe
+transformation namespaces such as `Table.*`, `Text.*`, `List.*`, `Record.*`,
+`Number.*`, `Date.*`, `DateTime.*`, `Binary.*`, and the local import primitives
+`Excel.Workbook`, `Csv.Document`, `File.Contents`, `Folder.Files`, and
+`Folder.Contents` remain allowed. Any other callable namespace is rejected unless
+`PBI_MCP_ALLOW_EXTERNAL_M=1` is set explicitly.
 
 ### 4. DAX Measure / Table / Column Validation
 
