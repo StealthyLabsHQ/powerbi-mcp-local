@@ -16,7 +16,13 @@ from pbi_connection import (
     ok,
     serialize_value,
 )
-from security import inspect_excel_archive, resolve_local_path, validate_expression_text, validate_model_object_name
+from security import (
+    inspect_excel_archive,
+    redact_sensitive_data,
+    resolve_local_path,
+    validate_expression_text,
+    validate_model_object_name,
+)
 
 
 def _m_string(value: str) -> str:
@@ -46,6 +52,7 @@ _M_BLOCKED_FUNCTIONS = [
     re.compile(r"\bSharePoint\.\w+", re.IGNORECASE),
     re.compile(r"\bActiveDirectory\.\w+", re.IGNORECASE),
     re.compile(r"\bAzureStorage\.\w+", re.IGNORECASE),
+    re.compile(r"#shared\b", re.IGNORECASE),
 ]
 
 def _validate_m_expression(expression: str) -> None:
@@ -149,7 +156,7 @@ def _partition_payload(table: Any, partition: Any) -> dict[str, Any]:
         "partition": str(partition.Name),
         "source_type": _source_type_token(partition),
         "source_type_raw": serialize_value(getattr(partition, "SourceType", None)),
-        "m_expression": expression,
+        "m_expression": redact_sensitive_data(expression),
         "expression_length": len(expression),
     }
 
@@ -379,7 +386,7 @@ def pbi_set_power_query_tool(
                 "source_type": new_source_type,
                 "previous_expression_length": previous["expression_length"],
                 "expression_length": len(m_expression),
-                "m_expression": m_expression,
+                "m_expression": redact_sensitive_data(m_expression),
                 "refresh_requested": refresh_after,
             }
         }

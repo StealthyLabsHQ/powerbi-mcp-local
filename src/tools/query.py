@@ -18,7 +18,12 @@ from pbi_connection import (
     ok,
     serialize_value,
 )
-from security import SECURITY, validate_model_object_name, validate_query_text
+from security import (
+    SECURITY,
+    validate_connection_string_property_value,
+    validate_model_object_name,
+    validate_query_text,
+)
 
 
 # ── DAX safety ───────────────────────────────────────────────────────
@@ -159,8 +164,10 @@ def pbi_execute_dax_as_role_tool(
     _validate_dax_query(query)
     policy = SECURITY.policy()
     validate_model_object_name(role, max_length=policy.max_name_length)
+    validate_connection_string_property_value(role, field="role")
     if username is not None:
         validate_model_object_name(username, max_length=policy.max_name_length)
+        validate_connection_string_property_value(username, field="username")
 
     max_rows = min(1000, policy.max_rows_for_dax)
 

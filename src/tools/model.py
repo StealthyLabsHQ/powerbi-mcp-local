@@ -78,7 +78,7 @@ def pbi_list_tables_tool(
                         "column_type": type(column).__name__,
                         "is_hidden": column_hidden,
                         "format_string": serialize_value(getattr(column, "FormatString", "")),
-                        "expression": serialize_value(getattr(column, "Expression", None)),
+                        "expression": redact_sensitive_data(serialize_value(getattr(column, "Expression", None))),
                     }
                 )
 
@@ -245,7 +245,7 @@ def pbi_create_table_tool(
         return {
             "table": {
                 "name": name,
-                "expression": expression,
+                "expression": redact_sensitive_data(expression),
                 "is_hidden": is_hidden,
             },
             "action": action,
@@ -318,7 +318,7 @@ def pbi_create_column_tool(
             "column": {
                 "table": table,
                 "name": name,
-                "expression": expression,
+                "expression": redact_sensitive_data(expression),
                 "data_type": data_type,
                 "format_string": format_string or None,
                 "display_folder": display_folder or None,
