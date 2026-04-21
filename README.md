@@ -13,7 +13,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 58](https://img.shields.io/badge/tools-58-orange)](#tool-catalog-en-58-tools)
+[![Tools 80](https://img.shields.io/badge/tools-80-orange)](#tool-catalog-en-80-tools)
 
 </div>
 
@@ -21,7 +21,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 
 | Start | Setup | Demo | Tools | Security | FR |
 | --- | --- | --- | --- | --- | --- |
-| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-58-tools) | [Security](#security-en) | [Version française](#francais) |
+| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-80-tools) | [Security](#security-en) | [Version française](#francais) |
 
 <a id="demo-60s"></a>
 ## Demo (60s)
@@ -119,6 +119,12 @@ Optional:
 ```powershell
 python src/server.py --transport sse --port 8765
 python src/server.py --readonly
+python src/server.py --profile readonly   # prune to read-only tools
+python src/server.py --profile write      # read + write, no destructive
+# SSE auth: set an env var before launch
+$env:PBI_MCP_AUTH_TOKEN = "your-secret-token"
+python src/server.py --transport sse --port 8765
+# clients must send: Authorization: Bearer your-secret-token
 ```
 
 <a id="mcp-client-setup-en"></a>
@@ -160,27 +166,39 @@ Guides:
 - `Run this DAX query and show top 20 rows.`
 - `Extract report, add a new page, place 3 visuals, then compile.`
 
-<a id="tool-catalog-en-58-tools"></a>
-### Tool catalog (EN, 58 tools)
+<a id="tool-catalog-en-80-tools"></a>
+### Tool catalog (EN, 80 tools)
 
-Core model discovery (6):
+Core model discovery (7):
 - `pbi_connect`
 - `pbi_list_instances`
 - `pbi_list_tables`
 - `pbi_list_measures`
 - `pbi_list_relationships`
 - `pbi_model_info`
+- `pbi_refresh_metadata`
 
-Model mutations (6):
+Model mutations (14):
 - `pbi_create_measure`
 - `pbi_delete_measure`
+- `pbi_rename_measure`
 - `pbi_set_format`
 - `pbi_create_relationship`
+- `pbi_update_relationship`
+- `pbi_delete_relationship`
 - `pbi_create_table`
+- `pbi_delete_table`
+- `pbi_rename_table`
 - `pbi_create_column`
+- `pbi_delete_column`
+- `pbi_rename_column`
+- `pbi_execute_dax_as_role`
 
-Query and import (4):
+Query and import (6):
 - `pbi_execute_dax`
+- `pbi_trace_query`
+- `pbi_validate_dax`
+- `pbi_measure_dependencies`
 - `pbi_refresh`
 - `pbi_import_dax_file`
 - `pbi_export_model`
@@ -193,6 +211,22 @@ Power Query (M) tools (7):
 - `pbi_create_csv_import_query`
 - `pbi_create_folder_import_query`
 - `pbi_bulk_import_excel`
+
+Row-level security (6):
+- `pbi_list_roles`
+- `pbi_create_role`
+- `pbi_delete_role`
+- `pbi_set_role_filter`
+- `pbi_add_role_member`
+- `pbi_remove_role_member`
+
+Calculation groups (3):
+- `pbi_list_calc_groups`
+- `pbi_create_calc_group`
+- `pbi_delete_calc_group`
+
+Unified visual dispatcher (1):
+- `pbi_add_visual(visual_type, config)` — dispatches to the 9 legacy `pbi_add_*` tools (kept as shims)
 
 Excel tools (13):
 - `excel_list_sheets`
@@ -280,7 +314,8 @@ Details: [SECURITY.md](SECURITY.md)
 ### Development
 
 ```powershell
-python -m unittest discover -s tests -p "test_*.py" -v
+pip install -e ".[dev]"
+pytest -v
 ```
 
 ---
@@ -369,17 +404,20 @@ Guides:
 
 ### Catalogue des outils (FR)
 
-Le projet expose **58 tools MCP**.
+Le projet expose **80 tools MCP**.
 Les noms et catégories sont identiques à la section anglaise:
 
-- Core model discovery (6)
-- Model mutations (6)
-- Query and import (4)
+- Core model discovery (7)
+- Model mutations (14)
+- Query and import (7)
 - Power Query (M) tools (7)
+- Row-level security (6)
+- Calculation groups (3)
+- Unified visual dispatcher (1)
 - Excel tools (13)
 - Report and visual tools (22)
 
-Voir le détail complet ici: [Tool catalog (EN)](#tool-catalog-en-58-tools)
+Voir le détail complet ici: [Tool catalog (EN)](#tool-catalog-en-80-tools)
 
 ### Dépannage (FR)
 

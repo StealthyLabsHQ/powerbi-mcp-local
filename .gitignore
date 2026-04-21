@@ -3,7 +3,11 @@ __pycache__/
 *.pyo
 .env
 venv/
+.venv/
 dist/
 *.egg-info/
 tests/
 .pytest_cache/
+tools-bin/
+tmp_*/
+build/

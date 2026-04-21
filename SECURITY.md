@@ -78,12 +78,14 @@ This security pass was cross-checked against the local hardening references in:
 - `excel_format_range`
 - `excel_auto_width`
 - `excel_create_workbook`
+- `pbi_bulk_import_excel`
 
 ### Destructive Tools
 
 - `pbi_delete_measure`
-- `pbi_bulk_import_excel`
 - `excel_delete_sheet`
+- `pbi_delete_page`
+- `pbi_remove_visual`
 
 ## Current Hardening Details
 

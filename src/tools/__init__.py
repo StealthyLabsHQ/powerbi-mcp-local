@@ -20,16 +20,22 @@ from .measures import (
     pbi_delete_measure_tool,
     pbi_import_dax_file_tool,
     pbi_list_measures_tool,
+    pbi_rename_measure_tool,
     pbi_set_format_tool,
 )
 from .model import (
     pbi_connect_tool,
     pbi_create_column_tool,
     pbi_create_table_tool,
+    pbi_delete_column_tool,
+    pbi_delete_table_tool,
     pbi_export_model_tool,
     pbi_list_instances_tool,
     pbi_list_tables_tool,
     pbi_model_info_tool,
+    pbi_refresh_metadata_tool,
+    pbi_rename_column_tool,
+    pbi_rename_table_tool,
 )
 from .power_query import (
     pbi_bulk_import_excel_tool,
@@ -40,8 +46,33 @@ from .power_query import (
     pbi_list_power_queries_tool,
     pbi_set_power_query_tool,
 )
-from .query import pbi_execute_dax_as_role_tool, pbi_execute_dax_tool, pbi_refresh_tool, pbi_trace_query_tool
-from .relationships import pbi_create_relationship_tool, pbi_list_relationships_tool
+from .query import (
+    pbi_execute_dax_as_role_tool,
+    pbi_execute_dax_tool,
+    pbi_measure_dependencies_tool,
+    pbi_refresh_tool,
+    pbi_trace_query_tool,
+    pbi_validate_dax_tool,
+)
+from .relationships import (
+    pbi_create_relationship_tool,
+    pbi_delete_relationship_tool,
+    pbi_list_relationships_tool,
+    pbi_update_relationship_tool,
+)
+from .rls import (
+    pbi_add_role_member_tool,
+    pbi_create_role_tool,
+    pbi_delete_role_tool,
+    pbi_list_roles_tool,
+    pbi_remove_role_member_tool,
+    pbi_set_role_filter_tool,
+)
+from .calc_groups import (
+    pbi_create_calc_group_tool,
+    pbi_delete_calc_group_tool,
+    pbi_list_calc_groups_tool,
+)
 from .visuals import (
     pbi_add_bar_chart_tool,
     pbi_add_card_tool,
@@ -51,6 +82,7 @@ from .visuals import (
     pbi_add_slicer_tool,
     pbi_add_table_visual_tool,
     pbi_add_text_box_tool,
+    pbi_add_visual_tool,
     pbi_add_waterfall_tool,
     pbi_apply_design_tool,
     pbi_apply_theme_tool,
@@ -68,6 +100,26 @@ from .visuals import (
 )
 
 __all__ = [
+    "pbi_delete_relationship_tool",
+    "pbi_update_relationship_tool",
+    "pbi_delete_table_tool",
+    "pbi_delete_column_tool",
+    "pbi_rename_table_tool",
+    "pbi_rename_column_tool",
+    "pbi_rename_measure_tool",
+    "pbi_refresh_metadata_tool",
+    "pbi_validate_dax_tool",
+    "pbi_measure_dependencies_tool",
+    "pbi_list_roles_tool",
+    "pbi_create_role_tool",
+    "pbi_delete_role_tool",
+    "pbi_set_role_filter_tool",
+    "pbi_add_role_member_tool",
+    "pbi_remove_role_member_tool",
+    "pbi_list_calc_groups_tool",
+    "pbi_create_calc_group_tool",
+    "pbi_delete_calc_group_tool",
+    "pbi_add_visual_tool",
     "excel_list_sheets_tool",
     "excel_read_sheet_tool",
     "excel_read_cell_tool",

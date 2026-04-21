@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,10 @@ from tools import (
     pbi_create_measure_tool,
     pbi_create_relationship_tool,
     pbi_create_table_tool,
+    pbi_delete_column_tool,
     pbi_delete_measure_tool,
+    pbi_delete_relationship_tool,
+    pbi_delete_table_tool,
     pbi_execute_dax_as_role_tool,
     pbi_execute_dax_tool,
     pbi_export_model_tool,
@@ -37,10 +41,17 @@ from tools import (
     pbi_list_measures_tool,
     pbi_list_relationships_tool,
     pbi_list_tables_tool,
+    pbi_measure_dependencies_tool,
     pbi_model_info_tool,
+    pbi_refresh_metadata_tool,
     pbi_refresh_tool,
+    pbi_rename_column_tool,
+    pbi_rename_measure_tool,
+    pbi_rename_table_tool,
     pbi_set_format_tool,
     pbi_trace_query_tool,
+    pbi_update_relationship_tool,
+    pbi_validate_dax_tool,
     pbi_bulk_import_excel_tool,
     pbi_create_csv_import_query_tool,
     pbi_create_folder_import_query_tool,
@@ -50,10 +61,20 @@ from tools import (
     pbi_add_donut_chart_tool,
     pbi_add_gauge_tool,
     pbi_add_line_chart_tool,
+    pbi_add_role_member_tool,
     pbi_add_slicer_tool,
     pbi_add_table_visual_tool,
     pbi_add_text_box_tool,
+    pbi_add_visual_tool,
     pbi_add_waterfall_tool,
+    pbi_create_calc_group_tool,
+    pbi_create_role_tool,
+    pbi_delete_calc_group_tool,
+    pbi_delete_role_tool,
+    pbi_list_calc_groups_tool,
+    pbi_list_roles_tool,
+    pbi_remove_role_member_tool,
+    pbi_set_role_filter_tool,
     pbi_apply_design_tool,
     pbi_apply_theme_tool,
     pbi_build_dashboard_tool,
@@ -175,14 +196,19 @@ def pbi_list_relationships() -> dict[str, Any]:
 
 
 @mcp.tool()
-def pbi_execute_dax(query: str, max_rows: int = 1000) -> dict[str, Any]:
-    """Execute a DAX or DMV query and return rows."""
+def pbi_execute_dax(
+    query: str,
+    max_rows: int = 1000,
+    timeout_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Execute a DAX or DMV query and return rows. timeout_seconds=0 disables the timeout."""
     return _run(
         "pbi_execute_dax",
         pbi_execute_dax_tool,
         CONNECTION_MANAGER,
         query=query,
         max_rows=max_rows,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -200,13 +226,17 @@ def pbi_execute_dax_as_role(query: str, role: str, username: str | None = None) 
 
 
 @mcp.tool()
-def pbi_trace_query(query: str) -> dict[str, Any]:
+def pbi_trace_query(
+    query: str,
+    timeout_seconds: int | None = None,
+) -> dict[str, Any]:
     """Execute a DAX query and return rows plus performance diagnostics."""
     return _run(
         "pbi_trace_query",
         pbi_trace_query_tool,
         CONNECTION_MANAGER,
         query=query,
+        timeout_seconds=timeout_seconds,
     )
 
 
@@ -273,6 +303,145 @@ def pbi_create_relationship(
         direction=direction,
         is_active=is_active,
         relationship_name=relationship_name,
+    )
+
+
+@mcp.tool()
+def pbi_delete_relationship(
+    name: str | None = None,
+    from_table: str | None = None,
+    from_column: str | None = None,
+    to_table: str | None = None,
+    to_column: str | None = None,
+) -> dict[str, Any]:
+    """Delete a relationship by name or by endpoint columns."""
+    return _run(
+        "pbi_delete_relationship",
+        pbi_delete_relationship_tool,
+        CONNECTION_MANAGER,
+        name=name,
+        from_table=from_table,
+        from_column=from_column,
+        to_table=to_table,
+        to_column=to_column,
+    )
+
+
+@mcp.tool()
+def pbi_update_relationship(
+    name: str | None = None,
+    from_table: str | None = None,
+    from_column: str | None = None,
+    to_table: str | None = None,
+    to_column: str | None = None,
+    cardinality: str | None = None,
+    direction: str | None = None,
+    is_active: bool | None = None,
+    new_name: str | None = None,
+) -> dict[str, Any]:
+    """Update properties of an existing relationship."""
+    return _run(
+        "pbi_update_relationship",
+        pbi_update_relationship_tool,
+        CONNECTION_MANAGER,
+        name=name,
+        from_table=from_table,
+        from_column=from_column,
+        to_table=to_table,
+        to_column=to_column,
+        cardinality=cardinality,
+        direction=direction,
+        is_active=is_active,
+        new_name=new_name,
+    )
+
+
+@mcp.tool()
+def pbi_delete_table(name: str) -> dict[str, Any]:
+    """Delete a table from the model."""
+    return _run("pbi_delete_table", pbi_delete_table_tool, CONNECTION_MANAGER, name=name)
+
+
+@mcp.tool()
+def pbi_delete_column(table: str, name: str) -> dict[str, Any]:
+    """Delete a column from a table."""
+    return _run(
+        "pbi_delete_column",
+        pbi_delete_column_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        name=name,
+    )
+
+
+@mcp.tool()
+def pbi_rename_table(name: str, new_name: str) -> dict[str, Any]:
+    """Rename a table. Dependent DAX expressions must be updated separately."""
+    return _run(
+        "pbi_rename_table",
+        pbi_rename_table_tool,
+        CONNECTION_MANAGER,
+        name=name,
+        new_name=new_name,
+    )
+
+
+@mcp.tool()
+def pbi_rename_column(table: str, name: str, new_name: str) -> dict[str, Any]:
+    """Rename a column. Dependent DAX expressions must be updated separately."""
+    return _run(
+        "pbi_rename_column",
+        pbi_rename_column_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        name=name,
+        new_name=new_name,
+    )
+
+
+@mcp.tool()
+def pbi_rename_measure(table: str, name: str, new_name: str) -> dict[str, Any]:
+    """Rename a DAX measure. Dependent DAX expressions must be updated separately."""
+    return _run(
+        "pbi_rename_measure",
+        pbi_rename_measure_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        name=name,
+        new_name=new_name,
+    )
+
+
+@mcp.tool()
+def pbi_refresh_metadata() -> dict[str, Any]:
+    """Reload the cached TOM schema (cheaper than pbi_connect force_reconnect)."""
+    return _run("pbi_refresh_metadata", pbi_refresh_metadata_tool, CONNECTION_MANAGER)
+
+
+@mcp.tool()
+def pbi_validate_dax(expression: str, kind: str = "scalar") -> dict[str, Any]:
+    """Parse-check a DAX expression. kind='scalar' or 'table'."""
+    return _run(
+        "pbi_validate_dax",
+        pbi_validate_dax_tool,
+        CONNECTION_MANAGER,
+        expression=expression,
+        kind=kind,
+    )
+
+
+@mcp.tool()
+def pbi_measure_dependencies(
+    measure: str | None = None,
+    table: str | None = None,
+) -> dict[str, Any]:
+    """Return DISCOVER_CALC_DEPENDENCY rows, optionally filtered by measure/table."""
+    return _run(
+        "pbi_measure_dependencies",
+        pbi_measure_dependencies_tool,
+        CONNECTION_MANAGER,
+        measure=measure,
+        table=table,
     )
 
 
@@ -1108,6 +1277,151 @@ def pbi_apply_design(
 
 
 @mcp.tool()
+def pbi_add_visual(
+    extract_folder: str,
+    page: str,
+    visual_type: str,
+    x: int,
+    y: int,
+    width: int | None = None,
+    height: int | None = None,
+    title: str = "",
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Add any visual via a generic dispatcher. visual_type: card|bar_chart|line_chart|donut|table|waterfall|slicer|gauge|text_box."""
+    return _run(
+        "pbi_add_visual",
+        pbi_add_visual_tool,
+        extract_folder=extract_folder,
+        page=page,
+        visual_type=visual_type,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+        config=config,
+    )
+
+
+@mcp.tool()
+def pbi_list_roles() -> dict[str, Any]:
+    """List RLS roles, members, and table filters."""
+    return _run("pbi_list_roles", pbi_list_roles_tool, CONNECTION_MANAGER)
+
+
+@mcp.tool()
+def pbi_create_role(
+    name: str,
+    permission: str = "Read",
+    description: str = "",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create or update an RLS role. permission: None|Read|ReadRefresh|Refresh|Administrator."""
+    return _run(
+        "pbi_create_role",
+        pbi_create_role_tool,
+        CONNECTION_MANAGER,
+        name=name,
+        permission=permission,
+        description=description,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_delete_role(name: str) -> dict[str, Any]:
+    """Delete an RLS role."""
+    return _run("pbi_delete_role", pbi_delete_role_tool, CONNECTION_MANAGER, name=name)
+
+
+@mcp.tool()
+def pbi_set_role_filter(
+    role: str,
+    table: str,
+    filter_expression: str | None,
+) -> dict[str, Any]:
+    """Apply or clear a DAX RLS filter on a table for a role (None/empty clears)."""
+    return _run(
+        "pbi_set_role_filter",
+        pbi_set_role_filter_tool,
+        CONNECTION_MANAGER,
+        role=role,
+        table=table,
+        filter_expression=filter_expression,
+    )
+
+
+@mcp.tool()
+def pbi_add_role_member(
+    role: str,
+    member_name: str,
+    member_type: str = "external",
+    identity_provider: str = "AzureAD",
+) -> dict[str, Any]:
+    """Add a member to an RLS role. member_type: external|windows."""
+    return _run(
+        "pbi_add_role_member",
+        pbi_add_role_member_tool,
+        CONNECTION_MANAGER,
+        role=role,
+        member_name=member_name,
+        member_type=member_type,
+        identity_provider=identity_provider,
+    )
+
+
+@mcp.tool()
+def pbi_remove_role_member(role: str, member_name: str) -> dict[str, Any]:
+    """Remove a member from an RLS role (matched on MemberName)."""
+    return _run(
+        "pbi_remove_role_member",
+        pbi_remove_role_member_tool,
+        CONNECTION_MANAGER,
+        role=role,
+        member_name=member_name,
+    )
+
+
+@mcp.tool()
+def pbi_list_calc_groups() -> dict[str, Any]:
+    """List calculation groups and their calculation items."""
+    return _run("pbi_list_calc_groups", pbi_list_calc_groups_tool, CONNECTION_MANAGER)
+
+
+@mcp.tool()
+def pbi_create_calc_group(
+    table_name: str,
+    column_name: str = "Name",
+    precedence: int = 0,
+    items: list[dict[str, Any]] | None = None,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create or replace a calculation group. items: [{name, expression, format_string_expression?, ordinal?}]."""
+    return _run(
+        "pbi_create_calc_group",
+        pbi_create_calc_group_tool,
+        CONNECTION_MANAGER,
+        table_name=table_name,
+        column_name=column_name,
+        precedence=precedence,
+        items=items,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_delete_calc_group(table_name: str) -> dict[str, Any]:
+    """Delete a calculation group table."""
+    return _run(
+        "pbi_delete_calc_group",
+        pbi_delete_calc_group_tool,
+        CONNECTION_MANAGER,
+        table_name=table_name,
+    )
+
+
+@mcp.tool()
 def pbi_build_dashboard(extract_folder: str, page: str, layout: list[dict[str, Any]]) -> dict[str, Any]:
     """Build a dashboard page from a bulk layout specification."""
     return _run(
@@ -1117,6 +1431,57 @@ def pbi_build_dashboard(extract_folder: str, page: str, layout: list[dict[str, A
         page=page,
         layout=layout,
     )
+
+
+def _bearer_auth_middleware(app: Any, token: str) -> Any:
+    """ASGI middleware that requires Authorization: Bearer <token> on HTTP requests."""
+    expected = f"Bearer {token}".encode("utf-8")
+
+    async def wrapped(scope: dict, receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        provided = headers.get(b"authorization", b"")
+        if provided != expected:
+            await send({
+                "type": "http.response.start",
+                "status": 401,
+                "headers": [(b"content-type", b"text/plain"), (b"www-authenticate", b"Bearer")],
+            })
+            await send({"type": "http.response.body", "body": b"Unauthorized"})
+            return
+        await app(scope, receive, send)
+
+    return wrapped
+
+
+async def _run_sse_with_auth(host: str, port: int) -> None:
+    """Mirror FastMCP.run_sse_async but allow wrapping with Bearer auth middleware."""
+    import uvicorn
+
+    mcp.settings.host = host
+    mcp.settings.port = port
+
+    asgi_app = mcp.sse_app()
+    token = os.getenv("PBI_MCP_AUTH_TOKEN", "").strip()
+    if token:
+        asgi_app = _bearer_auth_middleware(asgi_app, token)
+        logger.info("SECURITY: SSE Bearer auth enabled (PBI_MCP_AUTH_TOKEN set).")
+    else:
+        logger.warning(
+            "SECURITY: SSE has no Bearer auth. Set PBI_MCP_AUTH_TOKEN to require "
+            "'Authorization: Bearer <token>' on HTTP requests.",
+        )
+
+    config = uvicorn.Config(
+        asgi_app,
+        host=host,
+        port=port,
+        log_level=mcp.settings.log_level.lower(),
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 def main() -> None:
@@ -1146,11 +1511,19 @@ def main() -> None:
         action="store_true",
         help="Disable write and destructive tools for this server process.",
     )
+    parser.add_argument(
+        "--profile",
+        choices=["readonly", "write", "all"],
+        default="all",
+        help="Filter exposed tool surface: readonly, write (read+write), or all (default).",
+    )
     args = parser.parse_args()
     SECURITY.policy(reload=True, cwd=Path(__file__).parent)
     if args.readonly:
         SECURITY.set_runtime_readonly(True)
         logger.info("SECURITY: readonly mode enabled via --readonly")
+
+    _apply_profile(args.profile)
 
     if args.transport == "sse":
         logger.info(
@@ -1163,9 +1536,34 @@ def main() -> None:
                 "Ensure network is trusted or use --host 127.0.0.1",
                 args.host,
             )
-        mcp.run(transport="sse", sse_params={"host": args.host, "port": args.port})
+        import anyio
+        anyio.run(_run_sse_with_auth, args.host, args.port)
     else:
         mcp.run(transport="stdio")
+
+
+def _apply_profile(profile: str) -> None:
+    """Prune FastMCP's registered tools based on the selected profile."""
+    if profile == "all":
+        return
+    from security import READ_TOOLS, WRITE_TOOLS, DESTRUCTIVE_TOOLS
+
+    if profile == "readonly":
+        allowed = set(READ_TOOLS)
+    elif profile == "write":
+        allowed = set(READ_TOOLS) | set(WRITE_TOOLS)
+    else:
+        return
+
+    manager = getattr(mcp, "_tool_manager", None)
+    tools_map = getattr(manager, "_tools", None)
+    if tools_map is None:
+        logger.warning("profile filter skipped: FastMCP tool registry not accessible")
+        return
+    removed = [name for name in list(tools_map.keys()) if name not in allowed]
+    for name in removed:
+        tools_map.pop(name, None)
+    logger.info("PROFILE %s applied: removed %d tools, exposing %d", profile, len(removed), len(tools_map))
 
 
 if __name__ == "__main__":

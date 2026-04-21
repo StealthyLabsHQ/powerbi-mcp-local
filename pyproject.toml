@@ -4,20 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "powerbi-mcp-local"
-version = "0.1.0"
+version = "0.6.0"
 description = "FastMCP server for Power BI Desktop model, Excel, and Power Query automation."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 authors = [
   { name = "StealthyLabsHQ" }
 ]
 dependencies = [
-  "mcp[cli]==1.27.0",
-  "openpyxl==3.1.5",
-  "pbi-pyadomd==1.4.3",
-  "psutil==7.2.2",
-  "pythonnet==3.0.5",
+  "mcp[cli]~=1.27.0",
+  "openpyxl~=3.1.5",
+  "pbi-pyadomd~=1.4.3",
+  "psutil~=7.2.2",
+  "pythonnet~=3.0.5",
 ]
 keywords = ["mcp", "power-bi", "power-query", "excel", "tabular"]
 classifiers = [
@@ -28,6 +28,11 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest~=8.3",
 ]
 
 [project.urls]
@@ -43,3 +48,8 @@ py-modules = []
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"

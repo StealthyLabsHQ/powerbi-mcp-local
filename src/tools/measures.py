@@ -162,6 +162,47 @@ def pbi_delete_measure_tool(manager: Any, *, table: str, name: str) -> dict[str,
     )
 
 
+def pbi_rename_measure_tool(
+    manager: Any,
+    *,
+    table: str,
+    name: str,
+    new_name: str,
+) -> dict[str, Any]:
+    """Rename a DAX measure. Callers must update downstream DAX expressions themselves."""
+    validate_model_object_name(table)
+    validate_measure_name(name)
+    validate_measure_name(new_name)
+
+    def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        target_table = find_named(model.Tables, table)
+        if target_table is None:
+            raise PowerBINotFoundError(f"Table '{table}' was not found.", details={"table": table})
+        measure = find_named(target_table.Measures, name)
+        if measure is None:
+            raise PowerBINotFoundError(
+                f"Measure '{table}[{name}]' was not found.",
+                details={"table": table, "measure": name},
+            )
+        if new_name.casefold() != name.casefold():
+            for candidate_table in model.Tables:
+                if find_named(candidate_table.Measures, new_name) is not None:
+                    raise PowerBIDuplicateError(
+                        f"Measure '{new_name}' already exists in table '{candidate_table.Name}'.",
+                        details={"new_name": new_name, "conflict_table": str(candidate_table.Name)},
+                    )
+        measure.Name = new_name
+        return {"rename": {"table": table, "measure_old_name": name, "measure_new_name": new_name}}
+
+    payload = manager.execute_write("rename_measure", _mutator)
+    return ok(
+        f"Measure '{table}[{name}]' renamed to '{table}[{new_name}]'.",
+        rename=payload["rename"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
 def pbi_set_format_tool(
     manager: Any,
     *,
