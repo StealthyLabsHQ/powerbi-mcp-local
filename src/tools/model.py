@@ -51,6 +51,18 @@ def pbi_list_instances_tool(manager: Any) -> dict[str, Any]:
     )
 
 
+def pbi_refresh_metadata_tool(manager: Any) -> dict[str, Any]:
+    """Reload cached TOM schema from the server (cheaper than full reconnect)."""
+    payload = manager.refresh_metadata()
+    return ok(
+        "Metadata cache refreshed.",
+        changed=payload["changed"],
+        previous_version=payload["previous_version"],
+        current_version=payload["current_version"],
+        database=payload["database"],
+    )
+
+
 def pbi_list_tables_tool(
     manager: Any,
     *,
@@ -256,6 +268,112 @@ def pbi_create_table_tool(
         f"Calculated table '{name}' {payload['action']} successfully.",
         table=payload["table"],
         action=payload["action"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
+def pbi_delete_table_tool(manager: Any, *, name: str) -> dict[str, Any]:
+    """Delete a table. Removes associated relationships and measures."""
+    validate_model_object_name(name)
+
+    def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        table = find_named(model.Tables, name)
+        if table is None:
+            raise PowerBINotFoundError(f"Table '{name}' was not found.", details={"table": name})
+        model.Tables.Remove(table)
+        return {"deleted_table": {"name": name}}
+
+    payload = manager.execute_write("delete_table", _mutator)
+    return ok(
+        f"Table '{name}' deleted successfully.",
+        deleted_table=payload["deleted_table"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
+def pbi_delete_column_tool(manager: Any, *, table: str, name: str) -> dict[str, Any]:
+    """Delete a column from a table."""
+    validate_model_object_name(table)
+    validate_model_object_name(name)
+
+    def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        target_table = find_named(model.Tables, table)
+        if target_table is None:
+            raise PowerBINotFoundError(f"Table '{table}' was not found.", details={"table": table})
+        column = find_named(target_table.Columns, name)
+        if column is None:
+            raise PowerBINotFoundError(
+                f"Column '{table}[{name}]' was not found.",
+                details={"table": table, "column": name},
+            )
+        target_table.Columns.Remove(column)
+        return {"deleted_column": {"table": table, "name": name}}
+
+    payload = manager.execute_write("delete_column", _mutator)
+    return ok(
+        f"Column '{table}[{name}]' deleted successfully.",
+        deleted_column=payload["deleted_column"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
+def pbi_rename_table_tool(manager: Any, *, name: str, new_name: str) -> dict[str, Any]:
+    """Rename a table. Callers are responsible for updating dependent DAX expressions."""
+    validate_model_object_name(name)
+    validate_model_object_name(new_name)
+
+    def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        table = find_named(model.Tables, name)
+        if table is None:
+            raise PowerBINotFoundError(f"Table '{name}' was not found.", details={"table": name})
+        if find_named(model.Tables, new_name) is not None and new_name.casefold() != name.casefold():
+            raise PowerBIDuplicateError(
+                f"A table named '{new_name}' already exists.",
+                details={"new_name": new_name},
+            )
+        table.Name = new_name
+        return {"rename": {"table_old_name": name, "table_new_name": new_name}}
+
+    payload = manager.execute_write("rename_table", _mutator)
+    return ok(
+        f"Table '{name}' renamed to '{new_name}'.",
+        rename=payload["rename"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
+def pbi_rename_column_tool(manager: Any, *, table: str, name: str, new_name: str) -> dict[str, Any]:
+    """Rename a column. Callers are responsible for updating dependent DAX."""
+    validate_model_object_name(table)
+    validate_model_object_name(name)
+    validate_model_object_name(new_name)
+
+    def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        target_table = find_named(model.Tables, table)
+        if target_table is None:
+            raise PowerBINotFoundError(f"Table '{table}' was not found.", details={"table": table})
+        column = find_named(target_table.Columns, name)
+        if column is None:
+            raise PowerBINotFoundError(
+                f"Column '{table}[{name}]' was not found.",
+                details={"table": table, "column": name},
+            )
+        if find_named(target_table.Columns, new_name) is not None and new_name.casefold() != name.casefold():
+            raise PowerBIDuplicateError(
+                f"Column '{table}[{new_name}]' already exists.",
+                details={"table": table, "new_name": new_name},
+            )
+        column.Name = new_name
+        return {"rename": {"table": table, "column_old_name": name, "column_new_name": new_name}}
+
+    payload = manager.execute_write("rename_column", _mutator)
+    return ok(
+        f"Column '{table}[{name}]' renamed to '{table}[{new_name}]'.",
+        rename=payload["rename"],
         save_result=payload["save_result"],
         connection=payload["connection"],
     )

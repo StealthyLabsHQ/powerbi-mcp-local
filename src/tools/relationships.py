@@ -120,7 +120,11 @@ def pbi_create_relationship_tool(
         from_cardinality, to_cardinality = _map_cardinality(tom, cardinality)
         relationship.FromCardinality = from_cardinality
         relationship.ToCardinality = to_cardinality
-        relationship.CrossFilteringBehavior = _map_direction(tom, direction)
+        # 1:1 relationships must use BothDirections (SSAS hard requirement).
+        effective_direction = direction
+        if cardinality.strip().casefold() == "onetoone" and direction.strip().casefold() in {"onedirection", "single", "singledirection"}:
+            effective_direction = "bothDirections"
+        relationship.CrossFilteringBehavior = _map_direction(tom, effective_direction)
 
         model.Relationships.Add(relationship)
         return {
@@ -145,12 +149,148 @@ def pbi_create_relationship_tool(
     )
 
 
+def _find_relationship(model: Any, *, name: str | None, from_table: str | None, from_column: str | None, to_table: str | None, to_column: str | None) -> Any:
+    for relationship in model.Relationships:
+        if name and str(relationship.Name).casefold() == name.casefold():
+            return relationship
+        if from_table and from_column and to_table and to_column:
+            fc = relationship.FromColumn
+            tc = relationship.ToColumn
+            if (
+                str(fc.Table.Name).casefold() == from_table.casefold()
+                and str(fc.Name).casefold() == from_column.casefold()
+                and str(tc.Table.Name).casefold() == to_table.casefold()
+                and str(tc.Name).casefold() == to_column.casefold()
+            ):
+                return relationship
+    return None
+
+
+def pbi_delete_relationship_tool(
+    manager: Any,
+    *,
+    name: str | None = None,
+    from_table: str | None = None,
+    from_column: str | None = None,
+    to_table: str | None = None,
+    to_column: str | None = None,
+) -> dict[str, Any]:
+    """Delete a relationship by name or by endpoint columns."""
+    if not name and not (from_table and from_column and to_table and to_column):
+        raise PowerBIValidationError(
+            "Provide either 'name' or all of from_table/from_column/to_table/to_column.",
+        )
+    for value in (name, from_table, from_column, to_table, to_column):
+        if value:
+            validate_model_object_name(value)
+
+    def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        relationship = _find_relationship(
+            model,
+            name=name,
+            from_table=from_table,
+            from_column=from_column,
+            to_table=to_table,
+            to_column=to_column,
+        )
+        if relationship is None:
+            raise PowerBINotFoundError(
+                "Relationship not found.",
+                details={
+                    "name": name,
+                    "from_table": from_table,
+                    "from_column": from_column,
+                    "to_table": to_table,
+                    "to_column": to_column,
+                },
+            )
+        deleted_name = str(relationship.Name)
+        model.Relationships.Remove(relationship)
+        return {"deleted_relationship": {"name": deleted_name}}
+
+    payload = manager.execute_write("delete_relationship", _mutator)
+    return ok(
+        f"Relationship '{payload['deleted_relationship']['name']}' deleted successfully.",
+        deleted_relationship=payload["deleted_relationship"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
+def pbi_update_relationship_tool(
+    manager: Any,
+    *,
+    name: str | None = None,
+    from_table: str | None = None,
+    from_column: str | None = None,
+    to_table: str | None = None,
+    to_column: str | None = None,
+    cardinality: str | None = None,
+    direction: str | None = None,
+    is_active: bool | None = None,
+    new_name: str | None = None,
+) -> dict[str, Any]:
+    """Update properties of an existing relationship (cardinality, direction, is_active, name)."""
+    if not name and not (from_table and from_column and to_table and to_column):
+        raise PowerBIValidationError(
+            "Provide either 'name' or all of from_table/from_column/to_table/to_column.",
+        )
+    for value in (name, from_table, from_column, to_table, to_column, new_name):
+        if value:
+            validate_model_object_name(value)
+    if cardinality is None and direction is None and is_active is None and new_name is None:
+        raise PowerBIValidationError(
+            "Specify at least one of cardinality, direction, is_active, new_name.",
+        )
+
+    def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        tom = manager.tom
+        relationship = _find_relationship(
+            model,
+            name=name,
+            from_table=from_table,
+            from_column=from_column,
+            to_table=to_table,
+            to_column=to_column,
+        )
+        if relationship is None:
+            raise PowerBINotFoundError("Relationship not found.", details={"name": name})
+
+        if cardinality is not None:
+            from_card, to_card = _map_cardinality(tom, cardinality)
+            relationship.FromCardinality = from_card
+            relationship.ToCardinality = to_card
+        if direction is not None:
+            relationship.CrossFilteringBehavior = _map_direction(tom, direction)
+        if is_active is not None:
+            relationship.IsActive = is_active
+        if new_name is not None:
+            relationship.Name = new_name
+
+        return {
+            "relationship": {
+                "name": str(relationship.Name),
+                "cardinality": cardinality,
+                "direction": direction,
+                "is_active": bool(relationship.IsActive),
+            }
+        }
+
+    payload = manager.execute_write("update_relationship", _mutator)
+    return ok(
+        f"Relationship '{payload['relationship']['name']}' updated successfully.",
+        relationship=payload["relationship"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
 def _map_cardinality(tom: Any, cardinality: str) -> tuple[Any, Any]:
     token = cardinality.strip().casefold()
     enum_cls = tom.RelationshipEndCardinality
-    if token == "onetomany":
-        return enum_cls.One, enum_cls.Many
-    if token == "manytoone":
+    # Tabular convention: the "from" side is always the FK ("many"); the "to"
+    # side is the lookup ("one"). Both user-facing labels map to the same pair.
+    if token in {"onetomany", "manytoone"}:
         return enum_cls.Many, enum_cls.One
     if token == "onetoone":
         return enum_cls.One, enum_cls.One

@@ -404,6 +404,33 @@ class PowerBIConnectionManager:
             self._disconnect_locked()
         return ok("Disconnected from Power BI Desktop.")
 
+    def refresh_metadata(self) -> dict[str, Any]:
+        """Reload TOM schema from the server without dropping the connection.
+
+        Returns the new database version (if exposed by TOM) so callers can detect stale caches.
+        """
+        with self._lock:
+            self._ensure_connected_locked()
+            assert self._state is not None
+            server = self._state.tom_server
+            database = self._state.database
+            previous_version = serialize_value(getattr(database, "Version", None))
+            try:
+                server.Refresh(database)
+            except TypeError:
+                # Some TOM versions expect enum flags — fall back to simple Refresh()
+                database.Refresh()
+            except Exception as exc:
+                raise self._translate_exception(exc, "refresh_metadata") from exc
+            current_version = serialize_value(getattr(database, "Version", None))
+            changed = previous_version != current_version
+            return {
+                "changed": changed,
+                "previous_version": previous_version,
+                "current_version": current_version,
+                "database": str(database.Name),
+            }
+
     @property
     def tom(self) -> Any:
         """Expose the TOM namespace to tool modules."""
@@ -491,10 +518,16 @@ class PowerBIConnectionManager:
         query: str,
         *,
         max_rows: int = 1000,
+        timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         """Execute a DAX or DMV query through ADOMD and return JSON rows."""
         if max_rows < 1:
             raise PowerBIValidationError("max_rows must be >= 1", details={"max_rows": max_rows})
+        if timeout_seconds is not None and timeout_seconds < 0:
+            raise PowerBIValidationError(
+                "timeout_seconds must be >= 0 (0 disables the timeout).",
+                details={"timeout_seconds": timeout_seconds},
+            )
 
         def _execute(state: ConnectionState) -> dict[str, Any]:
             if not state.adomd_available or state.adomd_connection is None:
@@ -506,8 +539,12 @@ class PowerBIConnectionManager:
 
             backend = state.adomd_backend or "unknown"
             if backend.startswith("pyadomd"):
-                return self._query_with_pyadomd(state.adomd_connection, query, max_rows)
-            return self._query_with_pythonnet(state.adomd_connection, query, max_rows)
+                return self._query_with_pyadomd(
+                    state.adomd_connection, query, max_rows, timeout_seconds=timeout_seconds
+                )
+            return self._query_with_pythonnet(
+                state.adomd_connection, query, max_rows, timeout_seconds=timeout_seconds
+            )
 
         return self.run_read("execute_dax", _execute)
 
@@ -848,8 +885,19 @@ class PowerBIConnectionManager:
                 if name in process_names and exe:
                     dirs.append(str(Path(exe).parent))
 
+        # PATH lookup (covers user installs exposing pbidesktop.exe via PATH)
+        import shutil
+        for exe_name in ("PBIDesktop.exe", "pbidesktoprs.exe"):
+            located = shutil.which(exe_name)
+            if located:
+                dirs.append(str(Path(located).parent))
+
+        # Windows registry lookup (HKLM + HKCU, App Paths and PBI install key)
+        dirs.extend(self._registry_pbi_dirs())
+
         program_files = os.getenv("ProgramFiles", r"C:\Program Files")
         program_files_x86 = os.getenv("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        local_app = os.getenv("LOCALAPPDATA", "")
         dirs.extend(
             [
                 os.path.join(program_files, "Microsoft Power BI Desktop", "bin"),
@@ -858,6 +906,23 @@ class PowerBIConnectionManager:
                 os.path.join(program_files_x86, "Microsoft Power BI Desktop RS", "bin"),
             ]
         )
+        # Microsoft Store install (WindowsApps is ACL-restricted but readable for DLL load)
+        store_roots = [
+            os.path.join(program_files, "WindowsApps"),
+            os.path.join(local_app, "Microsoft", "WindowsApps") if local_app else "",
+        ]
+        for store_root in store_roots:
+            if not store_root or not os.path.isdir(store_root):
+                continue
+            try:
+                for entry in os.listdir(store_root):
+                    if entry.startswith("Microsoft.MicrosoftPowerBIDesktop"):
+                        dirs.append(os.path.join(store_root, entry, "bin"))
+            except (PermissionError, OSError):
+                continue
+        # User-scope install (winget/Scoop often target LocalAppData\Programs)
+        if local_app:
+            dirs.append(os.path.join(local_app, "Programs", "Microsoft Power BI Desktop", "bin"))
         # ADOMD.NET client libraries installed separately
         for adomd_ver in ("160", "150", "140"):
             dirs.append(os.path.join(program_files, "Microsoft.NET", "ADOMD.NET", adomd_ver))
@@ -873,6 +938,40 @@ class PowerBIConnectionManager:
                 deduped.append(resolved)
                 seen.add(resolved)
         return deduped
+
+    def _registry_pbi_dirs(self) -> list[str]:
+        """Query Windows registry for Power BI Desktop install locations."""
+        if os.name != "nt":
+            return []
+        try:
+            import winreg  # type: ignore[import-not-found]
+        except ImportError:
+            return []
+
+        found: list[str] = []
+        probes = [
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Microsoft Power BI Desktop", "InstallLocation"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Microsoft Power BI Desktop", "InstallLocation"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Microsoft Power BI Desktop", "InstallLocation"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\PBIDesktop.exe", None),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\PBIDesktop.exe", None),
+        ]
+        for hive, subkey, value_name in probes:
+            try:
+                with winreg.OpenKey(hive, subkey) as key:
+                    value, _ = winreg.QueryValueEx(key, value_name) if value_name else winreg.QueryValueEx(key, "")
+            except (FileNotFoundError, OSError):
+                continue
+            if not value:
+                continue
+            candidate = Path(str(value).strip('"'))
+            if candidate.suffix.lower() == ".exe":
+                candidate = candidate.parent
+            found.append(str(candidate))
+            bin_dir = candidate / "bin"
+            if bin_dir.is_dir():
+                found.append(str(bin_dir))
+        return found
 
     def _add_dll_search_path(self, directory: str) -> None:
         if directory in self._dll_search_paths:
@@ -912,8 +1011,22 @@ class PowerBIConnectionManager:
             raise PowerBIConnectionError("No user model database was found on the Power BI instance.")
         return candidates[0]
 
-    def _query_with_pyadomd(self, connection: Any, query: str, max_rows: int) -> dict[str, Any]:
+    def _query_with_pyadomd(
+        self,
+        connection: Any,
+        query: str,
+        max_rows: int,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
         cursor = connection.cursor()
+        if timeout_seconds is not None:
+            inner_cmd = getattr(cursor, "command", None) or getattr(cursor, "_command", None)
+            if inner_cmd is not None and hasattr(inner_cmd, "CommandTimeout"):
+                try:
+                    inner_cmd.CommandTimeout = int(timeout_seconds)
+                except Exception:
+                    pass
         try:
             cursor.execute(query)
             columns = []
@@ -959,9 +1072,21 @@ class PowerBIConnectionManager:
             except Exception:
                 pass
 
-    def _query_with_pythonnet(self, connection: Any, query: str, max_rows: int) -> dict[str, Any]:
+    def _query_with_pythonnet(
+        self,
+        connection: Any,
+        query: str,
+        max_rows: int,
+        *,
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
         assert self._adomd_client is not None
         command = self._adomd_client.AdomdCommand(query, connection)
+        if timeout_seconds is not None:
+            try:
+                command.CommandTimeout = int(timeout_seconds)
+            except Exception:
+                pass
         reader = None
         try:
             reader = command.ExecuteReader()

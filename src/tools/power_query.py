@@ -107,7 +107,11 @@ def _get_target_partition(model: Any, table_name: str, partition_name: str | Non
             f"Table '{table_name}' has multiple partitions. Specify partition_name explicitly.",
             details={"table": table_name, "partitions": [str(item.Name) for item in table.Partitions]},
         )
-    return table, table.Partitions[0]
+    # Avoid int indexing on the .NET collection (which expects a String name);
+    # iterate instead and return the first partition.
+    for partition in table.Partitions:
+        return table, partition
+    raise PowerBINotFoundError(f"Table '{table_name}' has no partitions.", details={"table": table_name})
 
 
 def _ensure_m_supported(database: Any) -> None:
@@ -197,12 +201,15 @@ def _build_csv_m(
             details={"quote_style": quote_style},
         )
     final_step = "Promoted" if promote_headers else "Source"
-    steps = [
-        "    Source = Csv.Document(",
-        f"        File.Contents({_m_string(csv_path)}),",
-        f"        [Delimiter={_m_string(delimiter)}, Encoding={encoding}, QuoteStyle=QuoteStyle.{token.title()}]",
-        "    )",
-    ]
+    # Each top-level let step is a single string; steps are joined by ",\n".
+    # The Csv.Document call spans multiple lines INSIDE one step (no comma between its lines).
+    csv_doc_step = (
+        "    Source = Csv.Document(\n"
+        f"        File.Contents({_m_string(csv_path)}),\n"
+        f"        [Delimiter={_m_string(delimiter)}, Encoding={encoding}, QuoteStyle=QuoteStyle.{token.title()}]\n"
+        "    )"
+    )
+    steps = [csv_doc_step]
     if promote_headers:
         steps.append("    Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true])")
     return "let\n" + ",\n".join(steps) + f"\nin\n    {final_step}"
@@ -470,7 +477,7 @@ def pbi_bulk_import_excel_tool(
                     }
                 )
                 continue
-            partition = table.Partitions[0]
+            partition = next(iter(table.Partitions))
             try:
                 m_expression = _build_excel_m(workbook_path, sheet_name, promote_headers)
                 _validate_m_expression(m_expression)

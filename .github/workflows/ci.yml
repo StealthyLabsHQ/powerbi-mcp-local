@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  offline-tests:
+    name: Offline tests (${{ matrix.os }} / py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies (without Windows-only backends)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          # Linux: skip pythonnet + pbi-pyadomd (require .NET, Windows-only PBI Desktop)
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            pip install "mcp[cli]~=1.27.0" openpyxl~=3.1.5 psutil~=7.2.2 pytest~=8.3
+          else
+            pip install -r requirements.txt
+            pip install pytest~=8.3
+          fi
+
+      - name: Syntax + import smoke test
+        shell: bash
+        run: |
+          python -c "
+          import ast, pathlib
+          for p in pathlib.Path('src').rglob('*.py'):
+              ast.parse(p.read_text(encoding='utf-8'))
+          print('syntax OK')
+          "
+
+      - name: Run offline tests
+        shell: bash
+        run: pytest tests/test_security.py tests/test_security_regressions_local.py -v

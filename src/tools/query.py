@@ -57,6 +57,7 @@ def pbi_execute_dax_tool(
     *,
     query: str,
     max_rows: int = 1000,
+    timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Execute a DAX or DMV query."""
     _validate_dax_query(query)
@@ -66,11 +67,12 @@ def pbi_execute_dax_tool(
             f"max_rows {max_rows} exceeds the configured limit of {limit}.",
             details={"max_rows": max_rows, "limit": limit},
         )
-    result = manager.run_adomd_query(query, max_rows=max_rows)
+    result = manager.run_adomd_query(query, max_rows=max_rows, timeout_seconds=timeout_seconds)
     return ok(
         "Query executed successfully.",
         query=query,
         max_rows=max_rows,
+        timeout_seconds=timeout_seconds,
         columns=result["columns"],
         rows=result["rows"],
         row_count=result["row_count"],
@@ -252,7 +254,12 @@ def pbi_execute_dax_as_role_tool(
     )
 
 
-def pbi_trace_query_tool(manager: Any, *, query: str) -> dict[str, Any]:
+def pbi_trace_query_tool(
+    manager: Any,
+    *,
+    query: str,
+    timeout_seconds: int | None = None,
+) -> dict[str, Any]:
     """Execute a DAX query and return result rows with timing diagnostics."""
     _validate_dax_query(query)
     max_rows = min(1000, SECURITY.policy().max_rows_for_dax)
@@ -260,7 +267,7 @@ def pbi_trace_query_tool(manager: Any, *, query: str) -> dict[str, Any]:
     start = time.perf_counter()
     if stopwatch is not None:
         stopwatch.Start()
-    result = manager.run_adomd_query(query, max_rows=max_rows)
+    result = manager.run_adomd_query(query, max_rows=max_rows, timeout_seconds=timeout_seconds)
     duration_ms = int((time.perf_counter() - start) * 1000)
     if stopwatch is not None:
         stopwatch.Stop()
@@ -281,6 +288,90 @@ def pbi_trace_query_tool(manager: Any, *, query: str) -> dict[str, Any]:
         row_count=result["row_count"],
         truncated=result["truncated"],
         diagnostics=diagnostics,
+    )
+
+
+def pbi_validate_dax_tool(
+    manager: Any,
+    *,
+    expression: str,
+    kind: str = "scalar",
+) -> dict[str, Any]:
+    """Parse-check a DAX expression by running a zero/one-row probe and catching errors.
+
+    kind='scalar' wraps the expression with EVALUATE ROW("v", <expr>).
+    kind='table'  wraps the expression with EVALUATE TOPN(0, <expr>).
+    """
+    if not expression or not expression.strip():
+        raise PowerBIValidationError("expression is required.")
+    policy = SECURITY.policy()
+    validate_query_text(expression, max_length=policy.max_query_length)
+    normalized_kind = kind.strip().casefold()
+    if normalized_kind not in {"scalar", "table"}:
+        raise PowerBIValidationError(
+            "kind must be 'scalar' or 'table'.", details={"kind": kind}
+        )
+
+    if normalized_kind == "scalar":
+        probe = f'EVALUATE ROW("__probe", {expression})'
+    else:
+        probe = f"EVALUATE TOPN(0, {expression})"
+
+    try:
+        manager.run_adomd_query(probe, max_rows=1)
+    except PowerBIError as exc:
+        return ok(
+            "DAX expression is invalid.",
+            valid=False,
+            kind=normalized_kind,
+            error=flatten_exception_message(exc),
+            error_code=getattr(exc, "code", "validation_error"),
+        )
+    return ok(
+        "DAX expression is valid.",
+        valid=True,
+        kind=normalized_kind,
+    )
+
+
+def pbi_measure_dependencies_tool(
+    manager: Any,
+    *,
+    measure: str | None = None,
+    table: str | None = None,
+) -> dict[str, Any]:
+    """Return calc-dependency graph rows (source → referenced object) from DISCOVER_CALC_DEPENDENCY."""
+    if measure is not None:
+        validate_model_object_name(measure)
+    if table is not None:
+        validate_model_object_name(table)
+
+    query = "SELECT * FROM $SYSTEM.DISCOVER_CALC_DEPENDENCY"
+    result = manager.run_adomd_query(query, max_rows=SECURITY.policy().max_rows_for_dax)
+
+    rows = result.get("rows", [])
+    if measure is not None or table is not None:
+        def _match(row: dict[str, Any]) -> bool:
+            name_match = True
+            table_match = True
+            if measure is not None:
+                obj = str(row.get("OBJECT", "") or row.get("Object", ""))
+                name_match = obj.casefold() == measure.casefold()
+            if table is not None:
+                tbl = str(row.get("TABLE", "") or row.get("Table", ""))
+                table_match = tbl.casefold() == table.casefold()
+            return name_match and table_match
+
+        rows = [row for row in rows if _match(row)]
+
+    return ok(
+        "Measure dependencies retrieved successfully.",
+        measure=measure,
+        table=table,
+        columns=result.get("columns", []),
+        rows=rows,
+        row_count=len(rows),
+        truncated=result.get("truncated", False),
     )
 
 
