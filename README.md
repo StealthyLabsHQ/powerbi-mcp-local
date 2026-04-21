@@ -19,9 +19,9 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 
 ## Quick Links
 
-| Start | Setup | Demo | Tools | Security | FR |
-| --- | --- | --- | --- | --- | --- |
-| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-80-tools) | [Security](#security-en) | [Version française](#francais) |
+| Start | Setup | Demo | Tools | Security |
+| --- | --- | --- | --- | --- |
+| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-80-tools) | [Security](#security-en) |
 
 <a id="demo-60s"></a>
 ## Demo (60s)
@@ -319,127 +319,6 @@ pytest -v
 ```
 
 ---
-
-<a id="francais"></a>
-## Français
-
-### Résumé
-
-`powerbi-mcp-local` est un serveur MCP pour automatiser Power BI Desktop en local:
-
-- modèle sémantique (tables, colonnes, mesures, relations)
-- exécution DAX et refresh
-- Power Query (M)
-- pipeline Excel
-- pages/visuels de rapport via `pbi-tools`
-
-### Démarrage rapide (FR)
-
-1. Installer le projet.
-
-```powershell
-git clone https://github.com/StealthyLabsHQ/powerbi-mcp-local.git
-cd powerbi-mcp-local
-pip install -r requirements.txt
-```
-
-2. Ouvrir Power BI Desktop avec un fichier `.pbix`.
-
-3. Vérifier la connexion.
-
-```powershell
-python tests/test_connection.py
-```
-
-4. Lancer le serveur.
-
-```powershell
-python src/server.py
-```
-
-Options:
-
-```powershell
-python src/server.py --transport sse --port 8765
-python src/server.py --readonly
-```
-
-### Configuration client MCP (FR)
-
-Configuration `stdio`:
-
-```json
-{
-  "mcpServers": {
-    "powerbi": {
-      "command": "python",
-      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server.py"]
-    }
-  }
-}
-```
-
-Configuration SSE:
-
-```powershell
-python src/server.py --transport sse --port 8765
-```
-
-Endpoint:
-
-```text
-http://localhost:8765/sse
-```
-
-Guides:
-- [docs/SETUP.md](docs/SETUP.md)
-- [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)
-
-### Exemples de prompts (FR)
-
-- `Connecte-toi à Power BI et liste toutes les tables avec leurs colonnes.`
-- `Crée une mesure Total Sales dans la table Sales.`
-- `Exécute cette requête DAX et affiche les 20 premières lignes.`
-- `Extrait le rapport, ajoute une page et 3 visuels, puis recompile.`
-
-### Catalogue des outils (FR)
-
-Le projet expose **80 tools MCP**.
-Les noms et catégories sont identiques à la section anglaise:
-
-- Core model discovery (7)
-- Model mutations (14)
-- Query and import (7)
-- Power Query (M) tools (7)
-- Row-level security (6)
-- Calculation groups (3)
-- Unified visual dispatcher (1)
-- Excel tools (13)
-- Report and visual tools (22)
-
-Voir le détail complet ici: [Tool catalog (EN)](#tool-catalog-en-80-tools)
-
-### Dépannage (FR)
-
-| Problème | Correctif |
-| --- | --- |
-| `No module named 'clr'` | Installer .NET 6+ puis redémarrer le terminal |
-| `No running PBI Desktop instance found` | Ouvrir un `.pbix` dans Power BI Desktop |
-| `pbi-tools not found` | Ajouter au `PATH` ou définir `PBI_TOOLS_PATH` |
-| `PermissionError` sur `.xlsx` | Fermer Excel (fichier verrouillé) |
-| Chemin bloqué | Configurer `PBI_MCP_ALLOWED_DIRS` |
-
-### Sécurité (FR)
-
-Le middleware de sécurité couvre:
-- restrictions de chemins locaux
-- protections sur requêtes DAX/DMV
-- protections SSRF pour Power Query
-- rédaction d'exports sensibles
-- protections zip
-- audit des appels tools
-
-Détails: [SECURITY.md](SECURITY.md)
 
 ## Repository layout
 
