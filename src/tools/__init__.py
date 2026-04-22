@@ -17,6 +17,7 @@ from .excel import (
 )
 from .measures import (
     pbi_create_measure_tool,
+    pbi_create_measures_tool,
     pbi_delete_measure_tool,
     pbi_import_dax_file_tool,
     pbi_list_measures_tool,
@@ -36,6 +37,7 @@ from .model import (
     pbi_refresh_metadata_tool,
     pbi_rename_column_tool,
     pbi_rename_table_tool,
+    pbi_validate_model_tool,
 )
 from .power_query import (
     pbi_bulk_import_excel_tool,
@@ -147,10 +149,12 @@ __all__ = [
     "pbi_model_info_tool",
     "pbi_refresh_tool",
     "pbi_import_dax_file_tool",
+    "pbi_create_measures_tool",
     "pbi_create_table_tool",
     "pbi_create_column_tool",
     "pbi_set_format_tool",
     "pbi_export_model_tool",
+    "pbi_validate_model_tool",
     "pbi_get_power_query_tool",
     "pbi_list_power_queries_tool",
     "pbi_set_power_query_tool",

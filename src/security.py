@@ -35,6 +35,7 @@ READ_TOOLS = {
     "pbi_refresh_metadata",
     "pbi_get_power_query",
     "pbi_list_power_queries",
+    "pbi_validate_model",
     "excel_list_sheets",
     "excel_read_sheet",
     "excel_read_cell",
@@ -47,6 +48,7 @@ READ_TOOLS = {
 
 WRITE_TOOLS = {
     "pbi_create_measure",
+    "pbi_create_measures",
     "pbi_create_relationship",
     "pbi_update_relationship",
     "pbi_rename_table",

@@ -108,7 +108,7 @@ def pbi_list_tables_tool(
             )
         return {"tables": tables, "connection": state.snapshot()}
 
-    payload = manager.run_read("list_tables", _reader)
+    payload = manager.cached_run_read(f"list_tables:h{include_hidden}", "list_tables", _reader)
 
     if include_row_counts:
         for table_payload in payload["tables"]:
@@ -451,5 +451,90 @@ def pbi_create_column_tool(
         column=payload["column"],
         action=payload["action"],
         save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
+def pbi_validate_model_tool(
+    manager: Any,
+    *,
+    include_warnings: bool = True,
+) -> dict[str, Any]:
+    """Audit the model for common issues: empty expressions, missing format strings, orphan tables, duplicate measure names."""
+
+    def _reader(state: Any) -> dict[str, Any]:
+        model = state.database.Model
+        issues: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        tables_with_rels: set[str] = set()
+        for rel in model.Relationships:
+            try:
+                tables_with_rels.add(str(rel.FromTable.Name))
+                tables_with_rels.add(str(rel.ToTable.Name))
+            except Exception:
+                pass
+
+        measure_name_index: dict[str, list[str]] = {}
+
+        for table in model.Tables:
+            table_name = str(table.Name)
+            is_hidden = bool(getattr(table, "IsHidden", False))
+            is_calc_group = bool(getattr(table, "CalculationGroup", None))
+            has_measures = False
+
+            for measure in table.Measures:
+                has_measures = True
+                m_name = str(measure.Name)
+                m_expr = str(measure.Expression or "").strip()
+                m_format = str(getattr(measure, "FormatString", "") or "").strip()
+                m_hidden = bool(getattr(measure, "IsHidden", False))
+
+                if not m_expr:
+                    issues.append({
+                        "type": "empty_expression",
+                        "object": f"{table_name}[{m_name}]",
+                        "message": "Measure has an empty DAX expression.",
+                    })
+
+                if not m_format and not m_hidden and not is_hidden and include_warnings:
+                    warnings.append({
+                        "type": "missing_format_string",
+                        "object": f"{table_name}[{m_name}]",
+                        "message": "Visible measure has no format string set.",
+                    })
+
+                measure_name_index.setdefault(m_name.casefold(), []).append(table_name)
+
+            if not is_hidden and not is_calc_group and table_name not in tables_with_rels and not has_measures and include_warnings:
+                warnings.append({
+                    "type": "orphan_table",
+                    "object": table_name,
+                    "message": "Table has no relationships and no measures — may be unused.",
+                })
+
+        for m_name_lower, tables_list in measure_name_index.items():
+            if len(tables_list) > 1:
+                issues.append({
+                    "type": "duplicate_measure_name",
+                    "object": m_name_lower,
+                    "message": f"Measure name exists in multiple tables: {', '.join(tables_list)}.",
+                })
+
+        return {
+            "issues": issues,
+            "warnings": warnings,
+            "connection": state.snapshot(),
+        }
+
+    payload = manager.run_read("validate_model", _reader)
+    issue_count = len(payload["issues"])
+    warning_count = len(payload["warnings"])
+    return ok(
+        f"Model audit: {issue_count} issue(s), {warning_count} warning(s).",
+        issues=payload["issues"],
+        issue_count=issue_count,
+        warnings=payload["warnings"],
+        warning_count=warning_count,
         connection=payload["connection"],
     )

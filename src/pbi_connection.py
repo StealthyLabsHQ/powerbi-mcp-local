@@ -349,6 +349,8 @@ class PowerBIConnectionManager:
         self._adomd_client: Any | None = None
         self._dll_search_paths: set[str] = set()
         self._dll_directory_handles: list[Any] = []
+        self._write_generation: int = 0
+        self._read_cache: dict[str, tuple[int, Any]] = {}
 
     def list_instances(self) -> list[dict[str, Any]]:
         """Return discovered Power BI Desktop instances."""
@@ -424,6 +426,8 @@ class PowerBIConnectionManager:
                 raise self._translate_exception(exc, "refresh_metadata") from exc
             current_version = serialize_value(getattr(database, "Version", None))
             changed = previous_version != current_version
+            self._write_generation += 1
+            self._read_cache.clear()
             return {
                 "changed": changed,
                 "previous_version": previous_version,
@@ -447,6 +451,23 @@ class PowerBIConnectionManager:
             self._ensure_connected_locked()
             assert self._state is not None
             yield self._state
+
+    def cached_run_read(
+        self,
+        cache_key: str,
+        operation_name: str,
+        reader: Callable[[ConnectionState], Any],
+    ) -> Any:
+        """Like run_read but caches results until the next write, reconnect, or metadata refresh."""
+        with self._lock:
+            cached = self._read_cache.get(cache_key)
+            if cached is not None and cached[0] == self._write_generation:
+                self._logger.debug("Cache hit: %s (gen=%d)", cache_key, self._write_generation)
+                return cached[1]
+        result = self.run_read(operation_name, reader)
+        with self._lock:
+            self._read_cache[cache_key] = (self._write_generation, result)
+        return result
 
     def run_read(self, operation_name: str, reader: Callable[[ConnectionState], Any]) -> Any:
         """Run a read operation with one automatic reconnect on connection loss."""
@@ -504,6 +525,8 @@ class PowerBIConnectionManager:
             try:
                 payload = mutator(self._state, database, model)
                 save_result = model.SaveChanges()
+                self._write_generation += 1
+                self._read_cache.clear()
                 payload["save_result"] = serialize_value(save_result)
                 payload["connection"] = self._state.snapshot()
                 return payload
@@ -1183,6 +1206,8 @@ class PowerBIConnectionManager:
             pass
 
         self._state = None
+        self._write_generation += 1
+        self._read_cache.clear()
 
     def _is_port_open(self, port: int) -> bool:
         try:

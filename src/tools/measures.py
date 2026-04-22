@@ -53,7 +53,7 @@ def pbi_list_measures_tool(
         measures.sort(key=lambda item: (item["table"].casefold(), item["name"].casefold()))
         return {"measures": measures, "connection": state.snapshot()}
 
-    payload = manager.run_read("list_measures", _reader)
+    payload = manager.cached_run_read(f"list_measures:h{include_hidden}", "list_measures", _reader)
     return ok(
         "Measures listed successfully.",
         measures=payload["measures"],
@@ -330,6 +330,102 @@ def pbi_import_dax_file_tool(
         updated=updated,
         failed=failed,
         results=results,
+    )
+
+
+def pbi_create_measures_tool(
+    manager: Any,
+    *,
+    table: str,
+    measures: list[dict[str, Any]],
+    overwrite: bool = True,
+    stop_on_error: bool = False,
+) -> dict[str, Any]:
+    """Batch-create or update multiple DAX measures with a single SaveChanges call.
+
+    Each item in *measures* must have at minimum: name, expression.
+    Optional keys: format_string, description, display_folder, is_hidden.
+    """
+    validate_model_object_name(table)
+    if not measures:
+        raise PowerBIValidationError("At least one measure is required.")
+
+    for item in measures:
+        validate_measure_name(item.get("name", ""))
+        validate_model_expression(item.get("expression", ""), kind="measure expression")
+
+    def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        target_table = find_named(model.Tables, table)
+        if target_table is None:
+            raise PowerBINotFoundError(f"Table '{table}' was not found.", details={"table": table})
+
+        results: list[dict[str, Any]] = []
+        created = 0
+        updated = 0
+        failed = 0
+
+        for item in measures:
+            name = item.get("name", "")
+            expression = item.get("expression", "")
+            format_string = str(item.get("format_string", "") or "")
+            description = str(item.get("description", "") or "")
+            display_folder = str(item.get("display_folder", "") or "")
+            is_hidden = bool(item.get("is_hidden", False))
+
+            try:
+                existing = find_named(target_table.Measures, name)
+                action = "created"
+                if existing is not None and not overwrite:
+                    raise PowerBIDuplicateError(
+                        f"Measure '{table}[{name}]' already exists.",
+                        details={"table": table, "measure": name},
+                    )
+                if existing is None:
+                    measure = manager.tom.Measure()
+                    measure.Name = name
+                    target_table.Measures.Add(measure)
+                else:
+                    measure = existing
+                    action = "updated"
+
+                measure.Expression = expression
+                if format_string:
+                    measure.FormatString = format_string
+                if description:
+                    measure.Description = description
+                if display_folder:
+                    measure.DisplayFolder = display_folder
+                measure.IsHidden = is_hidden
+
+                if action == "created":
+                    created += 1
+                else:
+                    updated += 1
+                results.append({"name": name, "ok": True, "action": action})
+            except Exception as exc:
+                failed += 1
+                results.append({"name": name, "ok": False, "error": error_payload(exc)["error"]})
+                if stop_on_error:
+                    break
+
+        return {
+            "results": results,
+            "created": created,
+            "updated": updated,
+            "failed": failed,
+            "table": table,
+        }
+
+    payload = manager.execute_write("create_measures_batch", _mutator)
+    return ok(
+        f"Batch: {payload['created']} created, {payload['updated']} updated, {payload['failed']} failed in '{table}'.",
+        table=payload["table"],
+        results=payload["results"],
+        created=payload["created"],
+        updated=payload["updated"],
+        failed=payload["failed"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
     )
 
 

@@ -40,7 +40,7 @@ def pbi_list_relationships_tool(manager: Any) -> dict[str, Any]:
         relationships.sort(key=lambda item: item["name"].casefold())
         return {"relationships": relationships, "connection": state.snapshot()}
 
-    payload = manager.run_read("list_relationships", _reader)
+    payload = manager.cached_run_read("list_relationships", "list_relationships", _reader)
     return ok(
         "Relationships listed successfully.",
         relationships=payload["relationships"],

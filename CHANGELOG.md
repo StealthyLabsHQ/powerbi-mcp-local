@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented here.
 
+## [0.7.0] — 2026-04-22 — Schema cache + batch measures + model audit + MCP Resources & Prompts
+
+### Added — new tools (+2)
+
+- `pbi_create_measures` — batch create/update multiple DAX measures in a single `SaveChanges()` call; accepts a list of `{name, expression, format_string?, description?, display_folder?, is_hidden?}` items.
+- `pbi_validate_model` — model audit: reports empty expressions, visible measures without format strings, orphan tables (no relationships + no measures), and duplicate measure names across tables.
+
+### Added — MCP Resources (3)
+
+- `powerbi://model/schema` — live full model snapshot (tables + measures + relationships)
+- `powerbi://model/measures` — live measures list
+- `powerbi://model/relationships` — live relationships list
+
+These are fetched on-demand by the MCP client without burning a tool call.
+
+### Added — MCP Prompts (8)
+
+Ready-to-use workflow prompts surfaced natively to any MCP client:
+`model_audit`, `time_intelligence_kit`, `star_schema_builder`, `rls_setup`, `dead_measure_scan`, `bulk_measure_format_fix`, `excel_to_pbi_pipeline`, `model_snapshot_export`.
+
+### Performance — schema read cache
+
+`pbi_list_tables`, `pbi_list_measures`, `pbi_list_relationships` now use a write-generation cache inside `PowerBIConnectionManager`. Results are served from memory until the next write (`execute_write`), reconnect, or `pbi_refresh_metadata`. Typical speedup for repeated reads: 10–50× (avoids TOM iteration).
+
+---
+
 ## [0.6.0] — 2026-04-21 — Full CRUD + RLS + Calc Groups + Infra (80 tools)
 
 Covers three work streams ("Lot 1/2/3") and end-to-end live validation against a real Power BI Desktop model (78/80 tools exercised; 2 hors-portée due to external tooling — `pbi_extract_report`/`pbi_compile_report` rely on an `extract` action that pbi-tools.core 1.2.0 no longer ships).
