@@ -71,6 +71,7 @@ WRITE_TOOLS = {
     "pbi_create_csv_import_query",
     "pbi_create_folder_import_query",
     "pbi_bulk_import_excel",
+    "pbi_import_excel_workbook",
     "excel_write_cell",
     "excel_write_range",
     "excel_create_sheet",

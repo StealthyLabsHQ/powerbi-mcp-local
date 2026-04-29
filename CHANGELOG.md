@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `pbi_import_excel_workbook` - explicit one-call Excel workbook import tool for Power BI tables.
+
 All notable changes to this project are documented here.
 
 ## [0.7.0] — 2026-04-22 — Schema cache + batch measures + model audit + MCP Resources & Prompts

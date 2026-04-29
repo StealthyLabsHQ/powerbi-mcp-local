@@ -45,6 +45,7 @@ from .power_query import (
     pbi_create_folder_import_query_tool,
     pbi_create_import_query_tool,
     pbi_get_power_query_tool,
+    pbi_import_excel_workbook_tool,
     pbi_list_power_queries_tool,
     pbi_set_power_query_tool,
 )
@@ -162,6 +163,7 @@ __all__ = [
     "pbi_create_csv_import_query_tool",
     "pbi_create_folder_import_query_tool",
     "pbi_bulk_import_excel_tool",
+    "pbi_import_excel_workbook_tool",
     "pbi_extract_report_tool",
     "pbi_compile_report_tool",
     "pbi_patch_layout_tool",
