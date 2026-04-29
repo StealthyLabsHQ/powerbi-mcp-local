@@ -532,6 +532,24 @@ def pbi_bulk_import_excel_tool(
     )
 
 
+def pbi_import_excel_workbook_tool(
+    manager: Any,
+    *,
+    excel_path: str,
+    sheet_table_map: dict[str, str] | None = None,
+    promote_headers: bool = True,
+    refresh_after: bool = True,
+) -> dict[str, Any]:
+    """Import an Excel workbook into Power BI tables in one call."""
+    return pbi_bulk_import_excel_tool(
+        manager,
+        excel_path=excel_path,
+        sheet_table_map=sheet_table_map,
+        promote_headers=promote_headers,
+        refresh_after=refresh_after,
+    )
+
+
 __all__ = [
     "_build_csv_m",
     "_build_excel_m",
@@ -542,6 +560,7 @@ __all__ = [
     "pbi_create_folder_import_query_tool",
     "pbi_create_import_query_tool",
     "pbi_get_power_query_tool",
+    "pbi_import_excel_workbook_tool",
     "pbi_list_power_queries_tool",
     "pbi_set_power_query_tool",
 ]

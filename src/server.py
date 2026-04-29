@@ -58,6 +58,7 @@ from tools import (
     pbi_create_csv_import_query_tool,
     pbi_create_folder_import_query_tool,
     pbi_create_import_query_tool,
+    pbi_import_excel_workbook_tool,
     pbi_add_bar_chart_tool,
     pbi_add_card_tool,
     pbi_add_donut_chart_tool,
@@ -904,6 +905,25 @@ def pbi_bulk_import_excel(
     return _run(
         "pbi_bulk_import_excel",
         pbi_bulk_import_excel_tool,
+        CONNECTION_MANAGER,
+        excel_path=excel_path,
+        sheet_table_map=sheet_table_map,
+        promote_headers=promote_headers,
+        refresh_after=refresh_after,
+    )
+
+
+@mcp.tool()
+def pbi_import_excel_workbook(
+    excel_path: str,
+    sheet_table_map: dict[str, str] | None = None,
+    promote_headers: bool = True,
+    refresh_after: bool = True,
+) -> dict[str, Any]:
+    """Import an Excel workbook into Power BI tables in one call."""
+    return _run(
+        "pbi_import_excel_workbook",
+        pbi_import_excel_workbook_tool,
         CONNECTION_MANAGER,
         excel_path=excel_path,
         sheet_table_map=sheet_table_map,
