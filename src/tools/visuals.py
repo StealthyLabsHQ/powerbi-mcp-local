@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from pbi_connection import PowerBIError, PowerBINotFoundError, PowerBIValidationError, error_payload, ok
 from security import SECURITY, resolve_local_path
+from .model import pbi_model_info_tool
 
 DEFAULT_PAGE_WIDTH = 1280
 DEFAULT_PAGE_HEIGHT = 720
@@ -37,6 +38,18 @@ DEFAULT_VISUAL_SIZES = {
     "gauge": (280, 220),
     "kpi": (260, 140),
     "map": (420, 320),
+}
+VISUAL_FIELD_ROLES = {
+    "card": {"Values"},
+    "clusteredBarChart": {"Category", "Y", "Series"},
+    "lineChart": {"Category", "Y"},
+    "donutChart": {"Category", "Y"},
+    "tableEx": {"Values"},
+    "waterfallChart": {"Category", "Y"},
+    "slicer": {"Values"},
+    "gauge": {"Y", "Goal"},
+    "kpi": {"Value", "Goal"},
+    "map": {"Category", "Y"},
 }
 
 DESIGN_PRESETS: dict[str, dict[str, Any]] = {
@@ -401,6 +414,235 @@ def _build_prototype_query(
     return {"Version": 2, "From": from_entries, "Select": select}
 
 
+def _select_name_map(prototype_query: dict[str, Any]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for entry in prototype_query.get("Select", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("Name", ""))
+        if not name:
+            continue
+        if "Column" in entry:
+            column = entry.get("Column", {})
+            if isinstance(column, dict):
+                prop = str(column.get("Property", ""))
+                if prop:
+                    names[prop.casefold()] = name
+        if "Measure" in entry:
+            measure = entry.get("Measure", {})
+            if isinstance(measure, dict):
+                prop = str(measure.get("Property", ""))
+                if prop:
+                    names[prop.casefold()] = name
+        names[name.casefold()] = name
+    return names
+
+
+def _from_entity_by_alias(prototype_query: dict[str, Any]) -> dict[str, str]:
+    entities: dict[str, str] = {}
+    for entry in prototype_query.get("From", []) or []:
+        if isinstance(entry, dict):
+            entities[str(entry.get("Name", ""))] = str(entry.get("Entity", ""))
+    return entities
+
+
+def _next_alias(existing: set[str]) -> str:
+    index = 0
+    while f"s{index}" in existing:
+        index += 1
+    alias = f"s{index}"
+    existing.add(alias)
+    return alias
+
+
+def _sync_container_query(container: dict[str, Any], prototype_query: dict[str, Any]) -> None:
+    query_payload = _parse_embedded_json(container.get("query"), {})
+    try:
+        commands = query_payload.setdefault("Commands", [])
+        if not commands:
+            commands.append({"SemanticQueryDataShapeCommand": {}})
+        commands[0].setdefault("SemanticQueryDataShapeCommand", {})["Query"] = prototype_query
+        container["query"] = _dump_embedded_json(query_payload)
+    except Exception:
+        container["query"] = _dump_embedded_json(
+            {"Commands": [{"SemanticQueryDataShapeCommand": {"Query": prototype_query}}]}
+        )
+
+
+def _live_model_field_index(manager: Any | None, *, include_hidden: bool) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    if manager is None:
+        return None, {"status": "unavailable", "reason": "manager_not_provided"}
+    try:
+        model = pbi_model_info_tool(manager, include_hidden=include_hidden, include_row_counts=False)
+    except Exception as exc:
+        return None, {"status": "unavailable", "error": error_payload(exc)["error"]}
+    if not model.get("ok"):
+        return None, {"status": "unavailable", "error": model.get("error")}
+
+    columns: set[tuple[str, str]] = set()
+    measures: dict[str, set[str]] = {}
+    for table in model.get("tables", []) or []:
+        table_name = str(table.get("name", ""))
+        for column in table.get("columns", []) or []:
+            columns.add((table_name.casefold(), str(column.get("name", "")).casefold()))
+    for measure in model.get("measures", []) or []:
+        name = str(measure.get("name", ""))
+        table_name = str(measure.get("table", ""))
+        measures.setdefault(name.casefold(), set()).add(table_name.casefold())
+    return {"columns": columns, "measures": measures}, {"status": "available"}
+
+
+def _visual_binding_issues(
+    container: dict[str, Any],
+    page_name: str,
+    measure_home_map: dict[str, str],
+    model_fields: dict[str, Any] | None = None,
+    *,
+    repair: bool = False,
+) -> tuple[list[dict[str, Any]], int]:
+    config = _parse_embedded_json(container.get("config"), {})
+    if not isinstance(config, dict):
+        return ([{"page": page_name, "visual_id": "", "issue": "invalid_config"}], 0)
+    single_visual = config.get("singleVisual", {})
+    if not isinstance(single_visual, dict):
+        return ([], 0)
+    visual_id = str(config.get("name", ""))
+    visual_type = str(single_visual.get("visualType", ""))
+    prototype_query = single_visual.get("prototypeQuery", {})
+    if not isinstance(prototype_query, dict):
+        return ([], 0)
+
+    issues: list[dict[str, Any]] = []
+    repairs = 0
+    select_names = _select_name_map(prototype_query)
+    from_entities = _from_entity_by_alias(prototype_query)
+
+    allowed_roles = VISUAL_FIELD_ROLES.get(visual_type)
+    projections = single_visual.get("projections", {})
+    if isinstance(projections, dict):
+        if repair and visual_type == "gauge" and "Value" in projections and "Y" not in projections:
+            projections["Y"] = projections.pop("Value")
+            issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "projection_role_repaired", "from": "Value", "to": "Y"})
+            repairs += 1
+        for role, items in list(projections.items()):
+            if allowed_roles is not None and role not in allowed_roles:
+                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "unexpected_projection_role", "role": role, "allowed_roles": sorted(allowed_roles)})
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                query_ref = str(item.get("queryRef", ""))
+                expected = select_names.get(query_ref.casefold())
+                if expected is None:
+                    short = _query_ref(query_ref)
+                    expected = select_names.get(short.casefold())
+                if expected is None:
+                    issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "query_ref_not_found", "queryRef": query_ref})
+                    continue
+                if query_ref != expected:
+                    issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "query_ref_mismatch", "queryRef": query_ref, "expected": expected})
+                    if repair:
+                        item["queryRef"] = expected
+                        repairs += 1
+
+    from_entries = prototype_query.get("From", []) or []
+    aliases = {str(entry.get("Name", "")) for entry in from_entries if isinstance(entry, dict)}
+    for entry in prototype_query.get("Select", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        if "Column" in entry:
+            column = entry.get("Column", {})
+            if isinstance(column, dict):
+                column_name = str(column.get("Property", ""))
+                source_ref = column.get("Expression", {}).get("SourceRef", {}) if isinstance(column.get("Expression"), dict) else {}
+                alias = str(source_ref.get("Source", "")) if isinstance(source_ref, dict) else ""
+                table_name = from_entities.get(alias, "")
+                if model_fields is not None and (table_name.casefold(), column_name.casefold()) not in model_fields["columns"]:
+                    issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "column_not_found", "table": table_name, "column": column_name})
+            continue
+        if "Measure" not in entry:
+            continue
+        measure = entry.get("Measure", {})
+        if not isinstance(measure, dict):
+            continue
+        measure_name = str(measure.get("Property", ""))
+        source_ref = measure.get("Expression", {}).get("SourceRef", {}) if isinstance(measure.get("Expression"), dict) else {}
+        alias = str(source_ref.get("Source", "")) if isinstance(source_ref, dict) else ""
+        entity = from_entities.get(alias, "")
+        home_table = measure_home_map.get(measure_name)
+        if model_fields is not None:
+            measure_tables = model_fields["measures"].get(measure_name.casefold(), set())
+            if not measure_tables:
+                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_not_found", "measure": measure_name})
+            elif entity and entity != "$Measures" and entity.casefold() not in measure_tables:
+                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_table_mismatch", "measure": measure_name, "table": entity, "expected_tables": sorted(measure_tables)})
+        if entity == "$Measures":
+            if not home_table:
+                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_unknown", "measure": measure_name})
+                continue
+            if not repair:
+                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_needs_repair", "measure": measure_name, "home_table": home_table})
+                continue
+            same_alias_measures = [
+                str(item.get("Measure", {}).get("Property", ""))
+                for item in prototype_query.get("Select", []) or []
+                if isinstance(item, dict)
+                and isinstance(item.get("Measure"), dict)
+                and item.get("Measure", {}).get("Expression", {}).get("SourceRef", {}).get("Source") == alias
+            ]
+            if all(measure_home_map.get(item) == home_table for item in same_alias_measures):
+                for from_entry in from_entries:
+                    if isinstance(from_entry, dict) and str(from_entry.get("Name", "")) == alias:
+                        from_entry["Entity"] = home_table
+                        break
+            else:
+                new_alias = _next_alias(aliases)
+                from_entries.append({"Name": new_alias, "Entity": home_table})
+                measure.setdefault("Expression", {}).setdefault("SourceRef", {})["Source"] = new_alias
+            issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_repaired", "measure": measure_name, "home_table": home_table})
+            repairs += 1
+
+    if repair and repairs:
+        single_visual["prototypeQuery"] = prototype_query
+        container["config"] = _dump_embedded_json(config)
+        _sync_container_query(container, prototype_query)
+    return issues, repairs
+
+
+def _scan_visual_bindings(
+    layout: dict[str, Any],
+    measure_home_map: dict[str, str],
+    model_fields: dict[str, Any] | None = None,
+    *,
+    page: str | None = None,
+    repair: bool = False,
+) -> tuple[list[dict[str, Any]], int]:
+    issues: list[dict[str, Any]] = []
+    repairs = 0
+    sections = layout.get("sections", []) or []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        section_name = str(section.get("displayName") or section.get("name") or "")
+        if page and page.casefold() not in {str(section.get("name", "")).casefold(), str(section.get("displayName", "")).casefold()}:
+            continue
+        for container in section.get("visualContainers", []) or []:
+            if not isinstance(container, dict):
+                continue
+            found, fixed = _visual_binding_issues(container, section_name, measure_home_map, model_fields, repair=repair)
+            issues.extend(found)
+            repairs += fixed
+    return issues, repairs
+
+
+def _assert_container_bindings(container: dict[str, Any], measure_home_map: dict[str, str]) -> None:
+    issues, _ = _visual_binding_issues(container, "", measure_home_map, repair=False)
+    blocking = [item for item in issues if item.get("issue") in {"unexpected_projection_role", "query_ref_not_found", "query_ref_mismatch"}]
+    if blocking:
+        raise PowerBIValidationError("Visual field bindings are invalid.", details={"issues": blocking})
+
+
 def _literal_value(value: Any) -> dict[str, Any]:
     return {"expr": {"Literal": {"Value": json.dumps(value)}}}
 
@@ -558,6 +800,7 @@ def _append_visual(
     section = _find_page(layout, page)
     section.setdefault("visualContainers", [])
     container = factory(section, measure_home_map)
+    _assert_container_bindings(container, measure_home_map)
     section["visualContainers"].append(container)
     _save_layout(folder, layout)
     visual = _visual_payload(container)
@@ -1298,6 +1541,7 @@ def pbi_build_dashboard_tool(extract_folder: str, page: str, layout: list[dict[s
             if not isinstance(item, dict):
                 raise PowerBIValidationError("Each layout item must be an object.", details={"item": item})
             container = _create_visual_from_spec(section, item, measure_home_map)
+            _assert_container_bindings(container, measure_home_map)
             section["visualContainers"].append(container)
             created.append(_visual_payload(container))
         _save_layout(folder, report_layout)
@@ -1306,6 +1550,72 @@ def pbi_build_dashboard_tool(extract_folder: str, page: str, layout: list[dict[s
             extract_folder=str(folder),
             page=_page_summary(section),
             created_visuals=created,
+        )
+
+    return _run(_impl)
+
+
+def pbi_validate_report_fields_tool(
+    extract_folder: str,
+    page: str | None = None,
+    include_hidden: bool = False,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    def _impl() -> dict[str, Any]:
+        folder, layout = _load_layout(extract_folder)
+        measure_home_map = _scan_measure_home_tables(folder)
+        model_fields, model_validation = _live_model_field_index(manager, include_hidden=include_hidden)
+        issues, _ = _scan_visual_bindings(layout, measure_home_map, model_fields, page=page, repair=False)
+        blocking = [item for item in issues if item.get("issue") not in {"measure_home_table_repaired"}]
+        return ok(
+            f"Report field validation found {len(blocking)} issue(s).",
+            extract_folder=str(folder),
+            page=page,
+            include_hidden=include_hidden,
+            model_validation=model_validation,
+            valid=not blocking,
+            issue_count=len(blocking),
+            issues=blocking,
+        )
+
+    return _run(_impl)
+
+
+def pbi_repair_report_fields_tool(
+    extract_folder: str,
+    page: str | None = None,
+    apply: bool = False,
+    manager: Any | None = None,
+    include_hidden: bool = False,
+) -> dict[str, Any]:
+    def _impl() -> dict[str, Any]:
+        folder, layout = _load_layout(extract_folder)
+        measure_home_map = _scan_measure_home_tables(folder)
+        model_fields, model_validation = _live_model_field_index(manager, include_hidden=include_hidden)
+        issues, repairs = _scan_visual_bindings(layout, measure_home_map, model_fields, page=page, repair=apply)
+        planned_repairs = repairs if apply else sum(
+            1
+            for item in issues
+            if item.get("issue") in {"query_ref_mismatch", "measure_home_table_needs_repair"}
+            or (item.get("issue") == "unexpected_projection_role" and item.get("visual_type") == "gauge" and item.get("role") == "Value")
+        )
+        unresolved = [
+            item for item in issues
+            if item.get("issue") in {"query_ref_not_found", "unexpected_projection_role", "measure_home_table_unknown", "column_not_found", "measure_not_found", "measure_table_mismatch"}
+            and not (item.get("visual_type") == "gauge" and item.get("role") == "Value")
+        ]
+        if apply and repairs:
+            _save_layout(folder, layout)
+        return ok(
+            f"Report field repair {'applied' if apply else 'planned'}: {planned_repairs} deterministic fix(es), {len(unresolved)} unresolved issue(s).",
+            extract_folder=str(folder),
+            page=page,
+            apply=apply,
+            model_validation=model_validation,
+            repairs=planned_repairs,
+            unresolved=unresolved,
+            issues=issues,
+            needs_apply=not apply and planned_repairs > 0,
         )
 
     return _run(_impl)
@@ -1473,6 +1783,8 @@ __all__ = [
     "pbi_list_pages_tool",
     "pbi_move_visual_tool",
     "pbi_patch_layout_tool",
+    "pbi_repair_report_fields_tool",
     "pbi_remove_visual_tool",
     "pbi_set_page_size_tool",
+    "pbi_validate_report_fields_tool",
 ]

@@ -5,6 +5,8 @@
 ### Added
 
 - `pbi_import_excel_workbook` - explicit one-call Excel workbook import tool for Power BI tables.
+- `pbi_model_audit_workflow`, `pbi_excel_import_workflow`, `pbi_measure_workflow` - guided workflow tools with dry-run defaults for higher-productivity LLM agents.
+- `pbi_validate_report_fields` and `pbi_repair_report_fields` - detect and repair broken report visual field bindings that cause Power BI "Fix this" placeholders.
 
 All notable changes to this project are documented here.
 

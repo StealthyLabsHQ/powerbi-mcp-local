@@ -98,8 +98,15 @@ from .visuals import (
     pbi_list_pages_tool,
     pbi_move_visual_tool,
     pbi_patch_layout_tool,
+    pbi_repair_report_fields_tool,
     pbi_remove_visual_tool,
     pbi_set_page_size_tool,
+    pbi_validate_report_fields_tool,
+)
+from .workflows import (
+    pbi_excel_import_workflow_tool,
+    pbi_measure_workflow_tool,
+    pbi_model_audit_workflow_tool,
 )
 
 __all__ = [
@@ -167,8 +174,10 @@ __all__ = [
     "pbi_extract_report_tool",
     "pbi_compile_report_tool",
     "pbi_patch_layout_tool",
+    "pbi_repair_report_fields_tool",
     "pbi_list_pages_tool",
     "pbi_get_page_tool",
+    "pbi_validate_report_fields_tool",
     "pbi_create_page_tool",
     "pbi_delete_page_tool",
     "pbi_set_page_size_tool",
@@ -186,4 +195,7 @@ __all__ = [
     "pbi_move_visual_tool",
     "pbi_apply_theme_tool",
     "pbi_build_dashboard_tool",
+    "pbi_model_audit_workflow_tool",
+    "pbi_excel_import_workflow_tool",
+    "pbi_measure_workflow_tool",
 ]
