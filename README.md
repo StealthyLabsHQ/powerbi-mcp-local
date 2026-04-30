@@ -13,7 +13,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 86](https://img.shields.io/badge/tools-86-orange)](#tool-catalog-en-86-tools)
+[![Tools 108](https://img.shields.io/badge/tools-108-orange)](#tool-catalog-en-108-tools)
 
 </div>
 
@@ -21,7 +21,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 
 | Start | Setup | Demo | Tools | Security |
 | --- | --- | --- | --- | --- |
-| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-86-tools) | [Security](#security-en) |
+| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-108-tools) | [Security](#security-en) |
 
 <a id="demo-60s"></a>
 ## Demo (60s)
@@ -166,10 +166,10 @@ Guides:
 - `Run this DAX query and show top 20 rows.`
 - `Extract report, add a new page, place 3 visuals, then compile.`
 
-<a id="tool-catalog-en-86-tools"></a>
-### Tool catalog (EN, 86 tools)
+<a id="tool-catalog-en-108-tools"></a>
+### Tool catalog (EN, 108 tools)
 
-Core model discovery (7):
+Core model discovery (8):
 - `pbi_connect`
 - `pbi_list_instances`
 - `pbi_list_tables`
@@ -177,9 +177,11 @@ Core model discovery (7):
 - `pbi_list_relationships`
 - `pbi_model_info`
 - `pbi_refresh_metadata`
+- `pbi_validate_model`
 
-Model mutations (14):
+Model mutations (15):
 - `pbi_create_measure`
+- `pbi_create_measures`
 - `pbi_delete_measure`
 - `pbi_rename_measure`
 - `pbi_set_format`
@@ -194,7 +196,7 @@ Model mutations (14):
 - `pbi_rename_column`
 - `pbi_execute_dax_as_role`
 
-Query and import (6):
+Query and import (7):
 - `pbi_execute_dax`
 - `pbi_trace_query`
 - `pbi_validate_dax`
@@ -213,10 +215,33 @@ Power Query (M) tools (8):
 - `pbi_bulk_import_excel`
 - `pbi_import_excel_workbook`
 
+PBIP/TMDL project tools (4):
+- `pbi_list_tmdl_files`
+- `pbi_read_tmdl_file`
+- `pbi_write_tmdl_file`
+- `pbi_patch_tmdl_measure`
+
 Workflow tools (3):
 - `pbi_model_audit_workflow`
 - `pbi_excel_import_workflow`
 - `pbi_measure_workflow`
+
+Quality gates (15):
+- `pbi_audit_model`
+- `pbi_lint_dax`
+- `pbi_detect_name_collisions`
+- `pbi_detect_dirty_dates`
+- `pbi_validate_relationship_plan`
+- `pbi_validate_filter_expression`
+- `pbi_detect_empty_visuals`
+- `pbi_generate_measure_tests`
+- `pbi_validate_pbix_persistence`
+- `pbi_lint_report_layout`
+- `pbi_validate_visual_bindings`
+- `pbi_score_dashboard`
+- `pbi_run_scenario`
+- `pbi_compare_report_versions`
+- `pbi_export_validation_report`
 
 Row-level security (6):
 - `pbi_list_roles`
@@ -249,8 +274,9 @@ Excel tools (13):
 - `excel_workbook_info`
 - `excel_to_pbi_check`
 
-Report and visual tools (24):
+Report and visual tools (25):
 - `pbi_extract_report`
+- `pbi_create_persistent_report`
 - `pbi_compile_report`
 - `pbi_patch_layout`
 - `pbi_list_pages`
