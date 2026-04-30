@@ -13,7 +13,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 108](https://img.shields.io/badge/tools-108-orange)](#tool-catalog-en-108-tools)
+[![Tools 109](https://img.shields.io/badge/tools-109-orange)](#tool-catalog-en-109-tools)
 
 </div>
 
@@ -21,7 +21,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 
 | Start | Setup | Demo | Tools | Security |
 | --- | --- | --- | --- | --- |
-| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-108-tools) | [Security](#security-en) |
+| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-109-tools) | [Security](#security-en) |
 
 <a id="demo-60s"></a>
 ## Demo (60s)
@@ -166,8 +166,8 @@ Guides:
 - `Run this DAX query and show top 20 rows.`
 - `Extract report, add a new page, place 3 visuals, then compile.`
 
-<a id="tool-catalog-en-108-tools"></a>
-### Tool catalog (EN, 108 tools)
+<a id="tool-catalog-en-109-tools"></a>
+### Tool catalog (EN, 109 tools)
 
 Core model discovery (8):
 - `pbi_connect`
@@ -226,7 +226,7 @@ Workflow tools (3):
 - `pbi_excel_import_workflow`
 - `pbi_measure_workflow`
 
-Quality gates (15):
+Quality gates (16):
 - `pbi_audit_model`
 - `pbi_lint_dax`
 - `pbi_detect_name_collisions`
@@ -236,6 +236,7 @@ Quality gates (15):
 - `pbi_detect_empty_visuals`
 - `pbi_generate_measure_tests`
 - `pbi_validate_pbix_persistence`
+- `pbi_validate_pbix_reopen`
 - `pbi_lint_report_layout`
 - `pbi_validate_visual_bindings`
 - `pbi_score_dashboard`

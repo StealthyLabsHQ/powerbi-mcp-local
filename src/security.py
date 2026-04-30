@@ -40,6 +40,7 @@ READ_TOOLS = {
     "pbi_detect_empty_visuals",
     "pbi_generate_measure_tests",
     "pbi_validate_pbix_persistence",
+    "pbi_validate_pbix_reopen",
     "pbi_lint_report_layout",
     "pbi_validate_visual_bindings",
     "pbi_score_dashboard",
