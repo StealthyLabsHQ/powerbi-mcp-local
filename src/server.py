@@ -631,6 +631,7 @@ def pbi_validate_pbix_reopen(
     screenshot_path: str | None = None,
     close_after: bool = False,
     analyze_screenshot: bool = True,
+    use_windows_ocr: bool = True,
 ) -> dict[str, Any]:
     """Open a PBIX in Power BI Desktop and scan for visible repair-error signals."""
     return _run(
@@ -641,6 +642,7 @@ def pbi_validate_pbix_reopen(
         screenshot_path=screenshot_path,
         close_after=close_after,
         analyze_screenshot=analyze_screenshot,
+        use_windows_ocr=use_windows_ocr,
     )
 
 
