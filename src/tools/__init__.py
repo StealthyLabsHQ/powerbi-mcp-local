@@ -78,6 +78,7 @@ from .quality import (
     pbi_score_dashboard_tool,
     pbi_validate_filter_expression_tool,
     pbi_validate_pbix_persistence_tool,
+    pbi_validate_pbix_reopen_tool,
     pbi_validate_relationship_plan_tool,
     pbi_validate_visual_bindings_tool,
 )
@@ -158,6 +159,7 @@ __all__ = [
     "pbi_run_scenario_tool",
     "pbi_compare_report_versions_tool",
     "pbi_validate_pbix_persistence_tool",
+    "pbi_validate_pbix_reopen_tool",
     "pbi_measure_dependencies_tool",
     "pbi_list_roles_tool",
     "pbi_create_role_tool",

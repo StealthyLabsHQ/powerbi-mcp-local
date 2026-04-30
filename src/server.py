@@ -67,6 +67,7 @@ from tools import (
     pbi_score_dashboard_tool,
     pbi_validate_filter_expression_tool,
     pbi_validate_pbix_persistence_tool,
+    pbi_validate_pbix_reopen_tool,
     pbi_validate_relationship_plan_tool,
     pbi_validate_visual_bindings_tool,
     pbi_bulk_import_excel_tool,
@@ -620,6 +621,24 @@ def pbi_validate_pbix_persistence(
         pbix_path=pbix_path,
         extract_folder=extract_folder,
         require_security_bindings_removed=require_security_bindings_removed,
+    )
+
+
+@mcp.tool()
+def pbi_validate_pbix_reopen(
+    pbix_path: str,
+    timeout_seconds: int = 60,
+    screenshot_path: str | None = None,
+    close_after: bool = False,
+) -> dict[str, Any]:
+    """Open a PBIX in Power BI Desktop and scan for visible repair-error signals."""
+    return _run(
+        "pbi_validate_pbix_reopen",
+        pbi_validate_pbix_reopen_tool,
+        pbix_path=pbix_path,
+        timeout_seconds=timeout_seconds,
+        screenshot_path=screenshot_path,
+        close_after=close_after,
     )
 
 
