@@ -1245,12 +1245,60 @@ foreach ($signal in $signals) {
     return json.loads(result.stdout)
 
 
+def _analyze_reopen_screenshot(screenshot_path: Path) -> dict[str, Any]:
+    script = "$ScreenshotPath = " + json.dumps(str(screenshot_path)) + r"""
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing | Out-Null
+$bitmap = [System.Drawing.Bitmap]::FromFile($ScreenshotPath)
+$width = $bitmap.Width
+$height = $bitmap.Height
+$maxSamples = 80000
+$step = [Math]::Max(1, [int][Math]::Ceiling([Math]::Sqrt(($width * $height) / $maxSamples)))
+$samples = 0
+$dark = 0
+$teal = 0
+for ($y = 0; $y -lt $height; $y += $step) {
+    for ($x = 0; $x -lt $width; $x += $step) {
+        $pixel = $bitmap.GetPixel($x, $y)
+        $samples += 1
+        if ($pixel.R -lt 35 -and $pixel.G -lt 35 -and $pixel.B -lt 35) { $dark += 1 }
+        if ($pixel.R -lt 45 -and $pixel.G -ge 85 -and $pixel.G -le 170 -and $pixel.B -ge 80 -and $pixel.B -le 170) { $teal += 1 }
+    }
+}
+$bitmap.Dispose()
+$darkRatio = if ($samples -gt 0) { $dark / $samples } else { 0 }
+$tealRatio = if ($samples -gt 0) { $teal / $samples } else { 0 }
+[PSCustomObject]@{
+    width = $width
+    height = $height
+    sample_count = $samples
+    dark_pixel_ratio = [Math]::Round($darkRatio, 4)
+    teal_pixel_ratio = [Math]::Round($tealRatio, 4)
+    fix_this_like = ($darkRatio -ge 0.32 -and $tealRatio -ge 0.0005)
+} | ConvertTo-Json -Depth 3
+"""
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        shell=False,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        return {"available": False, "error": result.stderr.strip() or result.stdout.strip()}
+    payload = json.loads(result.stdout)
+    payload["available"] = True
+    return payload
+
+
 def pbi_validate_pbix_reopen_tool(
     *,
     pbix_path: str,
     timeout_seconds: int = 60,
     screenshot_path: str | None = None,
     close_after: bool = False,
+    analyze_screenshot: bool = True,
 ) -> dict[str, Any]:
     """Open a PBIX in Power BI Desktop and scan for visible repair-error signals."""
     if timeout_seconds < 10 or timeout_seconds > 300:
@@ -1265,6 +1313,7 @@ def pbi_validate_pbix_reopen_tool(
     probe = _run_reopen_probe(pbix_path=pbix, timeout_seconds=timeout_seconds, screenshot_path=screenshot, close_after=close_after)
     issues: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
+    screenshot_analysis: dict[str, Any] | None = None
     if not persistence.get("valid"):
         issues.append({"type": "pbix_persistence_invalid", "issues": persistence.get("issues", [])})
     if not probe.get("opened"):
@@ -1273,6 +1322,12 @@ def pbi_validate_pbix_reopen_tool(
         issues.append({"type": "powerbi_fix_this_signal", "matches": probe["ui_text_matches"]})
     if screenshot and not probe.get("screenshot_path"):
         warnings.append({"type": "screenshot_not_created", "screenshot_path": str(screenshot)})
+    if analyze_screenshot and probe.get("screenshot_path"):
+        screenshot_analysis = _analyze_reopen_screenshot(Path(str(probe["screenshot_path"])))
+        if not screenshot_analysis.get("available", False):
+            warnings.append({"type": "screenshot_analysis_failed", "error": screenshot_analysis.get("error")})
+        elif screenshot_analysis.get("fix_this_like"):
+            issues.append({"type": "screenshot_fix_this_like_regions", "analysis": screenshot_analysis})
     return ok(
         f"PBIX reopen validation found {len(issues)} issue(s), {len(warnings)} warning(s).",
         pbix_path=str(pbix),
@@ -1283,6 +1338,7 @@ def pbi_validate_pbix_reopen_tool(
         warnings=warnings,
         persistence=persistence,
         reopen=probe,
+        screenshot_analysis=screenshot_analysis,
     )
 
 
