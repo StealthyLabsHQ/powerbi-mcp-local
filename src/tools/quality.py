@@ -1286,7 +1286,66 @@ $tealRatio = if ($samples -gt 0) { $teal / $samples } else { 0 }
         timeout=30,
     )
     if result.returncode != 0:
-        return {"available": False, "error": result.stderr.strip() or result.stdout.strip()}
+        error = result.stderr.strip() or result.stdout.strip()
+        return {"available": False, "error": error.splitlines()[0] if error else "Windows OCR failed."}
+    payload = json.loads(result.stdout)
+    payload["available"] = True
+    return payload
+
+
+def _ocr_reopen_screenshot(screenshot_path: Path) -> dict[str, Any]:
+    script = "$ScreenshotPath = " + json.dumps(str(screenshot_path)) + r"""
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null
+$null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
+$null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics.Imaging, ContentType = WindowsRuntime]
+$null = [Windows.Media.Ocr.OcrEngine, Windows.Media.Ocr, ContentType = WindowsRuntime]
+$asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.IsGenericMethod
+} | Select-Object -First 1)
+function Await-WinRt($operation, $type) {
+    $task = $asTaskGeneric.MakeGenericMethod($type).Invoke($null, @($operation))
+    try {
+        $task.Wait()
+    } catch {
+        $message = $_.Exception.Message
+        if ($_.Exception.InnerException -ne $null) {
+            $message = "$message | $($_.Exception.InnerException.Message)"
+        }
+        throw $message
+    }
+    return $task.Result
+}
+$file = Await-WinRt ([Windows.Storage.StorageFile]::GetFileFromPathAsync($ScreenshotPath)) ([Windows.Storage.StorageFile])
+$stream = Await-WinRt ($file.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
+$decoder = Await-WinRt ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+$bitmap = Await-WinRt ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+if ($engine -eq $null) { throw 'Windows OCR engine unavailable' }
+$result = Await-WinRt ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+$text = $result.Text
+$signals = @('Fix this', "Something's wrong with one or more fields", 'See details')
+$matches = @()
+foreach ($signal in $signals) {
+    if ($text -like "*$signal*") { $matches += $signal }
+}
+[PSCustomObject]@{
+    text = $text
+    text_length = if ($text) { $text.Length } else { 0 }
+    matches = $matches
+} | ConvertTo-Json -Depth 3
+"""
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        shell=False,
+        timeout=45,
+    )
+    if result.returncode != 0:
+        error = result.stderr.strip() or result.stdout.strip()
+        return {"available": False, "error": error.splitlines()[0] if error else "Windows OCR failed."}
     payload = json.loads(result.stdout)
     payload["available"] = True
     return payload
@@ -1299,6 +1358,7 @@ def pbi_validate_pbix_reopen_tool(
     screenshot_path: str | None = None,
     close_after: bool = False,
     analyze_screenshot: bool = True,
+    use_windows_ocr: bool = True,
 ) -> dict[str, Any]:
     """Open a PBIX in Power BI Desktop and scan for visible repair-error signals."""
     if timeout_seconds < 10 or timeout_seconds > 300:
@@ -1314,6 +1374,7 @@ def pbi_validate_pbix_reopen_tool(
     issues: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     screenshot_analysis: dict[str, Any] | None = None
+    ocr: dict[str, Any] | None = None
     if not persistence.get("valid"):
         issues.append({"type": "pbix_persistence_invalid", "issues": persistence.get("issues", [])})
     if not probe.get("opened"):
@@ -1328,6 +1389,12 @@ def pbi_validate_pbix_reopen_tool(
             warnings.append({"type": "screenshot_analysis_failed", "error": screenshot_analysis.get("error")})
         elif screenshot_analysis.get("fix_this_like"):
             issues.append({"type": "screenshot_fix_this_like_regions", "analysis": screenshot_analysis})
+    if use_windows_ocr and probe.get("screenshot_path"):
+        ocr = _ocr_reopen_screenshot(Path(str(probe["screenshot_path"])))
+        if not ocr.get("available", False):
+            warnings.append({"type": "windows_ocr_unavailable", "error": ocr.get("error")})
+        elif ocr.get("matches"):
+            issues.append({"type": "windows_ocr_fix_this_signal", "matches": ocr["matches"]})
     return ok(
         f"PBIX reopen validation found {len(issues)} issue(s), {len(warnings)} warning(s).",
         pbix_path=str(pbix),
@@ -1339,6 +1406,7 @@ def pbi_validate_pbix_reopen_tool(
         persistence=persistence,
         reopen=probe,
         screenshot_analysis=screenshot_analysis,
+        windows_ocr=ocr,
     )
 
 

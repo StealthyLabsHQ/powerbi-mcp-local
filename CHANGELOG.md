@@ -18,6 +18,7 @@
 - `pbi_generate_measure_tests` - runs smoke tests for measures and reports execution errors, blanks, zeros, unsafe division operators, and format mismatches.
 - `pbi_validate_pbix_persistence` - checks patched PBIX ZIP/Layout persistence, visual/page counts, and stale `SecurityBindings`.
 - `pbi_validate_pbix_reopen` - opens a PBIX in Power BI Desktop, optionally captures/analyzes a screenshot, and scans UI Automation text for repair-error signals.
+- `pbi_validate_pbix_reopen` can optionally run Windows OCR over the screenshot to catch canvas text that UI Automation misses.
 - `pbi_patch_layout` now enables `fail_on_persistence_risk=True` by default so PBIX layout patches are blocked when visual bindings rely on live-model metadata missing from the extract.
 
 All notable changes to this project are documented here.
