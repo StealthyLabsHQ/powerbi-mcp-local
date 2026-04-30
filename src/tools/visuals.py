@@ -469,6 +469,14 @@ def _sync_container_query(container: dict[str, Any], prototype_query: dict[str, 
         )
 
 
+def _persistence_risks(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        item for item in issues
+        if item.get("source") == "live_model"
+        and item.get("extract_metadata") == "missing"
+    ]
+
+
 def _live_model_field_index(manager: Any | None, *, include_hidden: bool) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     if manager is None:
         return None, {"status": "unavailable", "reason": "manager_not_provided"}
@@ -481,6 +489,7 @@ def _live_model_field_index(manager: Any | None, *, include_hidden: bool) -> tup
 
     columns: set[tuple[str, str]] = set()
     measures: dict[str, set[str]] = {}
+    measure_tables: dict[str, set[str]] = {}
     for table in model.get("tables", []) or []:
         table_name = str(table.get("name", ""))
         for column in table.get("columns", []) or []:
@@ -489,7 +498,8 @@ def _live_model_field_index(manager: Any | None, *, include_hidden: bool) -> tup
         name = str(measure.get("name", ""))
         table_name = str(measure.get("table", ""))
         measures.setdefault(name.casefold(), set()).add(table_name.casefold())
-    return {"columns": columns, "measures": measures}, {"status": "available"}
+        measure_tables.setdefault(name.casefold(), set()).add(table_name)
+    return {"columns": columns, "measures": measures, "measure_tables": measure_tables}, {"status": "available"}
 
 
 def _visual_binding_issues(
@@ -571,6 +581,12 @@ def _visual_binding_issues(
         alias = str(source_ref.get("Source", "")) if isinstance(source_ref, dict) else ""
         entity = from_entities.get(alias, "")
         home_table = measure_home_map.get(measure_name)
+        home_table_source = "extract_metadata" if home_table is not None else ""
+        if home_table is None and model_fields is not None:
+            live_tables = sorted(model_fields.get("measure_tables", {}).get(measure_name.casefold(), set()))
+            if len(live_tables) == 1:
+                home_table = live_tables[0]
+                home_table_source = "live_model"
         if model_fields is not None:
             measure_tables = model_fields["measures"].get(measure_name.casefold(), set())
             if not measure_tables:
@@ -582,7 +598,10 @@ def _visual_binding_issues(
                 issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_unknown", "measure": measure_name})
                 continue
             if not repair:
-                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_needs_repair", "measure": measure_name, "home_table": home_table})
+                item = {"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_needs_repair", "measure": measure_name, "home_table": home_table}
+                if home_table_source == "live_model":
+                    item.update({"source": "live_model", "extract_metadata": "missing"})
+                issues.append(item)
                 continue
             same_alias_measures = [
                 str(item.get("Measure", {}).get("Property", ""))
@@ -591,7 +610,16 @@ def _visual_binding_issues(
                 and isinstance(item.get("Measure"), dict)
                 and item.get("Measure", {}).get("Expression", {}).get("SourceRef", {}).get("Source") == alias
             ]
-            if all(measure_home_map.get(item) == home_table for item in same_alias_measures):
+            def _resolved_measure_home(item: str) -> str | None:
+                if item in measure_home_map:
+                    return measure_home_map[item]
+                if model_fields is not None:
+                    live = sorted(model_fields.get("measure_tables", {}).get(item.casefold(), set()))
+                    if len(live) == 1:
+                        return live[0]
+                return None
+
+            if all(_resolved_measure_home(item) == home_table for item in same_alias_measures):
                 for from_entry in from_entries:
                     if isinstance(from_entry, dict) and str(from_entry.get("Name", "")) == alias:
                         from_entry["Entity"] = home_table
@@ -600,7 +628,10 @@ def _visual_binding_issues(
                 new_alias = _next_alias(aliases)
                 from_entries.append({"Name": new_alias, "Entity": home_table})
                 measure.setdefault("Expression", {}).setdefault("SourceRef", {})["Source"] = new_alias
-            issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_repaired", "measure": measure_name, "home_table": home_table})
+            item = {"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_repaired", "measure": measure_name, "home_table": home_table}
+            if home_table_source == "live_model":
+                item.update({"source": "live_model", "extract_metadata": "missing"})
+            issues.append(item)
             repairs += 1
 
     if repair and repairs:
@@ -865,23 +896,84 @@ def pbi_extract_report_tool(pbix_path: str, extract_folder: str | None = None) -
     return _run(_impl)
 
 
-def _maybe_force_close_powerbi(force: bool) -> None:
+def _run_powershell(script: str, *, timeout: float = 20.0) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        shell=False,
+        timeout=timeout,
+    )
+
+
+def _save_and_close_powerbi_gracefully(pbix_path: Path | None = None) -> bool:
+    target_path = str(pbix_path) if pbix_path is not None else ""
+    script = "$TargetPath = " + json.dumps(target_path) + r"""
+$ErrorActionPreference = 'SilentlyContinue'
+$ws = New-Object -ComObject WScript.Shell
+$names = @('PBIDesktop', 'pbidesktoprs')
+$initialWrite = $null
+if ($TargetPath -and (Test-Path -LiteralPath $TargetPath)) {
+    $initialWrite = (Get-Item -LiteralPath $TargetPath).LastWriteTimeUtc
+}
+$procs = Get-Process -Name $names | Where-Object { $_.MainWindowHandle -ne 0 }
+foreach ($proc in $procs) {
+    [void]$ws.AppActivate($proc.Id)
+    Start-Sleep -Milliseconds 500
+    $ws.SendKeys('^s')
+}
+if ($initialWrite -ne $null) {
+    $deadline = (Get-Date).AddSeconds(30)
+    do {
+        Start-Sleep -Seconds 1
+        $currentWrite = (Get-Item -LiteralPath $TargetPath).LastWriteTimeUtc
+    } while ($currentWrite -le $initialWrite -and (Get-Date) -lt $deadline)
+} else {
+    Start-Sleep -Seconds 8
+}
+foreach ($proc in @($procs)) {
+    $proc.Refresh()
+    if (-not $proc.HasExited) {
+        [void]$proc.CloseMainWindow()
+    }
+}
+$deadline = (Get-Date).AddSeconds(12)
+do {
+    Start-Sleep -Milliseconds 500
+    $open = @(Get-Process -Name $names | Where-Object { $_.MainWindowHandle -ne 0 }).Count
+} while ($open -gt 0 -and (Get-Date) -lt $deadline)
+if ($open -gt 0) { exit 1 }
+exit 0
+"""
+    try:
+        return _run_powershell(script, timeout=45.0).returncode == 0
+    except Exception:
+        return False
+
+
+def _force_kill_powerbi() -> None:
+    for image in ("PBIDesktop.exe", "pbidesktoprs.exe"):
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/IM", image],
+                capture_output=True,
+                text=True,
+                check=False,
+                shell=False,
+            )
+        except Exception:
+            pass
+
+
+def _maybe_force_close_powerbi(force: bool, pbix_path: Path | None = None) -> None:
     if not force:
         return
     if os.name != "nt":
         logger.debug("force=True ignored on non-Windows platform for PBIDesktop termination.")
         return
-    try:
-        subprocess.run(
-            ["taskkill", "/F", "/IM", "PBIDesktop.exe"],
-            capture_output=True,
-            text=True,
-            check=False,
-            shell=False,
-        )
-    except Exception:
-        # Best effort: process may not exist or taskkill may be unavailable.
-        pass
+    if not _save_and_close_powerbi_gracefully(pbix_path):
+        _force_kill_powerbi()
     time.sleep(1.5)
 
 
@@ -904,6 +996,9 @@ def pbi_patch_layout_tool(
     extract_folder: str,
     pbix_path: str,
     force: bool = False,
+    fail_on_persistence_risk: bool = True,
+    manager: Any | None = None,
+    include_hidden: bool = False,
 ) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         folder = _resolve_extract_folder(extract_folder, must_exist=True)
@@ -912,7 +1007,23 @@ def pbi_patch_layout_tool(
         if not layout_path.exists():
             raise ReportLayoutError("Report/Layout file was not found in the extract folder.", details={"path": str(layout_path)})
 
-        _maybe_force_close_powerbi(force)
+        if fail_on_persistence_risk:
+            _, layout = _load_layout(folder)
+            measure_home_map = _scan_measure_home_tables(folder)
+            model_fields, model_validation = _live_model_field_index(manager, include_hidden=include_hidden)
+            issues, _ = _scan_visual_bindings(layout, measure_home_map, model_fields, repair=False)
+            persistence_risks = _persistence_risks(issues)
+            if persistence_risks:
+                raise PowerBIValidationError(
+                    "Layout patch blocked because field bindings rely on live-model metadata missing from the extract.",
+                    details={
+                        "persistence_risk_count": len(persistence_risks),
+                        "persistence_risks": persistence_risks,
+                        "model_validation": model_validation,
+                    },
+                )
+
+        _maybe_force_close_powerbi(force, pbix)
 
         layout_bytes = layout_path.read_bytes()
         pages = _page_names_from_layout_bytes(layout_bytes)
@@ -948,7 +1059,13 @@ def pbi_patch_layout_tool(
                     target_zip.writestr(target_info, layout_bytes)
 
             temp_size = temp_path.stat().st_size
-            temp_path.replace(pbix)
+            try:
+                temp_path.replace(pbix)
+            except PermissionError as exc:
+                raise ReportLayoutError(
+                    "PBIX file is locked by Power BI Desktop. Close it or retry with force=True.",
+                    details={"pbix_path": str(pbix), "force": force},
+                ) from exc
         finally:
             if temp_path and temp_path.exists():
                 temp_path.unlink(missing_ok=True)
@@ -960,6 +1077,7 @@ def pbi_patch_layout_tool(
             bytes_written=temp_size,
             layout_size=len(layout_bytes),
             pages=pages,
+            persistence_risk_checked=fail_on_persistence_risk,
         )
 
     return _run(_impl)
@@ -970,7 +1088,7 @@ def pbi_compile_report_tool(extract_folder: str, output_path: str, force: bool =
         folder = _resolve_extract_folder(extract_folder, must_exist=True)
         output = _resolve_pbix_path(output_path, must_exist=False)
         output.parent.mkdir(parents=True, exist_ok=True)
-        _maybe_force_close_powerbi(force)
+        _maybe_force_close_powerbi(force, output if output.exists() else None)
         _run_pbi_tools(["compile", str(folder), "-outPath", str(output), "-overwrite"])
         return ok(
             "Report compiled successfully.",
@@ -1567,6 +1685,7 @@ def pbi_validate_report_fields_tool(
         model_fields, model_validation = _live_model_field_index(manager, include_hidden=include_hidden)
         issues, _ = _scan_visual_bindings(layout, measure_home_map, model_fields, page=page, repair=False)
         blocking = [item for item in issues if item.get("issue") not in {"measure_home_table_repaired"}]
+        persistence_risks = _persistence_risks(issues)
         return ok(
             f"Report field validation found {len(blocking)} issue(s).",
             extract_folder=str(folder),
@@ -1576,6 +1695,8 @@ def pbi_validate_report_fields_tool(
             valid=not blocking,
             issue_count=len(blocking),
             issues=blocking,
+            persistence_risk_count=len(persistence_risks),
+            persistence_risks=persistence_risks,
         )
 
     return _run(_impl)
@@ -1604,6 +1725,7 @@ def pbi_repair_report_fields_tool(
             if item.get("issue") in {"query_ref_not_found", "unexpected_projection_role", "measure_home_table_unknown", "column_not_found", "measure_not_found", "measure_table_mismatch"}
             and not (item.get("visual_type") == "gauge" and item.get("role") == "Value")
         ]
+        persistence_risks = _persistence_risks(issues)
         if apply and repairs:
             _save_layout(folder, layout)
         return ok(
@@ -1614,6 +1736,8 @@ def pbi_repair_report_fields_tool(
             model_validation=model_validation,
             repairs=planned_repairs,
             unresolved=unresolved,
+            persistence_risk_count=len(persistence_risks),
+            persistence_risks=persistence_risks,
             issues=issues,
             needs_apply=not apply and planned_repairs > 0,
         )

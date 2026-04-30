@@ -7,6 +7,17 @@
 - `pbi_import_excel_workbook` - explicit one-call Excel workbook import tool for Power BI tables.
 - `pbi_model_audit_workflow`, `pbi_excel_import_workflow`, `pbi_measure_workflow` - guided workflow tools with dry-run defaults for higher-productivity LLM agents.
 - `pbi_validate_report_fields` and `pbi_repair_report_fields` - detect and repair broken report visual field bindings that cause Power BI "Fix this" placeholders.
+- `pbi_list_tmdl_files`, `pbi_read_tmdl_file`, `pbi_write_tmdl_file` - offline PBIP/TMDL semantic model file helpers for projects that should be edited without launching Power BI Desktop.
+- `pbi_patch_tmdl_measure` - create or replace a measure block in a table TMDL file without rewriting the whole file manually.
+- `pbi_create_persistent_report` - optional persistent PBIX builder for DataModel tables, DAX measures, relationships, pages, and native visuals.
+- `pbi_audit_model`, `pbi_lint_dax`, `pbi_lint_report_layout`, `pbi_validate_visual_bindings`, `pbi_score_dashboard`, `pbi_run_scenario`, `pbi_compare_report_versions` - QA gates for MCP-generated Power BI reports.
+- `pbi_detect_name_collisions`, `pbi_detect_dirty_dates`, `pbi_validate_relationship_plan` - enterprise-grade preflight checks for naming collisions, dirty text dates, and unsafe relationship plans.
+- `pbi_detect_empty_visuals`, `pbi_export_validation_report` - report QA probes for visuals that render no rows and reusable JSON validation artifacts.
+- `pbi_detect_empty_visuals` now accepts an optional DAX `filter_expression`, and validation report exports include an `overall_valid` summary with total issue and warning counts.
+- `pbi_validate_filter_expression` - validates a DAX boolean filter before filtered visual probes run.
+- `pbi_generate_measure_tests` - runs smoke tests for measures and reports execution errors, blanks, zeros, unsafe division operators, and format mismatches.
+- `pbi_validate_pbix_persistence` - checks patched PBIX ZIP/Layout persistence, visual/page counts, and stale `SecurityBindings`.
+- `pbi_patch_layout` now enables `fail_on_persistence_risk=True` by default so PBIX layout patches are blocked when visual bindings rely on live-model metadata missing from the extract.
 
 All notable changes to this project are documented here.
 
@@ -89,14 +100,14 @@ Covers three work streams ("Lot 1/2/3") and end-to-end live validation against a
 ## [0.5.1] — 2026-04-16 — Visual Layer follow-ups
 
 ### Added
-- `pbi_patch_layout`: direct PBIX Layout patch tool that swaps `Report/Layout`, removes `SecurityBindings`, preserves ZIP entry metadata, and supports `force=True` auto-kill on Windows.
+- `pbi_patch_layout`: direct PBIX Layout patch tool that swaps `Report/Layout`, removes `SecurityBindings`, preserves ZIP entry metadata, and supports `force=True` graceful save/close before Windows auto-kill fallback.
 - `pbi_apply_design`: one-shot design preset tool that writes the base theme, updates page backgrounds, and applies card container styling.
 
 ### Fixed
 - Visual query generation now resolves measure home tables from extract metadata (`Model/tables/*/measures/*.dax`) so `prototypeQuery.From[]` uses the real table entity instead of `"$Measures"` when available.
 - Measure fallback now logs a warning and uses `"$Measures"` only when extract metadata is missing or disconnected.
 - `.dax` import parsing now strips `//` and `/* ... */` comments safely while preserving quoted strings and measure block boundaries.
-- `pbi_compile_report` now accepts `force: bool = False` and can auto-kill `PBIDesktop.exe` on Windows before write operations.
+- `pbi_compile_report` now accepts `force: bool = False` and can gracefully save/close Power BI Desktop before write operations, with auto-kill fallback.
 - RLS role-scoped execution now rejects `role` / `username` values containing connection-string separators before building the ADOMD connection string.
 - Power Query M validation now blocks `#shared` and rejects function calls outside a strict local-file allowlist unless `PBI_MCP_ALLOW_EXTERNAL_M=1` is set.
 - MCP responses that expose model or Power Query expressions now redact secret-like values before returning them to clients.
