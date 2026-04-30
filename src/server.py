@@ -91,9 +91,14 @@ from tools import (
     pbi_list_power_queries_tool,
     pbi_move_visual_tool,
     pbi_patch_layout_tool,
+    pbi_repair_report_fields_tool,
     pbi_remove_visual_tool,
     pbi_set_power_query_tool,
     pbi_set_page_size_tool,
+    pbi_validate_report_fields_tool,
+    pbi_excel_import_workflow_tool,
+    pbi_measure_workflow_tool,
+    pbi_model_audit_workflow_tool,
 )
 
 
@@ -974,6 +979,32 @@ def pbi_list_pages(extract_folder: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def pbi_validate_report_fields(extract_folder: str, page: str | None = None, include_hidden: bool = False) -> dict[str, Any]:
+    """Validate report visual field bindings for broken Power BI visuals."""
+    return _run(
+        "pbi_validate_report_fields",
+        pbi_validate_report_fields_tool,
+        extract_folder=extract_folder,
+        page=page,
+        include_hidden=include_hidden,
+        manager=CONNECTION_MANAGER,
+    )
+
+
+@mcp.tool()
+def pbi_repair_report_fields(extract_folder: str, page: str | None = None, apply: bool = False) -> dict[str, Any]:
+    """Plan or apply deterministic repairs for broken report visual field bindings."""
+    return _run(
+        "pbi_repair_report_fields",
+        pbi_repair_report_fields_tool,
+        extract_folder=extract_folder,
+        page=page,
+        apply=apply,
+        manager=CONNECTION_MANAGER,
+    )
+
+
+@mcp.tool()
 def pbi_get_page(extract_folder: str, page: str) -> dict[str, Any]:
     """Get page details and visual metadata from an extracted report."""
     return _run("pbi_get_page", pbi_get_page_tool, extract_folder=extract_folder, page=page)
@@ -1485,6 +1516,58 @@ def pbi_build_dashboard(extract_folder: str, page: str, layout: list[dict[str, A
         extract_folder=extract_folder,
         page=page,
         layout=layout,
+    )
+
+
+@mcp.tool()
+def pbi_model_audit_workflow(include_hidden: bool = False, include_row_counts: bool = True) -> dict[str, Any]:
+    """Run a compact model audit workflow for agent planning."""
+    return _run(
+        "pbi_model_audit_workflow",
+        pbi_model_audit_workflow_tool,
+        CONNECTION_MANAGER,
+        include_hidden=include_hidden,
+        include_row_counts=include_row_counts,
+    )
+
+
+@mcp.tool()
+def pbi_excel_import_workflow(
+    excel_path: str,
+    sheet_table_map: dict[str, str] | None = None,
+    promote_headers: bool = True,
+    refresh_after: bool = True,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Plan or run Excel workbook import into Power BI tables."""
+    return _run(
+        "pbi_excel_import_workflow",
+        pbi_excel_import_workflow_tool,
+        CONNECTION_MANAGER,
+        excel_path=excel_path,
+        sheet_table_map=sheet_table_map,
+        promote_headers=promote_headers,
+        refresh_after=refresh_after,
+        apply=apply,
+    )
+
+
+@mcp.tool()
+def pbi_measure_workflow(
+    table: str,
+    measures: list[dict[str, Any]],
+    overwrite: bool = True,
+    apply: bool = False,
+) -> dict[str, Any]:
+    """Plan or run validated batch measure creation."""
+    return _run(
+        "pbi_measure_workflow",
+        pbi_measure_workflow_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        measures=measures,
+        overwrite=overwrite,
+        apply=apply,
     )
 
 

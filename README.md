@@ -13,7 +13,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 81](https://img.shields.io/badge/tools-81-orange)](#tool-catalog-en-81-tools)
+[![Tools 86](https://img.shields.io/badge/tools-86-orange)](#tool-catalog-en-86-tools)
 
 </div>
 
@@ -21,7 +21,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 
 | Start | Setup | Demo | Tools | Security |
 | --- | --- | --- | --- | --- |
-| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-81-tools) | [Security](#security-en) |
+| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-86-tools) | [Security](#security-en) |
 
 <a id="demo-60s"></a>
 ## Demo (60s)
@@ -166,8 +166,8 @@ Guides:
 - `Run this DAX query and show top 20 rows.`
 - `Extract report, add a new page, place 3 visuals, then compile.`
 
-<a id="tool-catalog-en-81-tools"></a>
-### Tool catalog (EN, 81 tools)
+<a id="tool-catalog-en-86-tools"></a>
+### Tool catalog (EN, 86 tools)
 
 Core model discovery (7):
 - `pbi_connect`
@@ -213,6 +213,11 @@ Power Query (M) tools (8):
 - `pbi_bulk_import_excel`
 - `pbi_import_excel_workbook`
 
+Workflow tools (3):
+- `pbi_model_audit_workflow`
+- `pbi_excel_import_workflow`
+- `pbi_measure_workflow`
+
 Row-level security (6):
 - `pbi_list_roles`
 - `pbi_create_role`
@@ -244,11 +249,13 @@ Excel tools (13):
 - `excel_workbook_info`
 - `excel_to_pbi_check`
 
-Report and visual tools (22):
+Report and visual tools (24):
 - `pbi_extract_report`
 - `pbi_compile_report`
 - `pbi_patch_layout`
 - `pbi_list_pages`
+- `pbi_validate_report_fields`
+- `pbi_repair_report_fields`
 - `pbi_get_page`
 - `pbi_create_page`
 - `pbi_delete_page`

@@ -36,6 +36,9 @@ READ_TOOLS = {
     "pbi_get_power_query",
     "pbi_list_power_queries",
     "pbi_validate_model",
+    "pbi_model_audit_workflow",
+    "pbi_excel_import_workflow",
+    "pbi_measure_workflow",
     "excel_list_sheets",
     "excel_read_sheet",
     "excel_read_cell",
@@ -44,6 +47,8 @@ READ_TOOLS = {
     "excel_to_pbi_check",
     "pbi_list_pages",
     "pbi_get_page",
+    "pbi_validate_report_fields",
+    "pbi_repair_report_fields",
 }
 
 WRITE_TOOLS = {
@@ -96,6 +101,9 @@ WRITE_TOOLS = {
     "pbi_apply_design",
     "pbi_apply_theme",
     "pbi_build_dashboard",
+    "pbi_excel_import_workflow",
+    "pbi_measure_workflow",
+    "pbi_repair_report_fields",
 }
 
 DESTRUCTIVE_TOOLS = {
@@ -372,6 +380,8 @@ class SecurityManager:
 def tool_category(tool_name: str, params: dict[str, Any] | None = None) -> str:
     if tool_name == "pbi_export_model" and params and not params.get("path"):
         return "read"
+    if tool_name in {"pbi_excel_import_workflow", "pbi_measure_workflow", "pbi_repair_report_fields"}:
+        return "write" if params and params.get("apply") else "read"
     if tool_name in DESTRUCTIVE_TOOLS:
         return "destructive"
     if tool_name in WRITE_TOOLS:
