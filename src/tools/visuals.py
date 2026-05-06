@@ -171,6 +171,9 @@ def _find_pbi_tools() -> str:
     discovered = shutil.which("pbi-tools") or shutil.which("pbi-tools.exe") or shutil.which("pbi-tools.core.exe")
     if discovered:
         return discovered
+    bundled = Path(__file__).resolve().parents[2] / "tools-bin" / "pbi-tools.core.exe"
+    if bundled.exists():
+        return str(bundled)
     # Fallback: check common install locations
     fallback_paths = [
         Path.home() / "AppData" / "Local" / "pbi-tools" / "full" / "pbi-tools.exe",
@@ -678,6 +681,48 @@ def _literal_value(value: Any) -> dict[str, Any]:
     return {"expr": {"Literal": {"Value": json.dumps(value)}}}
 
 
+def _decimal_literal(value: float) -> dict[str, Any]:
+    """Power BI numeric literal (Decimal). Uses 'D' suffix expected by the report engine."""
+    return {"expr": {"Literal": {"Value": f"{float(value)}D"}}}
+
+
+def _int_literal(value: int) -> dict[str, Any]:
+    return {"expr": {"Literal": {"Value": f"{int(value)}L"}}}
+
+
+def _solid_color(color: str) -> dict[str, Any]:
+    if not HEX_COLOR_RE.match(color):
+        raise PowerBIValidationError(
+            "color must match '#RRGGBB'.",
+            details={"value": color},
+        )
+    return {"solid": {"color": {"expr": {"Literal": {"Value": f"'{color}'"}}}}}
+
+
+def _gauge_axis_objects(min_value: float | None, max_value: float | None, target_value: float | None) -> list[dict[str, Any]]:
+    properties: dict[str, Any] = {}
+    if min_value is not None:
+        properties["min"] = _decimal_literal(min_value)
+    if max_value is not None:
+        properties["max"] = _decimal_literal(max_value)
+    if target_value is not None:
+        properties["target"] = _decimal_literal(target_value)
+    if not properties:
+        return []
+    return [{"properties": properties}]
+
+
+def _datapoint_fill_objects(fill_color: str | None, target_color: str | None) -> list[dict[str, Any]]:
+    properties: dict[str, Any] = {}
+    if fill_color is not None:
+        properties["fill"] = _solid_color(fill_color)
+    if target_color is not None:
+        properties["targetFill"] = _solid_color(target_color)
+    if not properties:
+        return []
+    return [{"properties": properties}]
+
+
 def _title_objects(title: str) -> dict[str, Any]:
     return {
         "title": [
@@ -715,7 +760,13 @@ def _base_visual_config(
     if title:
         single_visual["objects"].update(_title_objects(title))
     if extra_single_visual:
-        single_visual.update(extra_single_visual)
+        extra_objects = extra_single_visual.get("objects")
+        if isinstance(extra_objects, dict):
+            single_visual["objects"].update(extra_objects)
+        for key, val in extra_single_visual.items():
+            if key == "objects":
+                continue
+            single_visual[key] = val
     config = {
         "name": visual_id,
         "layouts": [{"id": 0, "position": position}],
@@ -1331,9 +1382,22 @@ def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str,
 
 def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: int, width: int = 220, height: int = 120, slicer_type: str = "dropdown") -> dict[str, Any]:
     slicer_kind = slicer_type.strip().casefold()
-    if slicer_kind not in {"dropdown", "list", "range"}:
-        raise PowerBIValidationError("slicer_type must be one of: dropdown, list, range.", details={"slicer_type": slicer_type})
+    if slicer_kind not in {"dropdown", "list", "range", "tile"}:
+        raise PowerBIValidationError("slicer_type must be one of: dropdown, list, range, tile.", details={"slicer_type": slicer_type})
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    if slicer_kind == "tile":
+        # Horizontal tile slicer: native list type with horizontal orientation flag.
+        emitted_kind = "list"
+        extra: dict[str, Any] = {
+            "slicerType": emitted_kind,
+            "objects": {
+                "general": [
+                    {"properties": {"orientation": _int_literal(1)}}
+                ]
+            },
+        }
+    else:
+        extra = {"slicerType": slicer_kind}
     return _append_visual(
         extract_folder,
         page,
@@ -1348,19 +1412,77 @@ def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: 
             projections={"Values": [{"queryRef": _query_ref(column)}]},
             references=[column],
             measure_home_map=home_map,
-            extra_single_visual={"slicerType": slicer_kind},
+            extra_single_visual=extra,
         ),
         measure_home_map,
     )
 
 
-def pbi_add_gauge_tool(extract_folder: str, page: str, measure: str, x: int, y: int, width: int = 280, height: int = 220, title: str = "", target_measure: str | None = None) -> dict[str, Any]:
+def pbi_add_gauge_tool(
+    extract_folder: str,
+    page: str,
+    measure: str,
+    x: int,
+    y: int,
+    width: int = 280,
+    height: int = 220,
+    title: str = "",
+    target_measure: str | None = None,
+    *,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    target_value: float | None = None,
+    fill_color: str | None = None,
+    target_color: str | None = None,
+    fill_color_measure: str | None = None,
+) -> dict[str, Any]:
+    """Add a gauge visual.
+
+    ``fill_color_measure`` (optional): name of a DAX measure that returns a
+    ``"#RRGGBB"`` string. The gauge arc fill becomes a measure-binding to it
+    (conditional formatting), so the colour reacts to slicer / filter context.
+    Mutually exclusive with ``fill_color``; if both are provided, the measure
+    binding wins.
+    """
+    if fill_color and fill_color_measure:
+        # Measure binding takes precedence — drop the static fill silently to keep callers tidy.
+        fill_color = None
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     projections = {"Y": [{"queryRef": _query_ref(measure)}]}
     references = [measure]
     if target_measure:
         projections["Goal"] = [{"queryRef": _query_ref(target_measure)}]
         references.append(target_measure)
+    if fill_color_measure:
+        # Pull the color measure into the visual's prototypeQuery so PBI can resolve the fill binding.
+        references.append(fill_color_measure)
+    extra_objects: dict[str, Any] = {}
+    axis_obj = _gauge_axis_objects(min_value, max_value, target_value)
+    if axis_obj:
+        extra_objects["axis"] = axis_obj
+    fill_obj = _datapoint_fill_objects(fill_color, target_color)
+    if fill_color_measure:
+        # Conditional fill via measure binding — overrides any static fill_color above.
+        host_table = measure_home_map.get(fill_color_measure) or "$Measures"
+        properties: dict[str, Any] = {}
+        if fill_obj and fill_obj[0].get("properties"):
+            properties = dict(fill_obj[0]["properties"])
+        properties["fill"] = {
+            "solid": {
+                "color": {
+                    "expr": {
+                        "Measure": {
+                            "Expression": {"SourceRef": {"Entity": host_table}},
+                            "Property": fill_color_measure,
+                        }
+                    }
+                }
+            }
+        }
+        fill_obj = [{"properties": properties}]
+    if fill_obj:
+        extra_objects["dataPoint"] = fill_obj
+    extra_single_visual = {"objects": extra_objects} if extra_objects else None
     return _append_visual(
         extract_folder,
         page,
@@ -1375,8 +1497,69 @@ def pbi_add_gauge_tool(extract_folder: str, page: str, measure: str, x: int, y: 
             projections=projections,
             references=references,
             measure_home_map=home_map,
+            extra_single_visual=extra_single_visual,
         ),
         measure_home_map,
+    )
+
+
+def pbi_add_labelled_card_tool(
+    extract_folder: str,
+    page: str,
+    measure: str,
+    label: str,
+    x: int,
+    y: int,
+    width: int = 220,
+    height: int = 110,
+    *,
+    label_height: int = 28,
+    label_font_size: int = 11,
+    label_bold: bool = True,
+    label_color: str = "#1F2937",
+) -> dict[str, Any]:
+    """Place a text label above a card value, matching docx-style 'label-on-top' card layout.
+
+    Returns both created visuals so callers can move/style them together later.
+    """
+    if label_height <= 0 or label_height >= height:
+        raise PowerBIValidationError(
+            "label_height must be > 0 and smaller than height.",
+            details={"label_height": label_height, "height": height},
+        )
+    label_response = pbi_add_text_box_tool(
+        extract_folder,
+        page,
+        label,
+        x,
+        y,
+        width,
+        label_height,
+        font_size=label_font_size,
+        bold=label_bold,
+        color=label_color,
+    )
+    if not label_response.get("ok"):
+        return label_response
+    card_response = pbi_add_card_tool(
+        extract_folder,
+        page,
+        measure,
+        x,
+        y + label_height,
+        width,
+        height - label_height,
+        title="",
+    )
+    if not card_response.get("ok"):
+        return card_response
+    return ok(
+        f"Labelled card '{label}' added.",
+        page=card_response.get("page"),
+        visuals={
+            "label": label_response.get("visual"),
+            "value": card_response.get("visual"),
+        },
     )
 
 
@@ -1850,7 +2033,47 @@ def _dispatch_gauge(extract, page, x, y, w, h, title, cfg):
     measure = cfg.get("measure")
     if not measure:
         raise PowerBIValidationError("gauge requires config.measure", details={"visual_type": "gauge"})
-    return pbi_add_gauge_tool(extract, page, measure, x, y, w, h, title, cfg.get("target_measure"))
+    return pbi_add_gauge_tool(
+        extract,
+        page,
+        measure,
+        x,
+        y,
+        w,
+        h,
+        title,
+        cfg.get("target_measure"),
+        min_value=cfg.get("min_value"),
+        max_value=cfg.get("max_value"),
+        target_value=cfg.get("target_value"),
+        fill_color=cfg.get("fill_color"),
+        target_color=cfg.get("target_color"),
+        fill_color_measure=cfg.get("fill_color_measure"),
+    )
+
+
+def _dispatch_labelled_card(extract, page, x, y, w, h, title, cfg):
+    measure = cfg.get("measure")
+    label = cfg.get("label") or title
+    if not measure or not label:
+        raise PowerBIValidationError(
+            "labelled_card requires config.measure and config.label (or title)",
+            details={"visual_type": "labelled_card"},
+        )
+    return pbi_add_labelled_card_tool(
+        extract,
+        page,
+        measure,
+        str(label),
+        x,
+        y,
+        w,
+        h,
+        label_height=int(cfg.get("label_height", 28)),
+        label_font_size=int(cfg.get("label_font_size", 11)),
+        label_bold=bool(cfg.get("label_bold", True)),
+        label_color=str(cfg.get("label_color", "#1F2937")),
+    )
 
 
 def _dispatch_text_box(extract, page, x, y, w, h, title, cfg):
@@ -1873,6 +2096,8 @@ def _dispatch_text_box(extract, page, x, y, w, h, title, cfg):
 
 _VISUAL_TYPE_DISPATCH.update({
     "card": _dispatch_card,
+    "labelled_card": _dispatch_labelled_card,
+    "labeled_card": _dispatch_labelled_card,
     "bar_chart": _dispatch_bar,
     "line_chart": _dispatch_line,
     "donut": _dispatch_donut,
@@ -1891,6 +2116,7 @@ __all__ = [
     "pbi_add_card_tool",
     "pbi_add_donut_chart_tool",
     "pbi_add_gauge_tool",
+    "pbi_add_labelled_card_tool",
     "pbi_add_line_chart_tool",
     "pbi_add_slicer_tool",
     "pbi_add_table_visual_tool",

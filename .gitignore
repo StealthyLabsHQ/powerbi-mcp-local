@@ -11,3 +11,4 @@ tests/
 tools-bin/
 tmp_*/
 build/
+REMNANT.md

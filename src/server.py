@@ -50,6 +50,7 @@ from tools import (
     pbi_rename_column_tool,
     pbi_rename_measure_tool,
     pbi_rename_table_tool,
+    pbi_set_column_data_type_tool,
     pbi_set_format_tool,
     pbi_trace_query_tool,
     pbi_update_relationship_tool,
@@ -84,6 +85,7 @@ from tools import (
     pbi_add_card_tool,
     pbi_add_donut_chart_tool,
     pbi_add_gauge_tool,
+    pbi_add_labelled_card_tool,
     pbi_add_line_chart_tool,
     pbi_add_role_member_tool,
     pbi_add_slicer_tool,
@@ -110,6 +112,8 @@ from tools import (
     pbi_get_page_tool,
     pbi_list_pages_tool,
     pbi_list_power_queries_tool,
+    pbi_parameterize_data_source_tool,
+    pbi_relocate_data_source_tool,
     pbi_move_visual_tool,
     pbi_patch_layout_tool,
     pbi_repair_report_fields_tool,
@@ -869,6 +873,30 @@ def pbi_set_format(
 
 
 @mcp.tool()
+def pbi_set_column_data_type(
+    table: str,
+    column: str,
+    data_type: str,
+    format_string: str | None = None,
+) -> dict[str, Any]:
+    """Set an existing column's DataType (and optionally FormatString).
+
+    Use when Power Query type hints (Int64.Type, etc.) are overridden by PBI's
+    inference and a column ends up as the wrong type. data_type accepts standard
+    TOM names: Int64, Decimal, Double, String, DateTime, Boolean, Currency.
+    """
+    return _run(
+        "pbi_set_column_data_type",
+        pbi_set_column_data_type_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        column=column,
+        data_type=data_type,
+        format_string=format_string,
+    )
+
+
+@mcp.tool()
 def pbi_export_model(
     path: str | None = None,
     include_hidden: bool = False,
@@ -1098,6 +1126,58 @@ def pbi_set_power_query(
         table=table,
         m_expression=m_expression,
         partition_name=partition_name,
+        refresh_after=refresh_after,
+    )
+
+
+@mcp.tool()
+def pbi_parameterize_data_source(
+    parameter_name: str,
+    file_path: str,
+    partitions: list[str] | None = None,
+    dry_run: bool = False,
+    refresh_after: bool = False,
+) -> dict[str, Any]:
+    """Make a workbook path portable via a Power Query parameter.
+
+    Creates an M parameter (default value = file_path) and rewrites every
+    matching M partition to call File.Contents(<parameter_name>) instead of the
+    hardcoded path. Collaborators can then change the path in one place via
+    Power BI Desktop's "Manage parameters" UI.
+    """
+    return _run(
+        "pbi_parameterize_data_source",
+        pbi_parameterize_data_source_tool,
+        CONNECTION_MANAGER,
+        parameter_name=parameter_name,
+        file_path=file_path,
+        partitions=partitions,
+        dry_run=dry_run,
+        refresh_after=refresh_after,
+    )
+
+
+@mcp.tool()
+def pbi_relocate_data_source(
+    old_path: str,
+    new_path: str,
+    case_sensitive: bool = False,
+    dry_run: bool = False,
+    refresh_after: bool = False,
+) -> dict[str, Any]:
+    """Bulk-rewrite a hardcoded file/folder path inside every M partition.
+
+    Use this when an Excel/CSV/folder data source moves and queries fail with
+    DataSource.NotFound. Pass `dry_run=True` first to preview the matches.
+    """
+    return _run(
+        "pbi_relocate_data_source",
+        pbi_relocate_data_source_tool,
+        CONNECTION_MANAGER,
+        old_path=old_path,
+        new_path=new_path,
+        case_sensitive=case_sensitive,
+        dry_run=dry_run,
         refresh_after=refresh_after,
     )
 
@@ -1590,7 +1670,7 @@ def pbi_add_slicer(
     height: int = 120,
     slicer_type: str = "dropdown",
 ) -> dict[str, Any]:
-    """Add a slicer visual."""
+    """Add a slicer visual. slicer_type: dropdown | list | range | tile (horizontal list)."""
     return _run(
         "pbi_add_slicer",
         pbi_add_slicer_tool,
@@ -1616,8 +1696,22 @@ def pbi_add_gauge(
     height: int = 220,
     title: str = "",
     target_measure: str | None = None,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    target_value: float | None = None,
+    fill_color: str | None = None,
+    target_color: str | None = None,
+    fill_color_measure: str | None = None,
 ) -> dict[str, Any]:
-    """Add a gauge visual."""
+    """Add a gauge visual.
+
+    Optional kwargs override the default 0-100 axis and blue fill:
+    - min_value / max_value: gauge range bounds (constants)
+    - target_value: marker on the arc (constant; alternative to target_measure)
+    - fill_color / target_color: '#RRGGBB' arc + target colors
+    - fill_color_measure: name of a DAX measure returning '#RRGGBB' for
+      conditional formatting (overrides fill_color, reacts to slicer context)
+    """
     return _run(
         "pbi_add_gauge",
         pbi_add_gauge_tool,
@@ -1630,6 +1724,49 @@ def pbi_add_gauge(
         height=height,
         title=title,
         target_measure=target_measure,
+        min_value=min_value,
+        max_value=max_value,
+        target_value=target_value,
+        fill_color=fill_color,
+        target_color=target_color,
+        fill_color_measure=fill_color_measure,
+    )
+
+
+@mcp.tool()
+def pbi_add_labelled_card(
+    extract_folder: str,
+    page: str,
+    measure: str,
+    label: str,
+    x: int,
+    y: int,
+    width: int = 220,
+    height: int = 110,
+    label_height: int = 28,
+    label_font_size: int = 11,
+    label_bold: bool = True,
+    label_color: str = "#1F2937",
+) -> dict[str, Any]:
+    """Add a docx-style card: text label on top, value card underneath.
+
+    Returns both visual ids under visuals.label and visuals.value.
+    """
+    return _run(
+        "pbi_add_labelled_card",
+        pbi_add_labelled_card_tool,
+        extract_folder=extract_folder,
+        page=page,
+        measure=measure,
+        label=label,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        label_height=label_height,
+        label_font_size=label_font_size,
+        label_bold=label_bold,
+        label_color=label_color,
     )
 
 

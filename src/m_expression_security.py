@@ -36,6 +36,15 @@ M_ALLOWED_FUNCTIONS = {
     "Folder.Contents",
     "Folder.Files",
 }
+# Reserved keywords / contextual identifiers that the function-call regex sees as
+# `name (` but that aren't actually function calls. Skip them before allowlist
+# enforcement so M idioms like `each (x)` or `if (cond) then ...` don't trip the
+# external-call gate.
+M_RESERVED_KEYWORDS = {
+    "and", "as", "each", "else", "error", "false", "if", "in", "is", "let",
+    "meta", "not", "null", "or", "otherwise", "section", "shared", "then",
+    "true", "try", "type",
+}
 M_ALLOWED_PREFIXES = (
     "Binary.",
     "Character.",
@@ -183,6 +192,8 @@ def validate_m_expression_policy(expression: str) -> None:
     disallowed: list[str] = []
     for match in M_FUNCTION_CALL_RE.finditer(sanitized):
         name = match.group("name")
+        if name in M_RESERVED_KEYWORDS:
+            continue
         if name in custom_functions:
             continue
         if name in M_ALLOWED_FUNCTIONS or any(name.startswith(prefix) for prefix in M_ALLOWED_PREFIXES):
@@ -205,6 +216,7 @@ __all__ = [
     "M_ALLOWED_FUNCTIONS",
     "M_ALLOWED_PREFIXES",
     "M_BLOCKED_FUNCTIONS",
+    "M_RESERVED_KEYWORDS",
     "strip_m_literals_and_comments",
     "validate_m_expression",
     "validate_m_expression_policy",

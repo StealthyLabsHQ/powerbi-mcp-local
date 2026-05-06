@@ -532,6 +532,276 @@ def pbi_bulk_import_excel_tool(
     )
 
 
+def _m_identifier_safe(name: str) -> str:
+    """Validate that a parameter name is a safe bare M identifier.
+
+    Power Query parameters used as bare identifiers in M expressions must be
+    plain alphanumeric/underscore names (no spaces, no leading digits).
+    """
+    if not name or not name[0].isalpha() and name[0] != "_":
+        raise PowerBIValidationError(
+            "parameter_name must start with a letter or underscore.",
+            details={"parameter_name": name},
+        )
+    if not all(ch.isalnum() or ch == "_" for ch in name):
+        raise PowerBIValidationError(
+            "parameter_name may only contain letters, digits, and underscore.",
+            details={"parameter_name": name},
+        )
+    return name
+
+
+def pbi_parameterize_data_source_tool(
+    manager: Any,
+    *,
+    parameter_name: str,
+    file_path: str,
+    partitions: list[str] | None = None,
+    dry_run: bool = False,
+    refresh_after: bool = False,
+) -> dict[str, Any]:
+    """Make data sources portable via a Power Query parameter.
+
+    Creates (or updates) an M parameter named ``parameter_name`` whose default
+    value is ``file_path``. Then rewrites every M partition that string-matches
+    ``file_path`` so it calls ``File.Contents(<parameter_name>)`` instead of the
+    hardcoded path. After the parameter is wired in, a collaborator can change
+    the file location once via Power BI Desktop's *Transform data → Manage
+    parameters* dialog without editing each query.
+
+    ``partitions``: optional explicit list of "Table[/Partition]" to rewrite. By
+    default every M-source partition that references ``file_path`` is rewritten.
+    """
+    _m_identifier_safe(parameter_name)
+    if not file_path:
+        raise PowerBIValidationError("file_path must be a non-empty string.")
+    # Resolve the path against the security policy so we never persist a path
+    # that the policy would refuse to read.
+    resolved = resolve_local_path(file_path, must_exist=False)
+    canonical_path = str(resolved)
+
+    target_partitions: set[str] | None = None
+    if partitions:
+        target_partitions = set()
+        for entry in partitions:
+            if "/" in entry:
+                tbl, part = entry.split("/", 1)
+            else:
+                tbl, part = entry, ""
+            target_partitions.add(f"{tbl.strip()}::{part.strip()}")
+
+    # M parameter expression: literal string + meta record marking it as a parameter.
+    parameter_expression = (
+        f'"{canonical_path}" meta [IsParameterQuery=true, '
+        f'Type=type text, IsParameterQueryRequired=true]'
+    )
+
+    def _act(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        # Step 1: ensure the parameter (NamedExpression) exists / is up to date.
+        named_expression_action = "noop"
+        existing = None
+        try:
+            for expr in model.Expressions:
+                if str(expr.Name) == parameter_name:
+                    existing = expr
+                    break
+        except Exception:
+            existing = None
+        if existing is None:
+            if not hasattr(manager.tom, "NamedExpression"):
+                raise PowerBIConfigurationError(
+                    "This TOM build does not expose NamedExpression; cannot create M parameter."
+                )
+            new_expr = manager.tom.NamedExpression()
+            new_expr.Name = parameter_name
+            new_expr.Expression = parameter_expression
+            try:
+                # Set Kind to M (= 1) if the enum is reachable; not strictly required for PBI.
+                new_expr.Kind = manager.tom.ExpressionKind.M  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            if not dry_run:
+                model.Expressions.Add(new_expr)
+            named_expression_action = "created"
+        else:
+            if existing.Expression != parameter_expression:
+                if not dry_run:
+                    existing.Expression = parameter_expression
+                named_expression_action = "updated"
+
+        # Step 2: rewrite each M partition that mentions file_path.
+        rewrites: list[dict[str, Any]] = []
+        for table in model.Tables:
+            for partition in table.Partitions:
+                key = f"{str(table.Name)}::{str(partition.Name)}"
+                if target_partitions is not None and key not in target_partitions:
+                    continue
+                source_type = _source_type_token(partition)
+                if source_type != "m":
+                    continue
+                expression = _partition_expression(partition)
+                if file_path not in expression:
+                    continue
+                # Replace the hardcoded literal with a bare identifier reference.
+                # Patterns covered:  "<file_path>"  (most common)
+                # We also handle the security-sensitive case where someone wrapped the
+                # path in single quotes — but PBI's M only uses double quotes here.
+                quoted = f'"{file_path}"'
+                if quoted in expression:
+                    new_expression = expression.replace(quoted, parameter_name)
+                else:
+                    # Fallback: substring replace that strips the surrounding quotes
+                    # from the matched chunk.
+                    new_expression = expression.replace(file_path, parameter_name)
+                if new_expression == expression:
+                    continue
+                _validate_m_expression(new_expression)
+                if not dry_run:
+                    _set_partition_m_expression(manager, database, partition, new_expression)
+                    _request_refresh(manager, table, refresh_after)
+                rewrites.append(
+                    {
+                        "table": str(table.Name),
+                        "partition": str(partition.Name),
+                        "previous_expression_length": len(expression),
+                        "expression_length": len(new_expression),
+                        "preview_after": redact_sensitive_data(new_expression[:200]),
+                        "status": "planned" if dry_run else "rewritten",
+                    }
+                )
+        return {
+            "parameter_name": parameter_name,
+            "parameter_expression": parameter_expression,
+            "parameter_action": named_expression_action,
+            "file_path": canonical_path,
+            "dry_run": dry_run,
+            "refresh_requested": refresh_after and not dry_run,
+            "rewrites": rewrites,
+            "rewrite_count": len(rewrites),
+        }
+
+    if dry_run:
+        payload = manager.run_read(
+            "parameterize_data_source_dry",
+            lambda state: _act(state, state.database, state.database.Model),
+        )
+        return ok(
+            f"Dry run: parameter '{parameter_name}' would be {payload['parameter_action']}, "
+            f"{payload['rewrite_count']} partition(s) would be rewritten.",
+            **payload,
+            connection=manager.run_read("snapshot", lambda state: state.snapshot()),
+        )
+    payload = manager.execute_write("parameterize_data_source", _act)
+    return ok(
+        f"Parameter '{parameter_name}' {payload['parameter_action']}, "
+        f"{payload['rewrite_count']} partition(s) rewritten.",
+        parameter_name=payload["parameter_name"],
+        parameter_action=payload["parameter_action"],
+        file_path=payload["file_path"],
+        rewrites=payload["rewrites"],
+        rewrite_count=payload["rewrite_count"],
+        refresh_requested=payload["refresh_requested"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
+def pbi_relocate_data_source_tool(
+    manager: Any,
+    *,
+    old_path: str,
+    new_path: str,
+    case_sensitive: bool = False,
+    dry_run: bool = False,
+    refresh_after: bool = False,
+) -> dict[str, Any]:
+    """Bulk-rewrite a hardcoded file or folder path inside every M partition.
+
+    Use when a workbook moves and queries break with DataSource.NotFound. Looks
+    for ``old_path`` as a substring of each M-source partition expression and
+    replaces it with ``new_path``. Calculated/query-source partitions are
+    skipped. ``dry_run=True`` returns the planned changes without writing.
+    """
+    if not old_path or not new_path:
+        raise PowerBIValidationError("old_path and new_path must both be non-empty.", details={"old_path": old_path, "new_path": new_path})
+    if not dry_run:
+        # Only validate that the new path resolves when actually rewriting; allows dry-run from
+        # any host and avoids resolving paths that may live outside the allowlist when probing.
+        resolved_new = resolve_local_path(new_path, must_exist=False)
+    else:
+        resolved_new = new_path
+    needle = old_path if case_sensitive else old_path.casefold()
+
+    def _act(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        plan: list[dict[str, Any]] = []
+        for table in model.Tables:
+            if bool(getattr(table, "IsHidden", False)):
+                # still inspect — sometimes hidden internal tables hold the source.
+                pass
+            for partition in table.Partitions:
+                source_type = _source_type_token(partition)
+                if source_type != "m":
+                    continue
+                expression = _partition_expression(partition)
+                haystack = expression if case_sensitive else expression.casefold()
+                if needle not in haystack:
+                    continue
+                if case_sensitive:
+                    new_expression = expression.replace(old_path, new_path)
+                else:
+                    # Preserve original casing of non-matching segments via regex w/ case-insensitive flag.
+                    import re
+                    new_expression = re.sub(re.escape(old_path), lambda _m: new_path, expression, flags=re.IGNORECASE)
+                if new_expression == expression:
+                    continue
+                entry: dict[str, Any] = {
+                    "table": str(table.Name),
+                    "partition": str(partition.Name),
+                    "previous_expression_length": len(expression),
+                    "expression_length": len(new_expression),
+                    "occurrences": expression.count(old_path) if case_sensitive else len(re.findall(re.escape(old_path), expression, flags=re.IGNORECASE)),
+                    "preview_before": redact_sensitive_data(expression[:200]),
+                    "preview_after": redact_sensitive_data(new_expression[:200]),
+                }
+                if not dry_run:
+                    _validate_m_expression(new_expression)
+                    _set_partition_m_expression(manager, database, partition, new_expression)
+                    _request_refresh(manager, table, refresh_after)
+                    entry["status"] = "rewritten"
+                else:
+                    entry["status"] = "planned"
+                plan.append(entry)
+        return {
+            "old_path": old_path,
+            "new_path": str(resolved_new),
+            "case_sensitive": case_sensitive,
+            "dry_run": dry_run,
+            "rewritten": [item for item in plan if item["status"] == "rewritten"],
+            "planned": [item for item in plan if item["status"] == "planned"],
+            "match_count": len(plan),
+            "refresh_requested": refresh_after and not dry_run,
+        }
+
+    if dry_run:
+        payload = manager.run_read("relocate_data_source_dry", lambda state: _act(state, state.database, state.database.Model))
+        return ok(
+            f"Dry run: {payload['match_count']} partitions would be rewritten.",
+            **payload,
+            connection=manager.run_read("snapshot", lambda state: state.snapshot()),
+        )
+    payload = manager.execute_write("relocate_data_source", _act)
+    return ok(
+        f"Relocated data source in {payload['match_count']} partitions.",
+        old_path=payload["old_path"],
+        new_path=payload["new_path"],
+        rewritten=payload["rewritten"],
+        match_count=payload["match_count"],
+        refresh_requested=payload["refresh_requested"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
 def pbi_import_excel_workbook_tool(
     manager: Any,
     *,
@@ -562,5 +832,7 @@ __all__ = [
     "pbi_get_power_query_tool",
     "pbi_import_excel_workbook_tool",
     "pbi_list_power_queries_tool",
+    "pbi_parameterize_data_source_tool",
+    "pbi_relocate_data_source_tool",
     "pbi_set_power_query_tool",
 ]

@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.8.0] — 2026-05-06 — Portable data sources + visual format toolkit
+
+### Added — new tools
+
+- `pbi_relocate_data_source` — bulk-rewrite a hardcoded file/folder path inside every M partition. Accepts `dry_run` for preview, `case_sensitive` for strict matching. Solves the most common collaborator-handoff issue (DataSource.NotFound on file move).
+- `pbi_parameterize_data_source` — create a Power Query M parameter (e.g. `SourcePath`) with `meta [IsParameterQuery=true, Type=type text, IsParameterQueryRequired=true]` so the path is editable via PBI Desktop's *Manage parameters* UI, then rewrites every matching M partition to call `File.Contents(<param>)`. After running once, future moves only need a single parameter edit.
+- `pbi_add_labelled_card` — composes a textbox label above a card value, matching docx-style "label-on-top" layouts that the native card visual cannot reproduce.
+- `pbi_set_column_data_type` — set an existing column's TOM `DataType` (and optionally `FormatString`) when Power Query type hints are overridden by PBI's downstream inference. Accepts standard names: Int64, Decimal, Double, String, DateTime, Boolean, Currency.
+
+### Enhanced
+
+- `pbi_add_gauge` now accepts:
+  - `min_value` / `max_value` — gauge axis range bounds (e.g. 0.10–0.20 for a discount % gauge instead of 0–1)
+  - `target_value` — target marker as a constant (alternative to `target_measure`)
+  - `fill_color` / `target_color` — `'#RRGGBB'` arc + target colors
+  - `fill_color_measure` — bind the arc fill to a DAX measure that returns `'#RRGGBB'`. Conditional formatting reacts to slicer / page filter context (overrides `fill_color`).
+- `pbi_add_slicer` now accepts `slicer_type="tile"` → emits native list slicer with `general.orientation = 1L` (horizontal tile band).
+- `pbi_build_dashboard` `gauge` spec forwards all new range/color keys; new `labelled_card` / `labeled_card` types.
+
+### Fixed
+
+- M expression validator: `each (...)`, `if (...)`, `let`, `then`, etc. were rejected as "function calls outside the local-file allowlist". Added `M_RESERVED_KEYWORDS` exclusion set so legitimate M idioms pass validation. Without this, partition rewrites referencing `each` (very common) failed.
+- `_base_visual_config` now deep-merges `extra_single_visual["objects"]` into `singleVisual.objects`, so callers can add formatting alongside the title without clobbering it.
+
+### Tests
+
+- 83 passing across `test_visuals + test_visual_field_validation + test_workflows + test_quality + test_security + test_query`.
+- New cases: gauge axis literals + dataPoint colors, gauge color validation, gauge fill_color_measure binding, gauge measure-binding overrides static fill, tile slicer orientation, slicer type validation, labelled card composition, label-height validation.
+
 ## [Unreleased]
 
 ### Added

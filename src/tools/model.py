@@ -455,6 +455,68 @@ def pbi_create_column_tool(
     )
 
 
+def pbi_set_column_data_type_tool(
+    manager: Any,
+    *,
+    table: str,
+    column: str,
+    data_type: str,
+    format_string: str | None = None,
+) -> dict[str, Any]:
+    """Set the DataType (and optionally FormatString) of an existing column.
+
+    Works for any column kind (source, calculated, calculated table column).
+    Use when Power Query type hints (``Int64.Type`` etc.) are overridden by
+    PBI's downstream inference and the column ends up as the wrong type.
+
+    ``data_type`` accepts standard TOM names (``Int64``, ``Decimal``,
+    ``Double``, ``String``, ``DateTime``, ``Boolean``, ``Currency``,
+    ``Binary``, ``Variant``).
+    """
+    validate_model_object_name(table)
+    validate_model_object_name(column)
+    if not data_type or not str(data_type).strip():
+        raise PowerBIValidationError("data_type must be a non-empty string.", details={"data_type": data_type})
+
+    def _mutator(state: Any, database: Any, model: Any) -> dict[str, Any]:
+        tom = manager.tom
+        target_table = find_named(model.Tables, table)
+        if target_table is None:
+            raise PowerBINotFoundError(f"Table '{table}' was not found.", details={"table": table})
+        target_column = find_named(target_table.Columns, column)
+        if target_column is None:
+            raise PowerBINotFoundError(
+                f"Column '{table}[{column}]' was not found.",
+                details={"table": table, "column": column},
+            )
+        before = {
+            "data_type": str(target_column.DataType),
+            "format_string": target_column.FormatString,
+        }
+        target_column.DataType = map_enum(tom.DataType, data_type)
+        if format_string is not None:
+            target_column.FormatString = format_string
+        after = {
+            "data_type": str(target_column.DataType),
+            "format_string": target_column.FormatString,
+        }
+        return {
+            "column": {"table": table, "name": column},
+            "before": before,
+            "after": after,
+        }
+
+    payload = manager.execute_write("set_column_data_type", _mutator)
+    return ok(
+        f"Column '{table}[{column}]' DataType set to {payload['after']['data_type']}.",
+        column=payload["column"],
+        before=payload["before"],
+        after=payload["after"],
+        save_result=payload["save_result"],
+        connection=payload["connection"],
+    )
+
+
 def pbi_validate_model_tool(
     manager: Any,
     *,

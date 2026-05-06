@@ -37,6 +37,7 @@ from .model import (
     pbi_refresh_metadata_tool,
     pbi_rename_column_tool,
     pbi_rename_table_tool,
+    pbi_set_column_data_type_tool,
     pbi_validate_model_tool,
 )
 from .power_query import (
@@ -47,6 +48,8 @@ from .power_query import (
     pbi_get_power_query_tool,
     pbi_import_excel_workbook_tool,
     pbi_list_power_queries_tool,
+    pbi_parameterize_data_source_tool,
+    pbi_relocate_data_source_tool,
     pbi_set_power_query_tool,
 )
 from .project import (
@@ -106,6 +109,7 @@ from .visuals import (
     pbi_add_card_tool,
     pbi_add_donut_chart_tool,
     pbi_add_gauge_tool,
+    pbi_add_labelled_card_tool,
     pbi_add_line_chart_tool,
     pbi_add_slicer_tool,
     pbi_add_table_visual_tool,
@@ -201,11 +205,14 @@ __all__ = [
     "pbi_create_measures_tool",
     "pbi_create_table_tool",
     "pbi_create_column_tool",
+    "pbi_set_column_data_type_tool",
     "pbi_set_format_tool",
     "pbi_export_model_tool",
     "pbi_validate_model_tool",
     "pbi_get_power_query_tool",
     "pbi_list_power_queries_tool",
+    "pbi_parameterize_data_source_tool",
+    "pbi_relocate_data_source_tool",
     "pbi_set_power_query_tool",
     "pbi_create_import_query_tool",
     "pbi_create_csv_import_query_tool",
@@ -232,6 +239,7 @@ __all__ = [
     "pbi_add_line_chart_tool",
     "pbi_add_donut_chart_tool",
     "pbi_add_gauge_tool",
+    "pbi_add_labelled_card_tool",
     "pbi_add_table_visual_tool",
     "pbi_add_waterfall_tool",
     "pbi_add_slicer_tool",
