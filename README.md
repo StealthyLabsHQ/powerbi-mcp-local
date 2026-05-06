@@ -1,10 +1,8 @@
 <div align="center">
 
-# powerbi-mcp-local
+![powerbi-mcp-local banner](docs/assets/powerbi-mcp-local-banner.png)
 
-<p>
-  <img src="docs/assets/powerbi-logo.svg" alt="Power BI logo" width="84" />
-</p>
+# powerbi-mcp-local
 
 **Local-first MCP server for Power BI Desktop automation**
 
@@ -13,86 +11,51 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 109](https://img.shields.io/badge/tools-109-orange)](#tool-catalog-en-109-tools)
+[![Tools 109](https://img.shields.io/badge/tools-109-orange)](#tool-catalog)
 
 </div>
 
 ## Quick Links
 
-| Start | Setup | Demo | Tools | Security |
-| --- | --- | --- | --- | --- |
-| [5-minute quick start](#quick-start-en) | [MCP client setup](#mcp-client-setup-en) | [60-second demo](#demo-60s) | [Tool catalog](#tool-catalog-en-109-tools) | [Security](#security-en) |
+| Start | Setup | Tools | Security |
+| --- | --- | --- | --- |
+| [Quick start](#quick-start) | [MCP client setup](#mcp-client-setup) | [Tool catalog](#tool-catalog) | [Security](#security) |
 
-<a id="demo-60s"></a>
-## Demo (60s)
+## What It Does
 
-![powerbi-mcp-local demo](docs/assets/demo.gif)
+- Connects AI tools to a running local Power BI Desktop engine.
+- Automates tables, columns, measures, relationships, DAX, refreshes, and Power Query.
+- Reads/writes Excel files for local BI workflows.
+- Extracts, patches, validates, and compiles report layouts through `pbi-tools`.
 
-```powershell
-# 1) Start the MCP server
-python src/server.py
+No Power BI Pro license is required for the local Desktop workflow.
 
-# 2) In your MCP client, run prompts like:
-"Connect to Power BI and list all tables with columns."
-"Create a measure called Total Sales in table Sales."
-"Run this DAX query and show top 20 rows."
-```
-
-Expected flow:
-- MCP client calls `pbi_connect`
-- server auto-discovers local Power BI Desktop SSAS port
-- model/query/report tools become available
-
----
-
-## English
-
-### What this gives you
-
-- Connect AI tools directly to a running local Power BI Desktop engine.
-- Automate tables, columns, measures, and relationships.
-- Execute DAX and refresh without leaving your MCP client.
-- Generate and patch Power Query (M) programmatically.
-- Edit report pages and visuals via JSON + `pbi-tools`.
-
-No Power BI Pro license is required for this local workflow.
-
-### Who this is for
-
-- Analytics engineers maintaining large Power BI models.
-- BI developers who want repeatable model/report changes.
-- Teams building AI-assisted BI workflows in editors and IDEs.
-
-### Architecture
+## Architecture
 
 ```text
-Any MCP Client  --(stdio or sse)-->  src/server.py
-                                      |
-                                      +-- TOM/.NET -> Power BI Desktop local SSAS
-                                      +-- ADOMD    -> DAX query execution
-                                      +-- openpyxl -> Excel read/write/format
-                                      +-- pbi-tools-> report extract/compile + visuals
-                                      +-- security -> path, query, and payload safeguards
+MCP Client --(stdio or sse)--> src/server.py
+                              |
+                              +-- TOM/.NET -> Power BI Desktop local SSAS
+                              +-- ADOMD    -> DAX query execution
+                              +-- openpyxl -> Excel read/write/format
+                              +-- pbi-tools-> report extract/compile + visuals
+                              +-- security -> path, query, and payload safeguards
 ```
 
-### Requirements
+## Requirements
 
-| Requirement | Why it is needed | Install |
-| --- | --- | --- |
-| Windows | Power BI Desktop runs on Windows | - |
-| Power BI Desktop | Local SSAS engine | `winget install Microsoft.PowerBIDesktop` |
-| Python 3.11+ | Runtime | `winget install Python.Python.3.11` |
-| .NET 6+ Runtime | Needed by `pythonnet` and `pbi-pyadomd` | `winget install Microsoft.DotNet.Runtime.6` |
-| pbi-tools | Needed for report extract/compile + visual tools | `winget install pbi-tools` or `dotnet tool install -g pbi-tools` |
+| Requirement | Install |
+| --- | --- |
+| Windows | Power BI Desktop local engine is Windows-only |
+| Power BI Desktop | `winget install Microsoft.PowerBIDesktop` |
+| Python 3.11+ | `winget install Python.Python.3.11` |
+| .NET 6+ Runtime | `winget install Microsoft.DotNet.Runtime.6` |
+| pbi-tools | `winget install pbi-tools` or `dotnet tool install -g pbi-tools` |
 
-Notes:
-- ADOMD.NET ships with Power BI Desktop.
-- If `pbi-tools` is not on `PATH`, set `PBI_TOOLS_PATH`.
+ADOMD.NET ships with Power BI Desktop. If `pbi-tools` is not on `PATH`, set `PBI_TOOLS_PATH`.
 
-<a id="quick-start-en"></a>
-### 5-minute quick start (EN)
-
-1. Install dependencies.
+<a id="quick-start"></a>
+## Quick Start
 
 ```powershell
 git clone https://github.com/StealthyLabsHQ/powerbi-mcp-local.git
@@ -100,35 +63,42 @@ cd powerbi-mcp-local
 pip install -r requirements.txt
 ```
 
-2. Open Power BI Desktop with a `.pbix` file.
-
-3. Verify connectivity.
+Open Power BI Desktop with a `.pbix` file, then verify connectivity:
 
 ```powershell
 python tests/test_connection.py
 ```
 
-4. Start server.
+Start the MCP server:
 
 ```powershell
 python src/server.py
 ```
 
-Optional:
+Useful launch modes:
 
 ```powershell
 python src/server.py --transport sse --port 8765
 python src/server.py --readonly
-python src/server.py --profile readonly   # prune to read-only tools
-python src/server.py --profile write      # read + write, no destructive
-# SSE auth: set an env var before launch
-$env:PBI_MCP_AUTH_TOKEN = "your-secret-token"
-python src/server.py --transport sse --port 8765
-# clients must send: Authorization: Bearer your-secret-token
+python src/server.py --profile readonly
+python src/server.py --profile write
 ```
 
-<a id="mcp-client-setup-en"></a>
-### MCP client setup (EN)
+For SSE auth:
+
+```powershell
+$env:PBI_MCP_AUTH_TOKEN = "your-secret-token"
+python src/server.py --transport sse --port 8765
+```
+
+Clients must send:
+
+```text
+Authorization: Bearer your-secret-token
+```
+
+<a id="mcp-client-setup"></a>
+## MCP Client Setup
 
 Standard `stdio` config:
 
@@ -143,202 +113,84 @@ Standard `stdio` config:
 }
 ```
 
-SSE mode:
-
-```powershell
-python src/server.py --transport sse --port 8765
-```
-
-Endpoint:
+SSE endpoint:
 
 ```text
 http://localhost:8765/sse
 ```
 
-Guides:
+Setup guides:
 - [docs/SETUP.md](docs/SETUP.md)
 - [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md)
 
-### First prompts to try
+## Example Prompts
 
 - `Connect to Power BI and list all tables with columns.`
 - `Create a measure called Total Sales in table Sales.`
 - `Run this DAX query and show top 20 rows.`
 - `Extract report, add a new page, place 3 visuals, then compile.`
 
-<a id="tool-catalog-en-109-tools"></a>
-### Tool catalog (EN, 109 tools)
+<a id="tool-catalog"></a>
+## Tool Catalog
 
-Core model discovery (8):
-- `pbi_connect`
-- `pbi_list_instances`
-- `pbi_list_tables`
-- `pbi_list_measures`
-- `pbi_list_relationships`
-- `pbi_model_info`
-- `pbi_refresh_metadata`
-- `pbi_validate_model`
+109 MCP tools are grouped into these areas:
 
-Model mutations (15):
-- `pbi_create_measure`
-- `pbi_create_measures`
-- `pbi_delete_measure`
-- `pbi_rename_measure`
-- `pbi_set_format`
-- `pbi_create_relationship`
-- `pbi_update_relationship`
-- `pbi_delete_relationship`
-- `pbi_create_table`
-- `pbi_delete_table`
-- `pbi_rename_table`
-- `pbi_create_column`
-- `pbi_delete_column`
-- `pbi_rename_column`
-- `pbi_execute_dax_as_role`
+| Area | Coverage |
+| --- | --- |
+| Model discovery | instances, tables, measures, relationships, metadata, validation |
+| Model mutations | measures, columns, tables, relationships, formats, role-based DAX |
+| Query and import | DAX execution, traces, validation, refresh, model export |
+| Power Query (M) | read, write, create, import, bulk Excel/folder sources |
+| PBIP/TMDL | list, read, write, and patch TMDL project files |
+| Workflows | model audit, Excel import, measure workflow automation |
+| Quality gates | DAX linting, visual checks, persistence, scenarios, report validation |
+| RLS and calc groups | roles, filters, members, calculation groups |
+| Excel | workbook, sheet, cell/range, formatting, search, Power BI import checks |
+| Reports and visuals | extract, compile, pages, cards, charts, slicers, themes, dashboards |
 
-Query and import (7):
-- `pbi_execute_dax`
-- `pbi_trace_query`
-- `pbi_validate_dax`
-- `pbi_measure_dependencies`
-- `pbi_refresh`
-- `pbi_import_dax_file`
-- `pbi_export_model`
-
-Power Query (M) tools (8):
-- `pbi_get_power_query`
-- `pbi_list_power_queries`
-- `pbi_set_power_query`
-- `pbi_create_import_query`
-- `pbi_create_csv_import_query`
-- `pbi_create_folder_import_query`
-- `pbi_bulk_import_excel`
-- `pbi_import_excel_workbook`
-
-PBIP/TMDL project tools (4):
-- `pbi_list_tmdl_files`
-- `pbi_read_tmdl_file`
-- `pbi_write_tmdl_file`
-- `pbi_patch_tmdl_measure`
-
-Workflow tools (3):
-- `pbi_model_audit_workflow`
-- `pbi_excel_import_workflow`
-- `pbi_measure_workflow`
-
-Quality gates (16):
-- `pbi_audit_model`
-- `pbi_lint_dax`
-- `pbi_detect_name_collisions`
-- `pbi_detect_dirty_dates`
-- `pbi_validate_relationship_plan`
-- `pbi_validate_filter_expression`
-- `pbi_detect_empty_visuals`
-- `pbi_generate_measure_tests`
-- `pbi_validate_pbix_persistence`
-- `pbi_validate_pbix_reopen`
-- `pbi_lint_report_layout`
-- `pbi_validate_visual_bindings`
-- `pbi_score_dashboard`
-- `pbi_run_scenario`
-- `pbi_compare_report_versions`
-- `pbi_export_validation_report`
-
-Row-level security (6):
-- `pbi_list_roles`
-- `pbi_create_role`
-- `pbi_delete_role`
-- `pbi_set_role_filter`
-- `pbi_add_role_member`
-- `pbi_remove_role_member`
-
-Calculation groups (3):
-- `pbi_list_calc_groups`
-- `pbi_create_calc_group`
-- `pbi_delete_calc_group`
-
-Unified visual dispatcher (1):
-- `pbi_add_visual(visual_type, config)` — dispatches to the 9 legacy `pbi_add_*` tools (kept as shims)
-
-Excel tools (13):
-- `excel_list_sheets`
-- `excel_read_sheet`
-- `excel_read_cell`
-- `excel_search`
-- `excel_write_cell`
-- `excel_write_range`
-- `excel_create_sheet`
-- `excel_delete_sheet`
-- `excel_format_range`
-- `excel_auto_width`
-- `excel_create_workbook`
-- `excel_workbook_info`
-- `excel_to_pbi_check`
-
-Report and visual tools (25):
-- `pbi_extract_report`
-- `pbi_create_persistent_report`
-- `pbi_compile_report`
-- `pbi_patch_layout`
-- `pbi_list_pages`
-- `pbi_validate_report_fields`
-- `pbi_repair_report_fields`
-- `pbi_get_page`
-- `pbi_create_page`
-- `pbi_delete_page`
-- `pbi_set_page_size`
-- `pbi_add_card`
-- `pbi_add_bar_chart`
-- `pbi_add_line_chart`
-- `pbi_add_donut_chart`
-- `pbi_add_gauge`
-- `pbi_add_table_visual`
-- `pbi_add_waterfall`
-- `pbi_add_slicer`
-- `pbi_add_text_box`
-- `pbi_remove_visual`
-- `pbi_move_visual`
-- `pbi_apply_design`
-- `pbi_apply_theme`
-- `pbi_build_dashboard`
-
-### End-to-end automation flow
+Unified visual creation is available through:
 
 ```text
-1) Build or update Excel input      -> excel_create_workbook / excel_write_range
-2) Generate or patch M queries      -> pbi_create_import_query / pbi_bulk_import_excel
-3) Model structure updates          -> pbi_create_relationship / pbi_create_column
-4) Measures and formatting          -> pbi_create_measure / pbi_set_format
-5) Validate                         -> pbi_refresh + pbi_execute_dax
-6) Extract report                   -> pbi_extract_report
-7) Create pages and visuals         -> pbi_create_page / pbi_build_dashboard / pbi_add_*
-8) Apply theme                      -> pbi_apply_theme
-9) Compile pbix                     -> pbi_compile_report
+pbi_add_visual(visual_type, config)
 ```
 
-### Troubleshooting (EN)
+## Automation Flow
+
+```text
+Excel input -> Power Query -> model updates -> measures -> validation -> report layout -> compile PBIX
+```
+
+Common tool chain:
+
+```text
+excel_write_range
+pbi_create_import_query
+pbi_create_relationship
+pbi_create_measure
+pbi_refresh
+pbi_execute_dax
+pbi_extract_report
+pbi_build_dashboard
+pbi_compile_report
+```
+
+## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
 | `No module named 'clr'` | Install .NET 6+ runtime, then restart terminal |
 | `No running PBI Desktop instance found` | Open a `.pbix` in Power BI Desktop first |
-| `pbi-tools not found` | Add to `PATH` or set `PBI_TOOLS_PATH` |
+| `pbi-tools not found` | Add it to `PATH` or set `PBI_TOOLS_PATH` |
 | `PermissionError` on `.xlsx` | Close Excel; workbook files are locked while open |
 | Path blocked by policy | Configure `PBI_MCP_ALLOWED_DIRS` |
 
-### FAQ (EN)
+<a id="security"></a>
+## Security
 
-- Does this work without Power BI Pro? Yes, local Power BI Desktop workflow.
-- Linux/macOS support? Not for full functionality. Power BI Desktop local engine is Windows-only.
-- Is `pbi-tools` needed for all tools? No, only report extract/compile and visual-layout tooling.
-- Can I run readonly? Yes, use `python src/server.py --readonly`.
+Built-in safeguards include:
 
-<a id="security-en"></a>
-### Security (EN)
-
-Security middleware includes:
 - local path restrictions and traversal protection
-- DAX/DMV injection and unsafe-query guards
+- DAX/DMV unsafe-query guards
 - Power Query SSRF protections
 - export redaction controls
 - zip safety checks
@@ -346,16 +198,14 @@ Security middleware includes:
 
 Details: [SECURITY.md](SECURITY.md)
 
-### Development
+## Development
 
 ```powershell
 pip install -e ".[dev]"
 pytest -v
 ```
 
----
-
-## Repository layout
+## Repository Layout
 
 ```text
 powerbi-mcp-local/
@@ -364,13 +214,6 @@ powerbi-mcp-local/
 |   |-- pbi_connection.py
 |   |-- security.py
 |   `-- tools/
-|       |-- model.py
-|       |-- measures.py
-|       |-- relationships.py
-|       |-- query.py
-|       |-- power_query.py
-|       |-- excel.py
-|       `-- visuals.py
 |-- tests/
 |-- docs/
 |-- specs/
