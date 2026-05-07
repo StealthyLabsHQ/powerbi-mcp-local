@@ -334,6 +334,133 @@ def pbi_validate_dax_tool(
     )
 
 
+_DAX_TABLE_COLUMN_RE = re.compile(r"(?P<table>'[^']+'|[A-Za-z_][\w]*)\s*\[(?P<column>[^\]]+)\]")
+_DAX_MEASURE_REF_RE = re.compile(r"(?<![\w.\]])\[(?P<measure>[^\]]+)\]")
+
+
+def pbi_validate_dax_semantic_tool(
+    manager: Any,
+    *,
+    expression: str,
+    kind: str = "scalar",
+    format_string: str = "",
+    include_hidden: bool = False,
+) -> dict[str, Any]:
+    """Validate a DAX expression with both semantic and syntax checks.
+
+    Three layers, each cheap and skippable on failure:
+
+    1. **Semantic — references**: scan the expression for ``Table[Column]`` and
+       bare ``[Measure]`` tokens, look them up against the live model index. Each
+       unknown reference is reported under ``semantic.unknown_references`` with
+       its kind. Strict failure means at least one column or measure isn't in
+       the model — typically a typo before commit.
+
+    2. **Semantic — format compatibility (heuristic, never blocks)**: if a
+       ``format_string`` is supplied and looks percent-shaped (``"0.00%"``,
+       ``"0%"``…) but the expression looks scalar-money (``SUM`` / ``SUMX`` /
+       ``DIVIDE`` over column values), surface a ``semantic.suspicious_format``
+       warning. Best-effort; the runtime probe stays the source of truth.
+
+    3. **Runtime**: delegates to ``pbi_validate_dax_tool`` (EVALUATE ROW / TOPN
+       probe) and surfaces any ASEngine error verbatim.
+
+    Returns ``{ok, valid, syntax: ok|error, semantic: {unknown_references,
+    suspicious_format}, runtime_error?}``.
+    """
+    if not expression or not expression.strip():
+        raise PowerBIValidationError("expression is required.")
+
+    # --- Layer 1: semantic references ---
+    # Strip string literals (DAX uses double quotes for strings) so we don't
+    # treat literals like "[Foo]" as measure references.
+    sanitized = re.sub(r'"(?:[^"\\]|\\.)*"', '""', expression)
+
+    columns_seen: set[tuple[str, str]] = set()
+    for match in _DAX_TABLE_COLUMN_RE.finditer(sanitized):
+        table = match.group("table").strip("'")
+        column = match.group("column")
+        columns_seen.add((table, column))
+
+    measures_seen: set[str] = set()
+    # Subtract column references from the leftover tokens so we don't double-count
+    # the [Column] of Table[Column] as a measure reference.
+    column_only_text = _DAX_TABLE_COLUMN_RE.sub("", sanitized)
+    for match in _DAX_MEASURE_REF_RE.finditer(column_only_text):
+        measures_seen.add(match.group("measure"))
+
+    unknown_references: list[dict[str, str]] = []
+    semantic_status = "skipped"
+
+    # Lazy import to avoid circulars: the field-index helper lives in tools.visuals.
+    try:
+        from .visuals import _live_model_field_index
+        index, status = _live_model_field_index(manager, include_hidden=include_hidden)
+    except Exception as exc:  # pragma: no cover
+        index, status = None, {"status": "unavailable", "error": flatten_exception_message(exc)}
+    if index is not None:
+        semantic_status = "checked"
+        for table, column in sorted(columns_seen):
+            if (table.casefold(), column.casefold()) not in index["columns"]:
+                unknown_references.append({"reference": f"{table}[{column}]", "kind": "column"})
+        for measure_name in sorted(measures_seen):
+            if measure_name.casefold() not in index["measures"]:
+                # An unknown bare ``[X]`` could also be a column whose table prefix was elided.
+                # Report it as ``measure_or_column`` so callers know the heuristic is fuzzy.
+                kind = "measure_or_column"
+                if any(col_lc == measure_name.casefold() for _, col_lc in index["columns"]):
+                    # It IS an existing column name, just unqualified — this is technically
+                    # legal DAX but flagged as a style warning.
+                    continue
+                unknown_references.append({"reference": f"[{measure_name}]", "kind": kind})
+
+    # --- Layer 2: format compatibility heuristic ---
+    suspicious_format: list[dict[str, str]] = []
+    if format_string:
+        fmt_lower = format_string.lower()
+        looks_percent = "%" in format_string and ("0%" in format_string or "0.0" in format_string)
+        # Very rough scalar-money heuristic: SUM/SUMX over a non-percent column.
+        looks_money = bool(
+            re.search(r"\b(SUM|SUMX|TOTAL|REVENUE|SALES)\b", expression, re.IGNORECASE)
+            and "%" not in expression
+        )
+        if looks_percent and looks_money:
+            suspicious_format.append({
+                "format_string": format_string,
+                "reason": "percent format on a likely scalar-money expression",
+            })
+        # Currency-shape heuristic: percent expression but currency format.
+        if not looks_percent and ("€" in format_string or "$" in format_string):
+            if "DIVIDE" in expression.upper() and "%" not in fmt_lower:
+                # DIVIDE often produces ratios — currency on a ratio is suspicious.
+                suspicious_format.append({
+                    "format_string": format_string,
+                    "reason": "currency format on a DIVIDE expression that often returns a ratio",
+                })
+
+    # --- Layer 3: runtime probe (delegates to existing tool) ---
+    runtime = pbi_validate_dax_tool(manager, expression=expression, kind=kind)
+    syntax = "ok" if runtime.get("valid") else "error"
+
+    valid = bool(runtime.get("valid")) and not unknown_references
+    return ok(
+        "DAX semantic validation completed."
+        if valid
+        else "DAX semantic validation found at least one issue.",
+        valid=valid,
+        kind=runtime.get("kind", kind),
+        syntax=syntax,
+        semantic={
+            "status": semantic_status,
+            "unknown_references": unknown_references,
+            "suspicious_format": suspicious_format,
+            "columns_referenced": sorted(f"{t}[{c}]" for t, c in columns_seen),
+            "measures_referenced": sorted(f"[{m}]" for m in measures_seen),
+        },
+        runtime_error=runtime.get("error"),
+    )
+
+
 def pbi_measure_dependencies_tool(
     manager: Any,
     *,

@@ -11,7 +11,18 @@ from mcp.server.fastmcp import FastMCP
 from pbi_connection import PowerBIConnectionManager, error_payload, logger
 from security import SECURITY
 from tools import (
+    pbi_apply_format_preset_tool,
+    pbi_create_contribution_measure_tool,
     pbi_create_measures_tool,
+    pbi_list_format_presets_tool,
+    pbi_create_mtd_measure_tool,
+    pbi_create_rolling_average_measure_tool,
+    pbi_create_spy_measure_tool,
+    pbi_create_time_intelligence_pack_tool,
+    pbi_create_topn_measure_tool,
+    pbi_create_variance_measure_tool,
+    pbi_create_yoy_measure_tool,
+    pbi_create_ytd_measure_tool,
     pbi_validate_model_tool,
     excel_auto_width_tool,
     excel_create_sheet_tool,
@@ -38,6 +49,7 @@ from tools import (
     pbi_execute_dax_as_role_tool,
     pbi_execute_dax_tool,
     pbi_export_model_tool,
+    pbi_generate_dax_context_prompt_tool,
     pbi_import_dax_file_tool,
     pbi_list_instances_tool,
     pbi_list_measures_tool,
@@ -45,7 +57,9 @@ from tools import (
     pbi_list_tables_tool,
     pbi_measure_dependencies_tool,
     pbi_model_info_tool,
+    pbi_operation_history_tool,
     pbi_refresh_metadata_tool,
+    pbi_system_health_tool,
     pbi_refresh_tool,
     pbi_rename_column_tool,
     pbi_rename_measure_tool,
@@ -54,6 +68,7 @@ from tools import (
     pbi_set_format_tool,
     pbi_trace_query_tool,
     pbi_update_relationship_tool,
+    pbi_validate_dax_semantic_tool,
     pbi_validate_dax_tool,
     pbi_audit_model_tool,
     pbi_compare_report_versions_tool,
@@ -83,11 +98,15 @@ from tools import (
     pbi_create_persistent_report_tool,
     pbi_add_bar_chart_tool,
     pbi_add_card_tool,
+    pbi_add_combo_chart_tool,
     pbi_add_donut_chart_tool,
     pbi_add_gauge_tool,
+    pbi_add_kpi_tool,
     pbi_add_labelled_card_tool,
     pbi_add_line_chart_tool,
+    pbi_add_matrix_tool,
     pbi_add_role_member_tool,
+    pbi_add_scatter_chart_tool,
     pbi_add_slicer_tool,
     pbi_add_table_visual_tool,
     pbi_add_text_box_tool,
@@ -110,6 +129,9 @@ from tools import (
     pbi_extract_report_tool,
     pbi_get_power_query_tool,
     pbi_get_page_tool,
+    pbi_describe_page_tool,
+    pbi_auto_grid_layout_tool,
+    pbi_convert_visual_type_tool,
     pbi_list_pages_tool,
     pbi_list_power_queries_tool,
     pbi_parameterize_data_source_tool,
@@ -308,10 +330,15 @@ def pbi_create_measures(
     measures: list[dict[str, Any]],
     overwrite: bool = True,
     stop_on_error: bool = False,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Batch-create or update multiple DAX measures with a single SaveChanges call.
 
     measures: list of {name, expression, format_string?, description?, display_folder?, is_hidden?}
+
+    With ``dry_run=True`` the model is not modified; the response carries a
+    ``plan`` describing the per-measure ``would_create``/``would_update``/
+    ``would_fail`` outcome — useful as a preflight before committing.
     """
     return _run(
         "pbi_create_measures",
@@ -321,6 +348,298 @@ def pbi_create_measures(
         measures=measures,
         overwrite=overwrite,
         stop_on_error=stop_on_error,
+        dry_run=dry_run,
+    )
+
+
+@mcp.tool()
+def pbi_create_time_intelligence_pack(
+    table: str,
+    base_measure: str,
+    date_table: str,
+    date_column: str,
+    patterns: list[str] | None = None,
+    display_folder: str = "Time intelligence",
+    format_inherit: bool = True,
+    format_string: str = "",
+    overwrite: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Create a family of time-intelligence measures from one base measure.
+
+    Default patterns: YTD, MTD, QTD, SPY, YOY, YOY %, MA3. Generated names
+    are ``"{base} {suffix}"`` (e.g. ``"Sales YTD"``). Dependency-aware:
+    requesting ``YOY%`` auto-adds ``YOY`` and ``SPY``. Use ``dry_run=True``
+    to preview the plan without writing.
+    """
+    return _run(
+        "pbi_create_time_intelligence_pack",
+        pbi_create_time_intelligence_pack_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        patterns=patterns,
+        display_folder=display_folder,
+        format_inherit=format_inherit,
+        format_string=format_string,
+        overwrite=overwrite,
+        dry_run=dry_run,
+    )
+
+
+@mcp.tool()
+def pbi_create_ytd_measure(
+    table: str,
+    base_measure: str,
+    date_table: str,
+    date_column: str,
+    format_string: str = "",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create a single YTD companion of ``base_measure``."""
+    return _run(
+        "pbi_create_ytd_measure",
+        pbi_create_ytd_measure_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        format_string=format_string,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_create_mtd_measure(
+    table: str,
+    base_measure: str,
+    date_table: str,
+    date_column: str,
+    format_string: str = "",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create a single MTD companion of ``base_measure``."""
+    return _run(
+        "pbi_create_mtd_measure",
+        pbi_create_mtd_measure_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        format_string=format_string,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_create_spy_measure(
+    table: str,
+    base_measure: str,
+    date_table: str,
+    date_column: str,
+    format_string: str = "",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create the Same-Period-Last-Year companion of ``base_measure``."""
+    return _run(
+        "pbi_create_spy_measure",
+        pbi_create_spy_measure_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        format_string=format_string,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_create_yoy_measure(
+    table: str,
+    base_measure: str,
+    date_table: str,
+    date_column: str,
+    format_string: str = "",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create the Year-over-Year delta + SPY companion of ``base_measure``."""
+    return _run(
+        "pbi_create_yoy_measure",
+        pbi_create_yoy_measure_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        format_string=format_string,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_create_variance_measure(
+    table: str,
+    base_measure: str,
+    date_table: str,
+    date_column: str,
+    measure_name: str | None = None,
+    compare_period_offset: int = -1,
+    granularity: str = "year",
+    format_string: str = "",
+    display_folder: str = "Variance",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create a period-over-period variance measure.
+
+    ``[base] - CALCULATE([base], DATEADD(date_table[date_column], offset, granularity))``.
+    Default offset = -1 ⇒ "current vs previous period".
+    """
+    return _run(
+        "pbi_create_variance_measure",
+        pbi_create_variance_measure_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        measure_name=measure_name,
+        compare_period_offset=compare_period_offset,
+        granularity=granularity,
+        format_string=format_string,
+        display_folder=display_folder,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_create_contribution_measure(
+    table: str,
+    base_measure: str,
+    scope_columns: list[str],
+    measure_name: str | None = None,
+    format_string: str = "0.00%",
+    display_folder: str = "Contribution",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create a %-of-total contribution measure.
+
+    ``DIVIDE([base], CALCULATE([base], ALL(scope_columns)))``. ``scope_columns``
+    take the ``"Table.Column"`` form, e.g. ``["Categorie.Nom catégorie"]``.
+    """
+    return _run(
+        "pbi_create_contribution_measure",
+        pbi_create_contribution_measure_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        base_measure=base_measure,
+        scope_columns=scope_columns,
+        measure_name=measure_name,
+        format_string=format_string,
+        display_folder=display_folder,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_create_topn_measure(
+    table: str,
+    base_measure: str,
+    n: int,
+    dimension_table: str,
+    dimension_column: str,
+    measure_name: str | None = None,
+    rank_measure: str | None = None,
+    format_string: str = "",
+    display_folder: str = "Top-N",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create a Top-N filter measure using RANKX over ALL(dim_table[dim_column])."""
+    return _run(
+        "pbi_create_topn_measure",
+        pbi_create_topn_measure_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        base_measure=base_measure,
+        n=n,
+        dimension_table=dimension_table,
+        dimension_column=dimension_column,
+        measure_name=measure_name,
+        rank_measure=rank_measure,
+        format_string=format_string,
+        display_folder=display_folder,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_create_rolling_average_measure(
+    table: str,
+    base_measure: str,
+    window: int,
+    date_table: str,
+    date_column: str,
+    granularity: str = "month",
+    measure_name: str | None = None,
+    format_string: str = "",
+    display_folder: str = "Rolling",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Create a trailing rolling-average measure using DATESINPERIOD."""
+    return _run(
+        "pbi_create_rolling_average_measure",
+        pbi_create_rolling_average_measure_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        base_measure=base_measure,
+        window=window,
+        date_table=date_table,
+        date_column=date_column,
+        granularity=granularity,
+        measure_name=measure_name,
+        format_string=format_string,
+        display_folder=display_folder,
+        overwrite=overwrite,
+    )
+
+
+@mcp.tool()
+def pbi_list_format_presets(filter_substring: str | None = None) -> dict[str, Any]:
+    """Return the format-string preset catalogue (currency, percent, thousands,
+    millions, dates, etc.). Pass ``filter_substring`` to narrow the result.
+    """
+    return _run(
+        "pbi_list_format_presets",
+        pbi_list_format_presets_tool,
+        filter_substring=filter_substring,
+    )
+
+
+@mcp.tool()
+def pbi_apply_format_preset(
+    table: str,
+    names: list[str],
+    preset: str,
+    object_type: str = "measure",
+) -> dict[str, Any]:
+    """Apply a named format preset to a list of measures (or columns).
+
+    Examples of preset names: ``currency_eur_k``, ``percent_4dp``, ``thousands``,
+    ``date_iso``, ``date_short_fr``. See ``pbi_list_format_presets`` for the
+    full catalogue.
+    """
+    return _run(
+        "pbi_apply_format_preset",
+        pbi_apply_format_preset_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        names=names,
+        preset=preset,
+        object_type=object_type,
     )
 
 
@@ -346,8 +665,14 @@ def pbi_create_relationship(
     direction: str = "oneDirection",
     is_active: bool = True,
     relationship_name: str | None = None,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
-    """Create a relationship between two columns."""
+    """Create or update a relationship between two columns.
+
+    With ``overwrite=True``, an existing relationship between the same endpoint
+    columns is updated in place (cardinality/direction/is_active refreshed)
+    instead of raising ``PowerBIDuplicateError``.
+    """
     return _run(
         "pbi_create_relationship",
         pbi_create_relationship_tool,
@@ -360,6 +685,7 @@ def pbi_create_relationship(
         direction=direction,
         is_active=is_active,
         relationship_name=relationship_name,
+        overwrite=overwrite,
     )
 
 
@@ -476,6 +802,29 @@ def pbi_refresh_metadata() -> dict[str, Any]:
 
 
 @mcp.tool()
+def pbi_system_health() -> dict[str, Any]:
+    """Single-call self-diagnostic: connection state, port/PID match, dependency
+    availability, model loaded?, table/measure counts, cache state, last op
+    timestamp. Read-only and safe to call without an active connection.
+    """
+    return _run("pbi_system_health", pbi_system_health_tool, CONNECTION_MANAGER)
+
+
+@mcp.tool()
+def pbi_operation_history(last_n: int = 20) -> dict[str, Any]:
+    """Return the last N tool operations recorded by the connection manager
+    (newest first). Useful for self-debugging after a failure: an LLM can pull
+    the most recent calls to see which writes already landed.
+    """
+    return _run(
+        "pbi_operation_history",
+        pbi_operation_history_tool,
+        CONNECTION_MANAGER,
+        last_n=last_n,
+    )
+
+
+@mcp.tool()
 def pbi_validate_dax(expression: str, kind: str = "scalar") -> dict[str, Any]:
     """Parse-check a DAX expression. kind='scalar' or 'table'."""
     return _run(
@@ -484,6 +833,34 @@ def pbi_validate_dax(expression: str, kind: str = "scalar") -> dict[str, Any]:
         CONNECTION_MANAGER,
         expression=expression,
         kind=kind,
+    )
+
+
+@mcp.tool()
+def pbi_validate_dax_semantic(
+    expression: str,
+    kind: str = "scalar",
+    format_string: str = "",
+    include_hidden: bool = False,
+) -> dict[str, Any]:
+    """Validate a DAX expression with three layers: reference existence
+    (column / measure typo detection against the live model), format-string
+    sanity heuristic (percent format on a money expression, currency on a
+    ratio), and the runtime ASEngine probe.
+
+    Returns ``{valid, syntax: ok|error, semantic: {unknown_references,
+    suspicious_format, columns_referenced, measures_referenced},
+    runtime_error?}``. Use as the canonical preflight before committing a
+    new DAX measure.
+    """
+    return _run(
+        "pbi_validate_dax_semantic",
+        pbi_validate_dax_semantic_tool,
+        CONNECTION_MANAGER,
+        expression=expression,
+        kind=kind,
+        format_string=format_string,
+        include_hidden=include_hidden,
     )
 
 
@@ -912,6 +1289,32 @@ def pbi_export_model(
         path=path,
         include_hidden=include_hidden,
         include_row_counts=include_row_counts,
+    )
+
+
+@mcp.tool()
+def pbi_generate_dax_context_prompt(
+    include_hidden: bool = False,
+    include_dax: bool = True,
+    include_relationships: bool = True,
+    max_chars: int = 12000,
+) -> dict[str, Any]:
+    """Render a compact markdown snapshot of the model (tables, columns,
+    measures, relationships) for direct paste into an LLM system prompt.
+
+    Use before asking another LLM to write DAX so it has the schema in one
+    round-trip. Output is truncated to ``max_chars`` (default 12 000) with a
+    trailing notice when truncation kicks in. Set ``include_dax=False`` for
+    a terser version that omits measure expressions.
+    """
+    return _run(
+        "pbi_generate_dax_context_prompt",
+        pbi_generate_dax_context_prompt_tool,
+        CONNECTION_MANAGER,
+        include_hidden=include_hidden,
+        include_dax=include_dax,
+        include_relationships=include_relationships,
+        max_chars=max_chars,
     )
 
 
@@ -1459,6 +1862,86 @@ def pbi_get_page(extract_folder: str, page: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+def pbi_convert_visual_type(
+    extract_folder: str,
+    page: str,
+    visual_id: str,
+    new_type: str,
+) -> dict[str, Any]:
+    """Migrate an existing visual to a different type while preserving compatible
+    bindings.
+
+    Compatible groups:
+    - card ↔ kpi
+    - clusteredBarChart ↔ clusteredColumnChart ↔ lineChart ↔
+      lineClusteredColumnComboChart
+    - donutChart ↔ treemap
+
+    Incompatible source/target combinations are rejected with a structured
+    error so an LLM can fall back to delete + recreate explicitly.
+    """
+    return _run(
+        "pbi_convert_visual_type",
+        pbi_convert_visual_type_tool,
+        extract_folder=extract_folder,
+        page=page,
+        visual_id=visual_id,
+        new_type=new_type,
+    )
+
+
+@mcp.tool()
+def pbi_auto_grid_layout(
+    specs: list[dict[str, Any]],
+    cols: int = 4,
+    gap: int = 16,
+    start_x: int = 20,
+    start_y: int = 60,
+    cell_width: int | None = None,
+    cell_height: int | None = None,
+    page_width: int = 1280,
+    page_height: int = 720,
+) -> dict[str, Any]:
+    """Auto-position a list of visual specs on an N-column grid.
+
+    Each input spec is returned annotated with x/y/width/height so the caller
+    can pass it through ``pbi_add_visual`` / ``pbi_build_dashboard`` without
+    doing arithmetic. Specs may set ``col_span`` / ``row_span`` to grow over
+    neighbouring cells. Pure utility — no live model touch.
+    """
+    return _run(
+        "pbi_auto_grid_layout",
+        pbi_auto_grid_layout_tool,
+        specs=specs,
+        cols=cols,
+        gap=gap,
+        start_x=start_x,
+        start_y=start_y,
+        cell_width=cell_width,
+        cell_height=cell_height,
+        page_width=page_width,
+        page_height=page_height,
+    )
+
+
+@mcp.tool()
+def pbi_describe_page(extract_folder: str, page: str) -> dict[str, Any]:
+    """LLM-friendly snapshot of a page: per-visual id/type/position/bindings/
+    formatting (title, axis titles, label_display_units), plus a
+    ``binding_health`` rollup. When a Power BI Desktop is connected, bindings
+    are checked against the live model so missing fields surface in the same
+    response without parsing layout JSON.
+    """
+    return _run(
+        "pbi_describe_page",
+        pbi_describe_page_tool,
+        extract_folder=extract_folder,
+        page=page,
+        manager=CONNECTION_MANAGER,
+    )
+
+
+@mcp.tool()
 def pbi_create_page(
     extract_folder: str,
     display_name: str,
@@ -1555,6 +2038,7 @@ def pbi_add_bar_chart(
         height=height,
         title=title,
         legend_column=legend_column,
+        manager=CONNECTION_MANAGER,
     )
 
 
@@ -1583,6 +2067,7 @@ def pbi_add_line_chart(
         width=width,
         height=height,
         title=title,
+        manager=CONNECTION_MANAGER,
     )
 
 
@@ -1611,6 +2096,7 @@ def pbi_add_donut_chart(
         width=width,
         height=height,
         title=title,
+        manager=CONNECTION_MANAGER,
     )
 
 
@@ -1637,6 +2123,153 @@ def pbi_add_table_visual(
         width=width,
         height=height,
         title=title,
+        manager=CONNECTION_MANAGER,
+    )
+
+
+@mcp.tool()
+def pbi_add_scatter_chart(
+    extract_folder: str,
+    page: str,
+    category_column: str,
+    x_measure: str,
+    y_measure: str,
+    x: int,
+    y: int,
+    width: int = 420,
+    height: int = 320,
+    title: str = "",
+    size_measure: str | None = None,
+    legend_column: str | None = None,
+) -> dict[str, Any]:
+    """Add a scatter chart. Roles: Category (column), X (measure), Y (measure),
+    Size (measure, optional), Series (column, optional). Use for correlation
+    analysis between two measures grouped by a dimension."""
+    return _run(
+        "pbi_add_scatter_chart",
+        pbi_add_scatter_chart_tool,
+        extract_folder=extract_folder,
+        page=page,
+        category_column=category_column,
+        x_measure=x_measure,
+        y_measure=y_measure,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+        size_measure=size_measure,
+        legend_column=legend_column,
+        manager=CONNECTION_MANAGER,
+    )
+
+
+@mcp.tool()
+def pbi_add_combo_chart(
+    extract_folder: str,
+    page: str,
+    category_column: str,
+    bar_measures: list[str],
+    line_measures: list[str],
+    x: int,
+    y: int,
+    width: int = 480,
+    height: int = 320,
+    title: str = "",
+    legend_column: str | None = None,
+) -> dict[str, Any]:
+    """Add a combo chart (bars + line overlay). Roles: Category (column),
+    Y (bar measures, list), Y2 (line measures, list). Use for actual vs target
+    comparisons where the target is rendered as a line over actual bars."""
+    return _run(
+        "pbi_add_combo_chart",
+        pbi_add_combo_chart_tool,
+        extract_folder=extract_folder,
+        page=page,
+        category_column=category_column,
+        bar_measures=bar_measures,
+        line_measures=line_measures,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+        legend_column=legend_column,
+        manager=CONNECTION_MANAGER,
+    )
+
+
+@mcp.tool()
+def pbi_add_kpi(
+    extract_folder: str,
+    page: str,
+    indicator_measure: str,
+    trend_axis_column: str,
+    x: int,
+    y: int,
+    width: int = 240,
+    height: int = 160,
+    title: str = "",
+    goal_measure: str | None = None,
+    direction: str = "high_is_good",
+) -> dict[str, Any]:
+    """Add a native KPI visual. Roles: Indicator (measure), TrendLine (column,
+    typically Date), Goal (measure, optional). ``direction`` controls status
+    colour: ``"high_is_good"`` (green when actual > goal) or ``"low_is_good"``."""
+    return _run(
+        "pbi_add_kpi",
+        pbi_add_kpi_tool,
+        extract_folder=extract_folder,
+        page=page,
+        indicator_measure=indicator_measure,
+        trend_axis_column=trend_axis_column,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
+        goal_measure=goal_measure,
+        direction=direction,
+        manager=CONNECTION_MANAGER,
+    )
+
+
+@mcp.tool()
+def pbi_add_matrix(
+    extract_folder: str,
+    page: str,
+    rows: list[str],
+    values: list[str],
+    x: int,
+    y: int,
+    columns: list[str] | None = None,
+    width: int = 540,
+    height: int = 360,
+    title: str = "",
+    subtotals: bool = True,
+    column_layout: str = "stepped",
+) -> dict[str, Any]:
+    """Add a matrix / pivot-table visual. Roles: Rows (column list — required),
+    Columns (column list — optional), Values (measure list — required).
+    ``column_layout``: ``"stepped"`` (compact) or ``"tabular"`` (one column per
+    row level). Matches the docx-style multi-dim table common in business
+    reports."""
+    return _run(
+        "pbi_add_matrix",
+        pbi_add_matrix_tool,
+        extract_folder=extract_folder,
+        page=page,
+        rows=rows,
+        values=values,
+        x=x,
+        y=y,
+        columns=columns,
+        width=width,
+        height=height,
+        title=title,
+        subtotals=subtotals,
+        column_layout=column_layout,
+        manager=CONNECTION_MANAGER,
     )
 
 
@@ -1665,6 +2298,7 @@ def pbi_add_waterfall(
         width=width,
         height=height,
         title=title,
+        manager=CONNECTION_MANAGER,
     )
 
 
@@ -1691,6 +2325,7 @@ def pbi_add_slicer(
         width=width,
         height=height,
         slicer_type=slicer_type,
+        manager=CONNECTION_MANAGER,
     )
 
 
@@ -2014,8 +2649,14 @@ def pbi_add_role_member(
     member_name: str,
     member_type: str = "external",
     identity_provider: str = "AzureAD",
+    overwrite: bool = False,
 ) -> dict[str, Any]:
-    """Add a member to an RLS role. member_type: external|windows."""
+    """Add (or update) a member on an RLS role. member_type: external|windows.
+
+    With ``overwrite=True``, an existing member with the same name is updated
+    in place (identity_provider refreshed when external) instead of raising
+    ``PowerBIDuplicateError``.
+    """
     return _run(
         "pbi_add_role_member",
         pbi_add_role_member_tool,
@@ -2024,6 +2665,7 @@ def pbi_add_role_member(
         member_name=member_name,
         member_type=member_type,
         identity_provider=identity_provider,
+        overwrite=overwrite,
     )
 
 

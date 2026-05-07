@@ -242,5 +242,89 @@ class SymlinkParentRejectionTests(unittest.TestCase):
         self.assertIn("Symlink", str(ctx.exception))
 
 
+class OperationHistoryTests(unittest.TestCase):
+    """Connection manager records operations into a ring buffer."""
+
+    def test_ring_buffer_records_read_and_write(self) -> None:
+        from pbi_connection import PowerBIConnectionManager
+        m = PowerBIConnectionManager()
+        # Direct record (no live PBI needed) — the helper is the only thing under test.
+        m._record_operation(op="read_one", kind="read", started=0.0, ok_=True)
+        m._record_operation(op="write_one", kind="write", started=0.0, ok_=False, error=ValueError("boom"))
+        history = m.operation_history(last_n=10)
+        self.assertEqual(len(history), 2)
+        # Newest first.
+        self.assertEqual(history[0]["op"], "write_one")
+        self.assertFalse(history[0]["ok"])
+        self.assertEqual(history[0]["error_type"], "ValueError")
+        self.assertEqual(history[1]["op"], "read_one")
+        self.assertTrue(history[1]["ok"])
+
+    def test_ring_buffer_capacity_50(self) -> None:
+        from pbi_connection import PowerBIConnectionManager
+        m = PowerBIConnectionManager()
+        for i in range(60):
+            m._record_operation(op=f"op_{i}", kind="read", started=0.0, ok_=True)
+        history = m.operation_history(last_n=60)
+        self.assertEqual(len(history), 50)
+        # Oldest retained should be op_10 (60 - 50).
+        names = [entry["op"] for entry in history]
+        self.assertEqual(names[0], "op_59")
+        self.assertEqual(names[-1], "op_10")
+
+
+class SystemHealthTests(unittest.TestCase):
+    """pbi_system_health returns a usable snapshot even without a live connection."""
+
+    def test_snapshot_when_disconnected(self) -> None:
+        from pbi_connection import PowerBIConnectionManager
+        from tools.model import pbi_system_health_tool
+        m = PowerBIConnectionManager()
+        result = pbi_system_health_tool(m)
+        self.assertTrue(result["ok"], result)
+        self.assertFalse(result["connected"])
+        self.assertIsNone(result["model_loaded"]) if result.get("model_loaded") is None else self.assertFalse(result["model_loaded"])
+        self.assertIn("dependencies", result)
+        # mcp dependency at minimum should be available since this is an MCP server repo.
+        self.assertIn("mcp", result["dependencies"])
+
+
+class TimeIntelligenceTemplateTests(unittest.TestCase):
+    """Time-intelligence DAX templates render the canonical strings."""
+
+    def test_dependency_expansion(self) -> None:
+        from tools.measures import _resolve_ti_patterns
+        # Requesting YOY% pulls YOY and SPY in front of it.
+        resolved = _resolve_ti_patterns(["YOY%"])
+        self.assertEqual(resolved, ["SPY", "YOY", "YOY%"])
+
+    def test_unknown_pattern_raises(self) -> None:
+        from pbi_connection import PowerBIValidationError
+        from tools.measures import _resolve_ti_patterns
+        with self.assertRaises(PowerBIValidationError):
+            _resolve_ti_patterns(["fOO"])
+
+    def test_template_renders(self) -> None:
+        from tools.measures import _TIME_INTELLIGENCE_TEMPLATES
+        rendered = _TIME_INTELLIGENCE_TEMPLATES["YTD"]["template"].format(
+            base="Sales", date_table="Date", date_column="Date",
+        )
+        self.assertEqual(rendered, "CALCULATE([Sales], DATESYTD(Date[Date]))")
+
+
+class DAXSemanticReferenceParserTests(unittest.TestCase):
+    """Reference scanner inside pbi_validate_dax_semantic_tool finds the right tokens."""
+
+    def test_extracts_columns_and_measures(self) -> None:
+        from tools.query import _DAX_TABLE_COLUMN_RE, _DAX_MEASURE_REF_RE
+        expr = 'CALCULATE([Sales], Date[Year] = 2024) - [Sales SPY]'
+        cols = {(m.group("table"), m.group("column")) for m in _DAX_TABLE_COLUMN_RE.finditer(expr)}
+        self.assertEqual(cols, {("Date", "Year")})
+        # Strip column refs first to isolate bare measures.
+        leftover = _DAX_TABLE_COLUMN_RE.sub("", expr)
+        measures = {m.group("measure") for m in _DAX_MEASURE_REF_RE.finditer(leftover)}
+        self.assertEqual(measures, {"Sales", "Sales SPY"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

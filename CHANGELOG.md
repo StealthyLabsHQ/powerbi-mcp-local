@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.10.0] — 2026-05-07 — Stability foundation, LLM-resilient visual surface, advanced visuals, DAX power tools
+
+124 tools registered, 0 orphans · 110/110 tests passing · 17 new tools, 6 hardened, 4 new DAX scaffolding helpers.
+
+### Pillar A — Stability foundation
+
+- `pbi_system_health` — single-call diagnostic. Returns `connected`, `port`, `port_open`, `pid_match`, `tom_available`, `adomd_available`, `model_loaded`, `model_name`, `table_count`, `measure_count`, `cache.{write_generation, entries}`, `last_operation_ts`, `dependencies` (mcp / pythonnet / pyadomd / pbi_pyadomd). Read-only and safe to call without an active connection — useful as a one-stop health check before any LLM agent attempts a write.
+- `pbi_operation_history` — exposes a 50-entry ring buffer of recent ops recorded inside `PowerBIConnectionManager` (`{ts, op, kind: read|write, duration_ms, ok, error_type?, error_code?, error_message?}`). `flatten_exception_message` is used so the cause chain travels with each failure entry. Use after a failure to see what already landed.
+- Idempotency standardisation: `pbi_create_relationship` and `pbi_add_role_member` now accept `overwrite=False`. With `overwrite=True`, existing endpoints/members are updated in place and the response carries `action="updated"` instead of raising `PowerBIDuplicateError`. `pbi_create_table_tool`, `pbi_create_column_tool`, `pbi_create_role_tool`, `pbi_create_calc_group_tool` already had this — surface aligned.
+- `pbi_create_measures` now accepts `dry_run=False`. With `dry_run=True`, every measure is name + expression validated and a per-item `planned_action` is reported (`would_create` / `would_update` / `would_fail`). No model mutation. Mirrors the pattern shipped earlier on `pbi_relocate_data_source`.
+
+### Pillar B — LLM-resilient visual surface
+
+- Field-existence validation extended from 3 to **9** add_* tools: `pbi_add_card`, `pbi_add_gauge`, `pbi_add_labelled_card` (already shipped) plus `pbi_add_bar_chart`, `pbi_add_line_chart`, `pbi_add_donut_chart`, `pbi_add_table_visual`, `pbi_add_waterfall`, `pbi_add_slicer`. Server wrappers forward `CONNECTION_MANAGER` automatically — typos fail fast before the layout is written.
+- New pre-flight projection role validator `_validate_projection_roles(visual_type, projections, *, manager=None)` wired into `_create_chart_container`. Two checks: (1) every role is in `VISUAL_FIELD_ROLES[visual_type]`; (2) when a connection manager is passed, each reference's resolved kind matches the new `VISUAL_ROLE_KINDS` table (e.g. measure-in-Category mistakes are rejected at tool-call time). Catches the most common LLM mistake when constructing visuals.
+- `pbi_describe_page` — read-only structured snapshot of a page. Per-visual `id`, `type`, `position`, `bindings` (role → list of refs), `formatting` (title, axis titles, label_display_units), and a `binding_health` rollup (`ok` | `missing_field` | `wrong_role` | `issues`). Lets an LLM introspect what's on the page without parsing layout JSON.
+- `pbi_auto_grid_layout` — pure utility. Positions a list of visual specs on an N-column grid with configurable padding, supports `col_span`/`row_span`, returns each spec annotated with `x`/`y`/`width`/`height`. No live model touch — saves LLMs from doing arithmetic and prevents overlap.
+- `pbi_convert_visual_type` — migrate an existing visual to a different type while preserving compatible bindings. Compatibility groups: `card↔kpi`, `clusteredBarChart↔clusteredColumnChart↔lineChart↔lineClusteredColumnComboChart`, `donutChart↔treemap`. Incompatible source/target combinations are rejected with a structured `details.reason="incompatible"`.
+
+### Pillar C — Advanced visual types
+
+- `pbi_add_scatter_chart` — `scatterChart`. Roles: Category (column), X (measure), Y (measure), Size (measure, optional), Series (column, optional). For correlation analysis between two measures grouped by a dimension.
+- `pbi_add_combo_chart` — `lineClusteredColumnComboChart`. Roles: Category, Y (bar measures, list), Y2 (line measures, list). Use for actual-vs-target dashboards.
+- `pbi_add_kpi` — native `kpi` visual. Roles: Indicator (measure), TrendLine (column), Goal (measure, optional). `direction="high_is_good"|"low_is_good"` controls the status colour interpretation.
+- `pbi_add_matrix` — `pivotTable`. Roles: Rows, Columns, Values. `column_layout="stepped"|"tabular"`, `subtotals=True|False`. Matches the docx-style multi-dim table common in business reports.
+
+### Pillar D — DAX power tools
+
+- `pbi_create_time_intelligence_pack` — batch creates a family of measures (default: YTD, MTD, QTD, SPY, YOY, YOY %, MA3) from one base measure. Dependency-aware: `YOY%` auto-pulls `YOY` and `SPY`. Supports `dry_run=True` for a no-mutation preview, `format_inherit=True` to inherit the base measure's format, and per-pattern format overrides (e.g. YOY % defaults to `0.00%`).
+- Per-pattern wrappers: `pbi_create_ytd_measure`, `pbi_create_mtd_measure`, `pbi_create_spy_measure`, `pbi_create_yoy_measure` — same engine, single pattern when only one is needed.
+- `pbi_create_variance_measure`, `pbi_create_contribution_measure`, `pbi_create_topn_measure`, `pbi_create_rolling_average_measure` — canonical DAX templates for the four most-asked analytics patterns. Each generates a measure with the right description, display folder, and (when supplied) format string.
+- `pbi_apply_format_preset` + `pbi_list_format_presets` — preset library covering `currency_eur`/`currency_eur_k`/`currency_eur_m`, `currency_usd` family, `percent`/`percent_0dp`/`percent_1dp`/`percent_2dp`/`percent_4dp`, `thousands`, `millions`, `decimal_2`, `integer`, `integer_no_sep`, `date_iso`, `date_short_fr`, `date_short_us`, `date_long_fr`, `datetime_iso`. New module `src/tools/formats.py`.
+- `pbi_validate_dax_semantic` — three-layer DAX validation. (1) References: parses `Table[Column]` and bare `[Measure]` tokens, checks each against the live model index, surfaces unknown references in `semantic.unknown_references`. (2) Format compatibility heuristic (best-effort, never blocks) — flags percent format on a money expression or currency on a ratio. (3) Runtime probe: delegates to `pbi_validate_dax`. Returns `{valid, syntax, semantic, runtime_error?}`.
+- `pbi_generate_dax_context_prompt` — compact markdown snapshot of the model (tables, columns, measures, relationships) ready to paste into an LLM system prompt. `include_dax`/`include_relationships`/`max_chars` knobs. Truncation respects line boundaries with a clear notice.
+
+### Tool registry
+
+`_audit_tool_registry()` confirms 124/124 wrappers (was 102 in v0.8.2, +22 net new tools). 0 orphans on every pillar.
+
+### Tests
+
+110 passing across `test_visuals + test_security + test_workflows + test_quality + test_query + test_visual_field_validation` (2 platform-conditional skips). New cases:
+- Stability: ring buffer rolls over at 50, returns newest-first; system health works disconnected; time-intel template renders the canonical strings; dependency expansion adds SPY/YOY automatically when YOY% is requested.
+- Visuals: auto-grid places specs on 3-column grid with correct spacing, honours col_span; convert card → kpi preserves bindings; donut → kpi rejected as `incompatible`; describe_page returns structured visuals with positions, bindings, binding_health; projection role validator rejects unknown role and (with manager) measure-in-Category kind mismatch.
+- DAX: format preset catalogue and lookup; semantic reference parser extracts `Table[Column]` and bare `[Measure]` tokens correctly.
+
 ## [0.8.2] — 2026-05-07 — Live-model field validation, error chains, symlink hardening
 
 ### Added — fail-fast field validation

@@ -59,8 +59,16 @@ def pbi_create_relationship_tool(
     direction: str = "oneDirection",
     is_active: bool = True,
     relationship_name: str | None = None,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
-    """Create a single-column relationship."""
+    """Create or update a single-column relationship.
+
+    With ``overwrite=False`` (default), raises ``PowerBIDuplicateError`` when
+    a relationship between the same endpoint columns already exists. With
+    ``overwrite=True`` the existing relationship is updated in place
+    (cardinality / direction / is_active refreshed) and the response carries
+    ``action="updated"``.
+    """
     validate_model_object_name(from_table)
     validate_model_object_name(from_column)
     validate_model_object_name(to_table)
@@ -90,6 +98,7 @@ def pbi_create_relationship_tool(
                 details={"table": to_table, "column": to_column},
             )
 
+        existing_match = None
         for existing in model.Relationships:
             existing_from = existing.FromColumn
             existing_to = existing.ToColumn
@@ -106,13 +115,20 @@ def pbi_create_relationship_tool(
                 and str(existing_to.Name).casefold() == from_column.casefold()
             )
             if same_direction or reverse_direction:
-                raise PowerBIDuplicateError(
-                    f"A relationship between '{from_table}[{from_column}]' and '{to_table}[{to_column}]' already exists.",
-                    details={"existing_relationship": str(existing.Name)},
-                )
+                if not overwrite:
+                    raise PowerBIDuplicateError(
+                        f"A relationship between '{from_table}[{from_column}]' and '{to_table}[{to_column}]' already exists.",
+                        details={"existing_relationship": str(existing.Name)},
+                    )
+                existing_match = existing
+                break
 
-        relationship = tom.SingleColumnRelationship()
-        relationship.Name = relationship_name or f"{from_table}_{from_column}__{to_table}_{to_column}"
+        action = "updated" if existing_match is not None else "created"
+        relationship = existing_match if existing_match is not None else tom.SingleColumnRelationship()
+        if existing_match is None:
+            relationship.Name = relationship_name or f"{from_table}_{from_column}__{to_table}_{to_column}"
+        elif relationship_name:
+            relationship.Name = relationship_name
         relationship.FromColumn = source_column
         relationship.ToColumn = target_column
         relationship.IsActive = is_active
@@ -126,7 +142,8 @@ def pbi_create_relationship_tool(
             effective_direction = "bothDirections"
         relationship.CrossFilteringBehavior = _map_direction(tom, effective_direction)
 
-        model.Relationships.Add(relationship)
+        if existing_match is None:
+            model.Relationships.Add(relationship)
         return {
             "relationship": {
                 "name": relationship.Name,
@@ -137,13 +154,15 @@ def pbi_create_relationship_tool(
                 "cardinality": cardinality,
                 "direction": direction,
                 "is_active": is_active,
-            }
+            },
+            "action": action,
         }
 
     payload = manager.execute_write("create_relationship", _mutator)
     return ok(
-        f"Relationship '{payload['relationship']['name']}' created successfully.",
+        f"Relationship '{payload['relationship']['name']}' {payload['action']}.",
         relationship=payload["relationship"],
+        action=payload["action"],
         save_result=payload["save_result"],
         connection=payload["connection"],
     )

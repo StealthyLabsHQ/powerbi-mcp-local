@@ -42,14 +42,39 @@ DEFAULT_VISUAL_SIZES = {
 VISUAL_FIELD_ROLES = {
     "card": {"Values"},
     "clusteredBarChart": {"Category", "Y", "Series"},
+    "clusteredColumnChart": {"Category", "Y", "Series"},
     "lineChart": {"Category", "Y"},
     "donutChart": {"Category", "Y"},
     "tableEx": {"Values"},
     "waterfallChart": {"Category", "Y"},
     "slicer": {"Values"},
     "gauge": {"Y", "Goal"},
-    "kpi": {"Value", "Goal"},
+    "kpi": {"Indicator", "TrendLine", "Goal"},
     "map": {"Category", "Y"},
+    "scatterChart": {"Category", "X", "Y", "Size", "Series"},
+    "lineClusteredColumnComboChart": {"Category", "Y", "Y2", "Series"},
+    "pivotTable": {"Rows", "Columns", "Values"},
+}
+
+# Per-role expected reference kind ("column", "measure", or "any"). Used by the
+# pre-flight projection role validator to catch "wrong field kind in role"
+# mistakes (e.g. an LLM puts a measure into Category) at tool-call time, before
+# we ever write the layout.
+VISUAL_ROLE_KINDS: dict[str, dict[str, str]] = {
+    "card": {"Values": "measure"},
+    "clusteredBarChart": {"Category": "column", "Y": "measure", "Series": "column"},
+    "clusteredColumnChart": {"Category": "column", "Y": "measure", "Series": "column"},
+    "lineChart": {"Category": "column", "Y": "measure"},
+    "donutChart": {"Category": "column", "Y": "measure"},
+    "tableEx": {"Values": "any"},
+    "waterfallChart": {"Category": "column", "Y": "measure"},
+    "slicer": {"Values": "column"},
+    "gauge": {"Y": "measure", "Goal": "measure"},
+    "kpi": {"Indicator": "measure", "TrendLine": "column", "Goal": "measure"},
+    "map": {"Category": "column", "Y": "measure"},
+    "scatterChart": {"Category": "column", "X": "measure", "Y": "measure", "Size": "measure", "Series": "column"},
+    "lineClusteredColumnComboChart": {"Category": "column", "Y": "measure", "Y2": "measure", "Series": "column"},
+    "pivotTable": {"Rows": "column", "Columns": "column", "Values": "measure"},
 }
 
 DESIGN_PRESETS: dict[str, dict[str, Any]] = {
@@ -478,6 +503,84 @@ def _persistence_risks(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if item.get("source") == "live_model"
         and item.get("extract_metadata") == "missing"
     ]
+
+
+def _validate_projection_roles(
+    visual_type: str,
+    projections: dict[str, list[dict[str, str]]] | None,
+    *,
+    manager: Any | None = None,
+    include_hidden: bool = False,
+) -> dict[str, Any]:
+    """Pre-flight check that every role used in ``projections`` is allowed for
+    ``visual_type`` and (when a live model is reachable) carries a reference of
+    the expected kind (column vs measure).
+
+    Use at tool-call time, before writing the layout. ``visual_type`` matches
+    the singleVisual.visualType value (e.g. ``clusteredBarChart``,
+    ``scatterChart``). Raises ``PowerBIValidationError`` with structured
+    ``details`` listing every offending role + reference.
+    """
+    if not isinstance(projections, dict) or not projections:
+        return {"status": "skipped", "reason": "no_projections"}
+    allowed = VISUAL_FIELD_ROLES.get(visual_type)
+    role_kinds = VISUAL_ROLE_KINDS.get(visual_type, {})
+
+    unknown_roles: list[str] = []
+    if allowed is not None:
+        for role in projections:
+            if role not in allowed:
+                unknown_roles.append(role)
+    if unknown_roles:
+        raise PowerBIValidationError(
+            f"Visual type '{visual_type}' does not accept role(s): {', '.join(sorted(unknown_roles))}.",
+            details={
+                "visual_type": visual_type,
+                "unknown_roles": sorted(unknown_roles),
+                "allowed_roles": sorted(allowed) if allowed else [],
+            },
+        )
+
+    if manager is None or not role_kinds:
+        return {"status": "roles_only_checked"}
+    index, status = _live_model_field_index(manager, include_hidden=include_hidden)
+    if index is None:
+        return status
+
+    role_kind_mismatches: list[dict[str, str]] = []
+    for role, items in projections.items():
+        expected_kind = role_kinds.get(role, "any")
+        if expected_kind == "any":
+            continue
+        for item in items or []:
+            ref = item.get("queryRef") if isinstance(item, dict) else None
+            if not isinstance(ref, str) or not ref.strip():
+                continue
+            actual_kind: str | None = None
+            if ref.casefold() in index["measures"]:
+                actual_kind = "measure"
+            else:
+                # Look up by short column name across all tables.
+                for table_lc, col_lc in index["columns"]:
+                    if col_lc == ref.casefold():
+                        actual_kind = "column"
+                        break
+            if actual_kind is not None and actual_kind != expected_kind:
+                role_kind_mismatches.append({
+                    "role": role,
+                    "reference": ref,
+                    "expected_kind": expected_kind,
+                    "actual_kind": actual_kind,
+                })
+    if role_kind_mismatches:
+        raise PowerBIValidationError(
+            "Projection role/kind mismatch — at least one reference is the wrong kind for its role.",
+            details={
+                "visual_type": visual_type,
+                "mismatches": role_kind_mismatches,
+            },
+        )
+    return {"status": "roles_and_kinds_checked"}
 
 
 def _validate_field_references_live(
@@ -1006,7 +1109,12 @@ def _create_chart_container(
     references: list[str],
     measure_home_map: dict[str, str] | None = None,
     extra_single_visual: dict[str, Any] | None = None,
+    manager: Any | None = None,
 ) -> dict[str, Any]:
+    # Pre-flight role validation: catches "role not allowed for this visual
+    # type" and (with manager) "wrong reference kind in role" before we ever
+    # write a layout that PBI Desktop would refuse to render.
+    _validate_projection_roles(visual_type, projections, manager=manager)
     return _make_visual_container(
         section=section,
         visual_type=visual_type,
@@ -1272,6 +1380,347 @@ def pbi_get_page_tool(extract_folder: str, page: str) -> dict[str, Any]:
     return _run(_impl)
 
 
+def pbi_convert_visual_type_tool(
+    extract_folder: str,
+    page: str,
+    visual_id: str,
+    new_type: str,
+) -> dict[str, Any]:
+    """Migrate an existing visual to a different type while preserving
+    compatible field bindings.
+
+    Compatibility groups (bindings preserved as-is within a group):
+    - ``card`` ↔ ``kpi`` (Values ↔ Indicator)
+    - ``clusteredBarChart`` ↔ ``clusteredColumnChart`` ↔ ``lineChart`` ↔
+      ``lineClusteredColumnComboChart`` (Category/Y/Series identical)
+    - ``donutChart`` ↔ ``treemap``
+
+    Raises ``PowerBIValidationError`` with a clear ``reason`` when the source
+    and target are incompatible. Use this so an LLM can recover from "I picked
+    the wrong visual type" without losing bindings.
+    """
+    new_type_clean = str(new_type).strip()
+    if not new_type_clean:
+        raise PowerBIValidationError("new_type must be non-empty.")
+    if new_type_clean not in VISUAL_FIELD_ROLES:
+        raise PowerBIValidationError(
+            f"Unknown target visual type '{new_type_clean}'.",
+            details={"new_type": new_type_clean, "known_types": sorted(VISUAL_FIELD_ROLES)},
+        )
+
+    # Source-target role rewrites. Each entry maps source role → target role.
+    # If a source role isn't covered, the conversion is rejected (no silent loss).
+    COMPATIBILITY: dict[tuple[str, str], dict[str, str]] = {
+        ("card", "kpi"): {"Values": "Indicator"},
+        ("kpi", "card"): {"Indicator": "Values"},
+        ("donutChart", "treemap"): {"Category": "Category", "Y": "Y"},
+        ("treemap", "donutChart"): {"Category": "Category", "Y": "Y"},
+    }
+    # Charts that share Category/Y/Series — identity rewrites are filled
+    # automatically.
+    chart_family = {"clusteredBarChart", "clusteredColumnChart", "lineChart", "lineClusteredColumnComboChart"}
+    for src in chart_family:
+        for tgt in chart_family:
+            if src != tgt:
+                COMPATIBILITY.setdefault((src, tgt), {"Category": "Category", "Y": "Y", "Series": "Series"})
+
+    def _impl() -> dict[str, Any]:
+        folder, layout = _load_layout(extract_folder)
+        section = _find_page(layout, page)
+        _, container, config = _find_visual(section, visual_id)
+        sv = config.setdefault("singleVisual", {})
+        old_type = str(sv.get("visualType") or "")
+        if old_type == new_type_clean:
+            return ok(
+                f"Visual '{visual_id}' already has type '{new_type_clean}'; nothing to do.",
+                visual_id=visual_id,
+                old_type=old_type,
+                new_type=new_type_clean,
+                changed=False,
+            )
+        rewrite = COMPATIBILITY.get((old_type, new_type_clean))
+        if rewrite is None:
+            raise PowerBIValidationError(
+                f"No compatible role rewrite from '{old_type}' to '{new_type_clean}'.",
+                details={
+                    "old_type": old_type,
+                    "new_type": new_type_clean,
+                    "supported_targets_from_old": sorted({tgt for (src, tgt) in COMPATIBILITY if src == old_type}),
+                    "reason": "incompatible",
+                },
+            )
+
+        old_projections = sv.get("projections", {}) or {}
+        new_projections: dict[str, list[dict[str, str]]] = {}
+        unmapped_roles: list[str] = []
+        for role, items in old_projections.items():
+            target_role = rewrite.get(role)
+            if target_role is None:
+                unmapped_roles.append(role)
+                continue
+            new_projections[target_role] = items
+
+        if unmapped_roles:
+            raise PowerBIValidationError(
+                f"Source role(s) {unmapped_roles} not mapped by '{old_type}' → '{new_type_clean}'. Aborting to avoid silent data loss.",
+                details={"unmapped_roles": unmapped_roles, "rewrite": rewrite},
+            )
+
+        # Validate the new projections against the new visual type's role schema.
+        _validate_projection_roles(new_type_clean, new_projections)
+
+        sv["visualType"] = new_type_clean
+        sv["projections"] = new_projections
+        # Refresh the embedded query so the visualType change is reflected in the query payload too.
+        prototype_query = sv.get("prototypeQuery") or {"Version": 2, "From": [], "Select": []}
+        sv["prototypeQuery"] = prototype_query
+        container["config"] = _dump_embedded_json(config)
+        query_payload = {"Commands": [{"SemanticQueryDataShapeCommand": {"Query": prototype_query}}]}
+        container["query"] = _dump_embedded_json(query_payload)
+        _save_layout(folder, layout)
+        return ok(
+            f"Visual '{visual_id}' converted: {old_type} → {new_type_clean}.",
+            visual_id=visual_id,
+            old_type=old_type,
+            new_type=new_type_clean,
+            role_rewrites=rewrite,
+            changed=True,
+        )
+
+    return _run(_impl)
+
+
+def pbi_auto_grid_layout_tool(
+    specs: list[dict[str, Any]],
+    *,
+    cols: int = 4,
+    gap: int = 16,
+    start_x: int = 20,
+    start_y: int = 60,
+    cell_width: int | None = None,
+    cell_height: int | None = None,
+    page_width: int = DEFAULT_PAGE_WIDTH,
+    page_height: int = DEFAULT_PAGE_HEIGHT,
+) -> dict[str, Any]:
+    """Compute non-overlapping (x, y, width, height) for a list of visual
+    specs on a column-based grid.
+
+    No layout writes happen here — the function is pure and offline. Each
+    input ``spec`` is returned annotated with ``x``, ``y``, ``width``,
+    ``height``. ``cell_width`` defaults to ``(page_width - 2*start_x - gap*(cols-1)) / cols``
+    so the grid fits the page width. ``cell_height`` defaults to 200.
+    Specs may set ``col_span`` / ``row_span`` to grow over neighbours; the
+    walker advances per cell so spans never overlap.
+    """
+    if not isinstance(specs, list) or not specs:
+        raise PowerBIValidationError("specs must be a non-empty list of visual configs.")
+    if cols < 1:
+        raise PowerBIValidationError("cols must be >= 1.", details={"cols": cols})
+    if gap < 0:
+        raise PowerBIValidationError("gap must be >= 0.", details={"gap": gap})
+
+    # Derive cell sizes.
+    usable_width = max(0, page_width - 2 * start_x - gap * max(0, cols - 1))
+    cw = int(cell_width if cell_width is not None else (usable_width // cols if cols else usable_width))
+    if cw <= 0:
+        raise PowerBIValidationError(
+            "Computed cell_width is non-positive; reduce cols or start_x or pass cell_width explicitly.",
+            details={"page_width": page_width, "start_x": start_x, "gap": gap, "cols": cols},
+        )
+    ch = int(cell_height) if cell_height is not None else 200
+
+    # Track which cells are occupied so spans don't overlap.
+    occupied: set[tuple[int, int]] = set()
+    placed: list[dict[str, Any]] = []
+    cursor_row = 0
+    cursor_col = 0
+
+    def _next_free_cell(row: int, col: int) -> tuple[int, int]:
+        while (row, col) in occupied:
+            col += 1
+            if col >= cols:
+                col = 0
+                row += 1
+        return row, col
+
+    for index, spec in enumerate(specs):
+        if not isinstance(spec, dict):
+            raise PowerBIValidationError(
+                f"specs[{index}] must be a dict, got {type(spec).__name__}.",
+                details={"index": index},
+            )
+        col_span = max(1, int(spec.get("col_span", 1)))
+        if col_span > cols:
+            col_span = cols
+        row_span = max(1, int(spec.get("row_span", 1)))
+
+        # Find a row/col where the whole span fits.
+        cursor_row, cursor_col = _next_free_cell(cursor_row, cursor_col)
+        while cursor_col + col_span > cols or any(
+            (cursor_row + r, cursor_col + c) in occupied
+            for r in range(row_span)
+            for c in range(col_span)
+        ):
+            cursor_col += 1
+            if cursor_col + col_span > cols:
+                cursor_col = 0
+                cursor_row += 1
+            cursor_row, cursor_col = _next_free_cell(cursor_row, cursor_col)
+
+        for r in range(row_span):
+            for c in range(col_span):
+                occupied.add((cursor_row + r, cursor_col + c))
+
+        x = start_x + cursor_col * (cw + gap)
+        y = start_y + cursor_row * (ch + gap)
+        width = cw * col_span + gap * (col_span - 1)
+        height = ch * row_span + gap * (row_span - 1)
+        placed_spec = dict(spec)
+        placed_spec.update({"x": x, "y": y, "width": width, "height": height})
+        placed.append(placed_spec)
+
+        cursor_col += col_span
+        if cursor_col >= cols:
+            cursor_col = 0
+            cursor_row += 1
+
+    total_height_used = start_y + (cursor_row + 1) * (ch + gap)
+    return ok(
+        f"Auto-grid: positioned {len(placed)} spec(s) on a {cols}-column grid.",
+        cols=cols,
+        gap=gap,
+        cell_width=cw,
+        cell_height=ch,
+        start_x=start_x,
+        start_y=start_y,
+        page_width=page_width,
+        page_height=page_height,
+        used_height_estimate=total_height_used,
+        specs=placed,
+    )
+
+
+def pbi_describe_page_tool(
+    extract_folder: str,
+    page: str,
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    """Return a structured, LLM-friendly snapshot of a report page.
+
+    Unlike ``pbi_get_page_tool`` (which exposes the raw projections), this
+    surface returns one entry per visual with:
+
+    - ``id``, ``type``, ``position`` (x, y, width, height)
+    - ``bindings`` mapping each role (Values, Category, Y, …) to a flat list
+      of query refs
+    - ``formatting``: extracted title / X axis title / Y axis title /
+      ``label_display_units`` when present
+    - ``binding_health``: ``ok`` | ``missing_field`` | ``wrong_role`` based on
+      live-model validation when ``manager`` is supplied; ``unchecked``
+      otherwise
+
+    Use this so an LLM can introspect the current page without having to
+    parse ``Report/Layout`` JSON itself.
+    """
+    def _impl() -> dict[str, Any]:
+        folder, layout = _load_layout(extract_folder)
+        section = _find_page(layout, page)
+        measure_home_map = _scan_measure_home_tables(folder)
+        model_fields, _ = _live_model_field_index(manager, include_hidden=False) if manager else (None, {"status": "unavailable"})
+
+        visuals: list[dict[str, Any]] = []
+        for container in section.get("visualContainers", []) or []:
+            cfg = _parse_embedded_json(container.get("config"), {})
+            sv = cfg.get("singleVisual", {}) if isinstance(cfg, dict) else {}
+            visual_type = str(sv.get("visualType") or "unknown")
+            projections = sv.get("projections", {}) or {}
+            bindings: dict[str, list[str]] = {}
+            for role, items in projections.items():
+                refs: list[str] = []
+                if isinstance(items, list):
+                    for item in items:
+                        ref = item.get("queryRef") if isinstance(item, dict) else None
+                        if isinstance(ref, str) and ref:
+                            refs.append(ref)
+                bindings[role] = refs
+
+            objects = sv.get("objects", {}) if isinstance(sv, dict) else {}
+            def _extract_literal_text(obj_name: str, prop: str) -> str | None:
+                entries = objects.get(obj_name)
+                if not isinstance(entries, list) or not entries:
+                    return None
+                props = entries[0].get("properties", {}) if isinstance(entries[0], dict) else {}
+                value = props.get(prop, {})
+                literal = value.get("expr", {}).get("Literal", {}).get("Value") if isinstance(value, dict) else None
+                if not isinstance(literal, str):
+                    return None
+                # Power BI text literals are wrapped in single quotes ('Value').
+                if len(literal) >= 2 and literal[0] == "'" and literal[-1] == "'":
+                    return literal[1:-1].replace("''", "'")
+                return literal
+
+            formatting: dict[str, Any] = {}
+            title_text = _extract_literal_text("title", "text")
+            if title_text is not None:
+                formatting["title"] = title_text
+            x_axis_title = _extract_literal_text("categoryAxis", "titleText") or _extract_literal_text("categoryAxis", "axisTitle")
+            if x_axis_title is not None:
+                formatting["x_axis_title"] = x_axis_title
+            y_axis_title = _extract_literal_text("valueAxis", "titleText") or _extract_literal_text("valueAxis", "axisTitle")
+            if y_axis_title is not None:
+                formatting["y_axis_title"] = y_axis_title
+            labels = objects.get("labels")
+            if isinstance(labels, list) and labels:
+                lu_value = labels[0].get("properties", {}).get("labelDisplayUnits", {}) if isinstance(labels[0], dict) else {}
+                lu_literal = lu_value.get("expr", {}).get("Literal", {}).get("Value") if isinstance(lu_value, dict) else None
+                if lu_literal is not None:
+                    formatting["label_display_units"] = lu_literal
+
+            issues, _ = _visual_binding_issues(container, str(section.get("displayName") or section.get("name", "")), measure_home_map, model_fields)
+            if not issues:
+                health = "ok"
+            else:
+                # Roll up the most actionable issue type into a single label.
+                kinds = {item.get("issue") for item in issues}
+                if "live_model_missing" in kinds or "live_model_unknown_field" in kinds:
+                    health = "missing_field"
+                elif any(k and "role" in k for k in kinds):
+                    health = "wrong_role"
+                else:
+                    health = "issues"
+
+            visuals.append({
+                "id": str(cfg.get("name", "")),
+                "type": visual_type,
+                "position": {
+                    "x": int(container.get("x", 0)),
+                    "y": int(container.get("y", 0)),
+                    "width": int(container.get("width", 0)),
+                    "height": int(container.get("height", 0)),
+                },
+                "bindings": bindings,
+                "formatting": formatting,
+                "binding_health": health,
+                "issues": issues,
+            })
+
+        return ok(
+            f"Page '{section.get('displayName')}' described — {len(visuals)} visual(s).",
+            extract_folder=str(folder),
+            page={
+                "name": str(section.get("name", "")),
+                "display_name": str(section.get("displayName", "")),
+                "width": int(section.get("width", DEFAULT_PAGE_WIDTH)),
+                "height": int(section.get("height", DEFAULT_PAGE_HEIGHT)),
+                "visual_count": len(visuals),
+            },
+            visuals=visuals,
+        )
+
+    return _run(_impl)
+
+
 def pbi_create_page_tool(extract_folder: str, display_name: str, width: int = DEFAULT_PAGE_WIDTH, height: int = DEFAULT_PAGE_HEIGHT) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         _validate_dimensions(0, 0, width, height)
@@ -1371,6 +1820,8 @@ def pbi_add_bar_chart_tool(
     height: int = 300,
     title: str = "",
     legend_column: str | None = None,
+    *,
+    manager: Any | None = None,
 ) -> dict[str, Any]:
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     projections = {"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]}
@@ -1378,6 +1829,7 @@ def pbi_add_bar_chart_tool(
     if legend_column:
         projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
         references.append(legend_column)
+    _validate_field_references_live(manager, references)
     return _append_visual(
         extract_folder,
         page,
@@ -1407,9 +1859,12 @@ def pbi_add_line_chart_tool(
     width: int = 420,
     height: int = 300,
     title: str = "",
+    *,
+    manager: Any | None = None,
 ) -> dict[str, Any]:
     if not value_measures:
         raise PowerBIValidationError("value_measures must contain at least one measure.")
+    _validate_field_references_live(manager, [axis_column, *value_measures])
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
@@ -1433,7 +1888,8 @@ def pbi_add_line_chart_tool(
     )
 
 
-def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 320, height: int = 280, title: str = "") -> dict[str, Any]:
+def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 320, height: int = 280, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
+    _validate_field_references_live(manager, [category_column, value_measure])
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
@@ -1454,9 +1910,10 @@ def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: st
     )
 
 
-def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str], x: int, y: int, width: int = 520, height: int = 320, title: str = "") -> dict[str, Any]:
+def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str], x: int, y: int, width: int = 520, height: int = 320, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
     if not columns:
         raise PowerBIValidationError("columns must contain at least one field or measure.")
+    _validate_field_references_live(manager, list(columns))
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
@@ -1477,7 +1934,8 @@ def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str]
     )
 
 
-def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 420, height: int = 300, title: str = "") -> dict[str, Any]:
+def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 420, height: int = 300, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
+    _validate_field_references_live(manager, [category_column, value_measure])
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
@@ -1498,10 +1956,11 @@ def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str,
     )
 
 
-def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: int, width: int = 220, height: int = 120, slicer_type: str = "dropdown") -> dict[str, Any]:
+def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: int, width: int = 220, height: int = 120, slicer_type: str = "dropdown", *, manager: Any | None = None) -> dict[str, Any]:
     slicer_kind = slicer_type.strip().casefold()
     if slicer_kind not in {"dropdown", "list", "range", "tile"}:
         raise PowerBIValidationError("slicer_type must be one of: dropdown, list, range, tile.", details={"slicer_type": slicer_type})
+    _validate_field_references_live(manager, [column])
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     if slicer_kind == "tile":
         # Horizontal tile slicer: native list type with horizontal orientation flag.
@@ -1693,6 +2152,264 @@ def pbi_add_labelled_card_tool(
             "label": label_response.get("visual"),
             "value": card_response.get("visual"),
         },
+    )
+
+
+def pbi_add_scatter_chart_tool(
+    extract_folder: str,
+    page: str,
+    category_column: str,
+    x_measure: str,
+    y_measure: str,
+    x: int,
+    y: int,
+    width: int = 420,
+    height: int = 320,
+    title: str = "",
+    size_measure: str | None = None,
+    legend_column: str | None = None,
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    """Add a scatter chart visual (``scatterChart``).
+
+    Roles: ``Category`` (column — dot identity), ``X`` (measure), ``Y``
+    (measure), ``Size`` (measure, optional), ``Series`` (column, optional).
+    Use for correlation analysis between two measures grouped by a dimension.
+    """
+    projections = {
+        "Category": [{"queryRef": _query_ref(category_column)}],
+        "X": [{"queryRef": _query_ref(x_measure)}],
+        "Y": [{"queryRef": _query_ref(y_measure)}],
+    }
+    references = [category_column, x_measure, y_measure]
+    if size_measure:
+        projections["Size"] = [{"queryRef": _query_ref(size_measure)}]
+        references.append(size_measure)
+    if legend_column:
+        projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
+        references.append(legend_column)
+    _validate_field_references_live(manager, references)
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    return _append_visual(
+        extract_folder,
+        page,
+        lambda section, home_map: _create_chart_container(
+            section,
+            visual_type="scatterChart",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title or None,
+            projections=projections,
+            references=references,
+            measure_home_map=home_map,
+            manager=manager,
+        ),
+        measure_home_map,
+    )
+
+
+def pbi_add_combo_chart_tool(
+    extract_folder: str,
+    page: str,
+    category_column: str,
+    bar_measures: list[str],
+    line_measures: list[str],
+    x: int,
+    y: int,
+    width: int = 480,
+    height: int = 320,
+    title: str = "",
+    legend_column: str | None = None,
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    """Add a combo chart (column bars + line overlay).
+
+    Roles: ``Category`` (column), ``Y`` (measure list — bars), ``Y2``
+    (measure list — line). Useful for "actual vs target" with a target line
+    over actual bars.
+    """
+    if not bar_measures:
+        raise PowerBIValidationError("bar_measures must contain at least one measure.")
+    if not line_measures:
+        raise PowerBIValidationError("line_measures must contain at least one measure.")
+    projections: dict[str, list[dict[str, str]]] = {
+        "Category": [{"queryRef": _query_ref(category_column)}],
+        "Y": [{"queryRef": _query_ref(item)} for item in bar_measures],
+        "Y2": [{"queryRef": _query_ref(item)} for item in line_measures],
+    }
+    references = [category_column, *bar_measures, *line_measures]
+    if legend_column:
+        projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
+        references.append(legend_column)
+    _validate_field_references_live(manager, references)
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    return _append_visual(
+        extract_folder,
+        page,
+        lambda section, home_map: _create_chart_container(
+            section,
+            visual_type="lineClusteredColumnComboChart",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title or None,
+            projections=projections,
+            references=references,
+            measure_home_map=home_map,
+            manager=manager,
+        ),
+        measure_home_map,
+    )
+
+
+def pbi_add_kpi_tool(
+    extract_folder: str,
+    page: str,
+    indicator_measure: str,
+    trend_axis_column: str,
+    x: int,
+    y: int,
+    width: int = 240,
+    height: int = 160,
+    title: str = "",
+    goal_measure: str | None = None,
+    direction: str = "high_is_good",
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    """Add a native KPI visual (``kpi``).
+
+    Roles: ``Indicator`` (measure — current value), ``TrendLine`` (column,
+    typically a Date), ``Goal`` (measure, optional). ``direction`` controls
+    the status colour interpretation: ``"high_is_good"`` means the green
+    threshold sits above ``Goal``; ``"low_is_good"`` flips it.
+    """
+    if direction not in {"high_is_good", "low_is_good"}:
+        raise PowerBIValidationError(
+            "direction must be 'high_is_good' or 'low_is_good'.",
+            details={"direction": direction},
+        )
+    projections: dict[str, list[dict[str, str]]] = {
+        "Indicator": [{"queryRef": _query_ref(indicator_measure)}],
+        "TrendLine": [{"queryRef": _query_ref(trend_axis_column)}],
+    }
+    references = [indicator_measure, trend_axis_column]
+    if goal_measure:
+        projections["Goal"] = [{"queryRef": _query_ref(goal_measure)}]
+        references.append(goal_measure)
+    _validate_field_references_live(manager, references)
+    # Encode direction in the visual's objects so PBI's KPI rendering picks the right colour rule.
+    extra_single_visual = {
+        "objects": {
+            "indicator": [
+                {
+                    "properties": {
+                        "directionType": _text_literal(
+                            "Increasing" if direction == "high_is_good" else "Decreasing"
+                        )
+                    }
+                }
+            ]
+        }
+    }
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    return _append_visual(
+        extract_folder,
+        page,
+        lambda section, home_map: _create_chart_container(
+            section,
+            visual_type="kpi",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title or None,
+            projections=projections,
+            references=references,
+            measure_home_map=home_map,
+            extra_single_visual=extra_single_visual,
+            manager=manager,
+        ),
+        measure_home_map,
+    )
+
+
+def pbi_add_matrix_tool(
+    extract_folder: str,
+    page: str,
+    rows: list[str],
+    values: list[str],
+    x: int,
+    y: int,
+    columns: list[str] | None = None,
+    width: int = 540,
+    height: int = 360,
+    title: str = "",
+    subtotals: bool = True,
+    column_layout: str = "stepped",
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    """Add a matrix / pivot-table visual (``pivotTable``).
+
+    Roles: ``Rows`` (column list — required), ``Columns`` (column list —
+    optional), ``Values`` (measure list — required). ``column_layout``
+    accepts ``"stepped"`` (compact, single column with indents) or
+    ``"tabular"`` (one column per row level).
+    """
+    if not rows:
+        raise PowerBIValidationError("rows must contain at least one column.")
+    if not values:
+        raise PowerBIValidationError("values must contain at least one measure.")
+    layout_token = column_layout.strip().casefold()
+    if layout_token not in {"stepped", "tabular"}:
+        raise PowerBIValidationError(
+            "column_layout must be 'stepped' or 'tabular'.",
+            details={"column_layout": column_layout},
+        )
+    projections: dict[str, list[dict[str, str]]] = {
+        "Rows": [{"queryRef": _query_ref(item)} for item in rows],
+        "Values": [{"queryRef": _query_ref(item)} for item in values],
+    }
+    references = [*rows, *values]
+    if columns:
+        projections["Columns"] = [{"queryRef": _query_ref(item)} for item in columns]
+        references.extend(columns)
+    _validate_field_references_live(manager, references)
+    extra_single_visual = {
+        "objects": {
+            "subTotals": [
+                {"properties": {"rowSubtotals": _literal_value(bool(subtotals))}}
+            ],
+            "general": [
+                {"properties": {"layout": _text_literal("Stepped" if layout_token == "stepped" else "Tabular")}}
+            ],
+        }
+    }
+    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    return _append_visual(
+        extract_folder,
+        page,
+        lambda section, home_map: _create_chart_container(
+            section,
+            visual_type="pivotTable",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title or None,
+            projections=projections,
+            references=references,
+            measure_home_map=home_map,
+            extra_single_visual=extra_single_visual,
+            manager=manager,
+        ),
+        measure_home_map,
     )
 
 
@@ -2385,10 +3102,14 @@ __all__ = [
     "pbi_add_visual_tool",
     "pbi_add_bar_chart_tool",
     "pbi_add_card_tool",
+    "pbi_add_combo_chart_tool",
     "pbi_add_donut_chart_tool",
     "pbi_add_gauge_tool",
+    "pbi_add_kpi_tool",
     "pbi_add_labelled_card_tool",
     "pbi_add_line_chart_tool",
+    "pbi_add_matrix_tool",
+    "pbi_add_scatter_chart_tool",
     "pbi_add_slicer_tool",
     "pbi_add_table_visual_tool",
     "pbi_add_text_box_tool",
@@ -2405,6 +3126,9 @@ __all__ = [
     "pbi_move_visual_tool",
     "pbi_patch_layout_tool",
     "pbi_repair_report_fields_tool",
+    "pbi_auto_grid_layout_tool",
+    "pbi_convert_visual_type_tool",
+    "pbi_describe_page_tool",
     "pbi_disable_card_autoscale_tool",
     "pbi_remove_visual_tool",
     "pbi_set_page_size_tool",

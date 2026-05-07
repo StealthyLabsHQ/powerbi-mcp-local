@@ -6,6 +6,7 @@ but establishing a connection will fail with a clear, JSON-serializable error.
 
 from __future__ import annotations
 
+import collections
 import importlib
 import json
 import logging
@@ -14,6 +15,7 @@ import os
 import socket
 import sys
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -385,6 +387,34 @@ class PowerBIConnectionManager:
         self._dll_directory_handles: list[Any] = []
         self._write_generation: int = 0
         self._read_cache: dict[str, tuple[int, Any]] = {}
+        # Ring buffer of recent operations for self-diagnostic by tools/LLMs.
+        self._operation_log: collections.deque[dict[str, Any]] = collections.deque(maxlen=50)
+
+    def _record_operation(self, *, op: str, kind: str, started: float, ok_: bool, error: BaseException | None = None) -> None:
+        """Append an entry to the operation history ring buffer."""
+        entry: dict[str, Any] = {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "op": op,
+            "kind": kind,  # "read" | "write"
+            "duration_ms": int((time.perf_counter() - started) * 1000),
+            "ok": ok_,
+        }
+        if not ok_ and error is not None:
+            entry["error_message"] = flatten_exception_message(error)
+            entry["error_type"] = type(error).__name__
+            code = getattr(error, "code", None)
+            if code:
+                entry["error_code"] = str(code)
+        self._operation_log.append(entry)
+
+    def operation_history(self, last_n: int = 20) -> list[dict[str, Any]]:
+        """Return the most recent operations (newest first)."""
+        n = max(1, min(int(last_n), len(self._operation_log)))
+        if n == 0:
+            return []
+        items = list(self._operation_log)[-n:]
+        items.reverse()
+        return items
 
     def list_instances(self) -> list[dict[str, Any]]:
         """Return discovered Power BI Desktop instances."""
@@ -505,13 +535,16 @@ class PowerBIConnectionManager:
 
     def run_read(self, operation_name: str, reader: Callable[[ConnectionState], Any]) -> Any:
         """Run a read operation with one automatic reconnect on connection loss."""
+        started = time.perf_counter()
         last_error: PowerBIError | None = None
         for attempt in range(2):
             with self._lock:
                 self._ensure_connected_locked(force_reconnect=attempt == 1)
                 assert self._state is not None
                 try:
-                    return reader(self._state)
+                    result = reader(self._state)
+                    self._record_operation(op=operation_name, kind="read", started=started, ok_=True)
+                    return result
                 except Exception as exc:  # pragma: no cover - exercised on Windows
                     translated = self._translate_exception(exc, operation_name)
                     if translated.retryable and attempt == 0:
@@ -523,8 +556,10 @@ class PowerBIConnectionManager:
                         self._disconnect_locked()
                         last_error = translated
                         continue
+                    self._record_operation(op=operation_name, kind="read", started=started, ok_=False, error=translated)
                     raise translated from exc
         if last_error is not None:
+            self._record_operation(op=operation_name, kind="read", started=started, ok_=False, error=last_error)
             raise last_error
         raise PowerBIConnectionError(f"Read operation '{operation_name}' failed unexpectedly.")
 
@@ -551,6 +586,7 @@ class PowerBIConnectionManager:
         mutator: Callable[[ConnectionState, Any, Any], dict[str, Any]],
     ) -> dict[str, Any]:
         """Run a TOM write operation, save changes, and reset state on failure."""
+        started = time.perf_counter()
         with self._lock:
             self._ensure_connected_locked()
             assert self._state is not None
@@ -563,10 +599,12 @@ class PowerBIConnectionManager:
                 self._read_cache.clear()
                 payload["save_result"] = serialize_value(save_result)
                 payload["connection"] = self._state.snapshot()
+                self._record_operation(op=operation_name, kind="write", started=started, ok_=True)
                 return payload
             except Exception as exc:  # pragma: no cover - exercised on Windows
                 translated = self._translate_exception(exc, operation_name)
                 self._logger.exception("Write operation '%s' failed", operation_name)
+                self._record_operation(op=operation_name, kind="write", started=started, ok_=False, error=translated)
                 self._disconnect_locked()
                 raise translated from exc
 

@@ -51,6 +51,105 @@ def pbi_list_instances_tool(manager: Any) -> dict[str, Any]:
     )
 
 
+def pbi_operation_history_tool(manager: Any, *, last_n: int = 20) -> dict[str, Any]:
+    """Return the most-recent N tool operations recorded by the connection
+    manager (newest first).
+
+    Each entry: ``{ts, op, kind: "read"|"write", duration_ms, ok}`` plus
+    ``error_type``/``error_code``/``error_message`` when ``ok`` is False. Use
+    this to self-diagnose what just happened — e.g. an LLM can pull the last
+    5 calls after a failure to see which writes already landed.
+    """
+    if not isinstance(last_n, int) or last_n < 1:
+        raise PowerBIValidationError("last_n must be a positive integer.", details={"last_n": last_n})
+    history = manager.operation_history(last_n=last_n)
+    return ok(
+        f"Returned {len(history)} most-recent operation(s).",
+        operations=history,
+        count=len(history),
+        buffer_capacity=int(getattr(getattr(manager, "_operation_log", None), "maxlen", 0) or 0),
+    )
+
+
+def pbi_system_health_tool(manager: Any) -> dict[str, Any]:
+    """Single-call self-diagnostic for stability and dependency status.
+
+    Read-only. Skips any TOM/ADOMD probe gracefully when no connection is
+    active. Use as a preflight from any LLM agent: one call answers "can I
+    talk to Power BI right now?" without juggling connect / list / model_info.
+    """
+    snapshot: dict[str, Any] = {
+        "connected": False,
+        "port": None,
+        "port_open": None,
+        "pid_match": None,
+        "tom_available": False,
+        "adomd_available": False,
+        "model_loaded": False,
+        "model_name": None,
+        "table_count": None,
+        "measure_count": None,
+        "cache": {
+            "write_generation": int(getattr(manager, "_write_generation", 0) or 0),
+            "entries": len(getattr(manager, "_read_cache", {}) or {}),
+        },
+        "last_operation_ts": None,
+    }
+
+    state = getattr(manager, "_state", None)
+    if state is not None:
+        snapshot["connected"] = True
+        instance = getattr(state, "instance", None)
+        if instance is not None:
+            snapshot["port"] = getattr(instance, "port", None)
+        try:
+            snapshot["port_open"] = bool(manager._is_port_open(snapshot["port"])) if snapshot["port"] else None
+        except Exception:
+            snapshot["port_open"] = None
+        try:
+            cached_pid = getattr(instance, "pid", None) if instance else None
+            current_pid = manager._pid_for_port(snapshot["port"]) if snapshot["port"] else None
+            snapshot["pid_match"] = (cached_pid is not None and current_pid is not None and cached_pid == current_pid) or None
+        except Exception:
+            snapshot["pid_match"] = None
+        snapshot["tom_available"] = getattr(state, "tom_server", None) is not None
+        snapshot["adomd_available"] = bool(getattr(state, "adomd_available", False))
+
+        try:
+            database = getattr(state, "database", None)
+            if database is not None:
+                snapshot["model_loaded"] = True
+                snapshot["model_name"] = serialize_value(getattr(database, "Name", None))
+                model = getattr(database, "Model", None)
+                if model is not None:
+                    snapshot["table_count"] = int(model.Tables.Count) if hasattr(model.Tables, "Count") else None
+                    measure_total = 0
+                    for table in model.Tables:
+                        try:
+                            measure_total += int(table.Measures.Count) if hasattr(table.Measures, "Count") else 0
+                        except Exception:
+                            pass
+                    snapshot["measure_count"] = measure_total
+        except Exception:
+            # Live model probe failed — leave fields as None; the caller already knows we're connected.
+            pass
+
+    history = manager.operation_history(last_n=1)
+    if history:
+        snapshot["last_operation_ts"] = history[0].get("ts")
+
+    deps: dict[str, Any] = {}
+    for module_name in ("mcp", "pythonnet", "pyadomd", "pbi_pyadomd"):
+        try:
+            __import__(module_name.replace("-", "_"))
+            deps[module_name] = "available"
+        except Exception:
+            deps[module_name] = "missing"
+    snapshot["dependencies"] = deps
+
+    return ok("System health snapshot collected.", **snapshot)
+
+
 def pbi_refresh_metadata_tool(manager: Any) -> dict[str, Any]:
     """Reload cached TOM schema from the server (cheaper than full reconnect)."""
     payload = manager.refresh_metadata()
@@ -452,6 +551,114 @@ def pbi_create_column_tool(
         action=payload["action"],
         save_result=payload["save_result"],
         connection=payload["connection"],
+    )
+
+
+def pbi_generate_dax_context_prompt_tool(
+    manager: Any,
+    *,
+    include_hidden: bool = False,
+    include_dax: bool = True,
+    include_relationships: bool = True,
+    max_chars: int = 12000,
+) -> dict[str, Any]:
+    """Render a compact markdown snapshot of the model — tables, columns,
+    measures, relationships — ready to paste into an LLM system prompt so the
+    LLM can author DAX with full schema context in one round-trip.
+
+    Sections:
+    - ``# Model: <name>``
+    - one ``## <Table>`` per table with ``Columns:`` and (optionally) DAX
+      ``Measures:`` lines
+    - ``## Relationships`` with ``A[X] → B[Y] (cardinality, active)`` rows
+
+    Output is truncated to ``max_chars`` (default 12 000) with a trailing
+    note when truncation kicks in. Set ``include_dax=False`` to omit the
+    measure expressions and stay terse.
+    """
+    if max_chars < 1024:
+        raise PowerBIValidationError("max_chars must be >= 1024.", details={"max_chars": max_chars})
+    info = pbi_model_info_tool(manager, include_hidden=include_hidden, include_row_counts=False)
+    if not info.get("ok"):
+        return info
+
+    db_name = info.get("database_name") or info.get("database") or "(unknown)"
+    tables = info.get("tables", []) or []
+    measures = info.get("measures", []) or []
+    relationships = info.get("relationships", []) or []
+
+    lines: list[str] = []
+    lines.append(f"# Model: {db_name}")
+    lines.append(f"_Tables: {len(tables)} · Measures: {len(measures)} · Relationships: {len(relationships)}_")
+    lines.append("")
+
+    measures_by_table: dict[str, list[dict[str, Any]]] = {}
+    for measure in measures:
+        measures_by_table.setdefault(str(measure.get("table", "")), []).append(measure)
+
+    for table in sorted(tables, key=lambda t: str(t.get("name", "")).casefold()):
+        table_name = str(table.get("name", ""))
+        if not table_name:
+            continue
+        lines.append(f"## {table_name}")
+        columns = table.get("columns", []) or []
+        if columns:
+            col_strs: list[str] = []
+            for column in columns:
+                name = str(column.get("name", ""))
+                dtype = str(column.get("data_type", "?"))
+                col_strs.append(f"{name} ({dtype})")
+            lines.append("**Columns:** " + ", ".join(col_strs))
+        table_measures = measures_by_table.get(table_name, [])
+        if table_measures:
+            lines.append("**Measures:**")
+            for measure in sorted(table_measures, key=lambda m: str(m.get("name", "")).casefold()):
+                m_name = str(measure.get("name", ""))
+                m_format = str(measure.get("format_string", "") or "")
+                if include_dax:
+                    expr = str(measure.get("expression", "") or "").strip().replace("\r", " ").replace("\n", " ")
+                    suffix = f" — `{m_format}`" if m_format else ""
+                    lines.append(f"- `{m_name}`{suffix}: `{expr}`")
+                else:
+                    suffix = f" — `{m_format}`" if m_format else ""
+                    lines.append(f"- `{m_name}`{suffix}")
+        lines.append("")
+
+    if include_relationships and relationships:
+        lines.append("## Relationships")
+        for rel in relationships:
+            from_table = str(rel.get("from_table", ""))
+            from_column = str(rel.get("from_column", ""))
+            to_table = str(rel.get("to_table", ""))
+            to_column = str(rel.get("to_column", ""))
+            cardinality = str(rel.get("cardinality", ""))
+            active = bool(rel.get("is_active", True))
+            lines.append(
+                f"- `{from_table}[{from_column}]` → `{to_table}[{to_column}]` "
+                f"({cardinality}, {'active' if active else 'inactive'})"
+            )
+
+    output = "\n".join(lines)
+    truncated = False
+    if len(output) > max_chars:
+        # Try to cut on the previous newline so we don't slice mid-line.
+        cutoff = output.rfind("\n", 0, max_chars - 80)
+        if cutoff < 0:
+            cutoff = max_chars - 80
+        output = output[:cutoff] + "\n\n_… truncated for max_chars; pass a larger max_chars or set include_dax=False._"
+        truncated = True
+
+    return ok(
+        f"DAX context prompt ready ({len(output)} chars).",
+        prompt=output,
+        char_count=len(output),
+        max_chars=max_chars,
+        truncated=truncated,
+        sections={
+            "table_count": len(tables),
+            "measure_count": len(measures),
+            "relationship_count": len(relationships),
+        },
     )
 
 

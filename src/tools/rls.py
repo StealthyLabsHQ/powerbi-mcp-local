@@ -210,12 +210,18 @@ def pbi_add_role_member_tool(
     member_name: str,
     member_type: str = "external",
     identity_provider: str = "AzureAD",
+    overwrite: bool = False,
 ) -> dict[str, Any]:
-    """Add a member (user/group) to a role.
+    """Add (or update) a member (user/group) on a role.
 
     member_type:
         'external' (default, ExternalModelRoleMember — recommended for Power BI service)
         'windows'  (WindowsModelRoleMember — domain principal SID)
+
+    With ``overwrite=False`` (default), raises ``PowerBIDuplicateError`` if a
+    member with the same ``member_name`` already exists on the role. With
+    ``overwrite=True`` the existing member's identity_provider is refreshed
+    (when external) and the response carries ``action="updated"``.
     """
     validate_model_object_name(role)
     if not member_name or not member_name.strip():
@@ -233,28 +239,47 @@ def pbi_add_role_member_tool(
         if role_obj is None:
             raise PowerBINotFoundError(f"Role '{role}' was not found.", details={"role": role})
 
-        if token == "external":
+        existing_match = None
+        for current in role_obj.Members:
+            if str(getattr(current, "MemberName", "")).casefold() == member_name.casefold():
+                existing_match = current
+                break
+        action = "added"
+        if existing_match is not None:
+            if not overwrite:
+                raise PowerBIDuplicateError(
+                    f"Member '{member_name}' already exists on role '{role}'.",
+                    details={"role": role, "member": member_name},
+                )
+            action = "updated"
+            if token == "external":
+                existing_match.IdentityProvider = identity_provider
+            member = existing_match
+        elif token == "external":
             member = tom.ExternalModelRoleMember()
             member.MemberName = member_name
             member.IdentityProvider = identity_provider
+            role_obj.Members.Add(member)
         else:
             member = tom.WindowsModelRoleMember()
             member.MemberName = member_name
+            role_obj.Members.Add(member)
 
-        role_obj.Members.Add(member)
         return {
             "member": {
                 "role": role,
                 "name": member_name,
                 "type": token,
                 "identity_provider": identity_provider if token == "external" else None,
-            }
+            },
+            "action": action,
         }
 
     payload = manager.execute_write("add_role_member", _mutator)
     return ok(
-        f"Member '{member_name}' added to role '{role}'.",
+        f"Member '{member_name}' {payload['action']} on role '{role}'.",
         member=payload["member"],
+        action=payload["action"],
         save_result=payload["save_result"],
         connection=payload["connection"],
     )
