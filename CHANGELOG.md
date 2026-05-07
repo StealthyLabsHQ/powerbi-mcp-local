@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.10.1] — 2026-05-07 — MATSKI-driven bugfixes (extract fallback, ref parsing, map dispatch, home tables, FORMAT detection, role hints, lint knobs)
+## [0.10.1] — 2026-05-07 — bugfixes (extract fallback, ref parsing, map dispatch, home tables, FORMAT detection, role hints, lint knobs)
 
-Seven concrete bugs surfaced while building the MATSKI Power BI report. All seven fixes are localised, signature-compatible, and covered by regression tests in `tests/test_security.py`. Net new tool: `pbi_add_map`. Registry: 125/125, 0 orphans · tests: 107/107 (2 platform skips).
+Seven concrete bugs surfaced while building the Power BI report. All seven fixes are localised, signature-compatible, and covered by regression tests in `tests/test_security.py`. Net new tool: `pbi_add_map`. Registry: 125/125, 0 orphans · tests: 107/107 (2 platform skips).
 
 ### Fixed
 
