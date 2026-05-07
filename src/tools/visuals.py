@@ -339,13 +339,44 @@ def _page_summary(section: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Match the standard Power BI bracket forms: Table[Column] or 'Table With Spaces'[Column].
+_BRACKET_REF_RE = re.compile(r"^\s*'?(?P<table>[^'\[\]]+?)'?\s*\[\s*(?P<column>[^\[\]]+?)\s*\]\s*$")
+
+
+def _normalize_reference(reference: str) -> str:
+    """Normalise a user-supplied field reference into ``"Table.Column"`` form.
+
+    Accepts (case-insensitive on whitespace; surrounding quotes optional):
+    - ``"Table.Column"`` (existing canonical form, returned as-is)
+    - ``"Table[Column]"``
+    - ``"'Table With Spaces'[Column]"``
+    - ``"BareMeasureName"`` (measure references stay unchanged)
+
+    The downstream tooling (``_split_column_ref``, ``_query_ref``) treats the
+    returned string as ``Table.Column``.
+    """
+    if not isinstance(reference, str):
+        return reference  # type: ignore[return-value]
+    raw = reference.strip()
+    if not raw:
+        return raw
+    match = _BRACKET_REF_RE.match(raw)
+    if match:
+        table = match.group("table").strip()
+        column = match.group("column").strip()
+        return f"{table}.{column}"
+    return raw
+
+
 def _split_column_ref(reference: str) -> tuple[str, str]:
-    if "." not in reference:
+    normalized = _normalize_reference(reference)
+    if "." not in normalized:
         raise PowerBIValidationError(
-            "Column references must use 'TableName.ColumnName' format.",
+            "Column references must use 'TableName.ColumnName', 'TableName[ColumnName]', "
+            "or '\\'Table Name\\'[Column Name]' format.",
             details={"reference": reference},
         )
-    table, column = reference.rsplit(".", 1)
+    table, column = normalized.rsplit(".", 1)
     if not table.strip() or not column.strip():
         raise PowerBIValidationError(
             "Column references must include both a table and a column name.",
@@ -371,8 +402,13 @@ def _page_next_z(section: dict[str, Any]) -> int:
 
 
 def _query_ref(reference: str) -> str:
-    """Return the short queryRef name (column part only, without table prefix)."""
-    return reference.split(".", 1)[1] if "." in reference else reference
+    """Return the short queryRef name (column part only, without table prefix).
+
+    Accepts the same flexible reference forms as :func:`_normalize_reference`
+    (``Table.Column``, ``Table[Column]``, ``'Table'[Column]``, bare measure).
+    """
+    normalized = _normalize_reference(reference)
+    return normalized.split(".", 1)[1] if "." in normalized else normalized
 
 
 def _scan_measure_home_tables(extract_folder: Path) -> dict[str, str]:
@@ -405,11 +441,66 @@ def _scan_measure_home_tables(extract_folder: Path) -> dict[str, str]:
     return measure_home_map
 
 
+def _resolve_measure_home_map(
+    extract_folder: str,
+    manager: Any | None = None,
+) -> dict[str, str]:
+    """Build a measure → home table map combining on-disk PBIP metadata and the
+    live model (when ``manager`` is supplied).
+
+    Use at the top of every ``pbi_add_*_tool`` so the visual write carries the
+    correct ``Entity`` reference and callers don't get the post-hoc
+    ``measure_home_table_needs_repair`` validation issue.
+    """
+    home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    return _augment_measure_home_map_with_live(home_map, manager)
+
+
+def _augment_measure_home_map_with_live(
+    measure_home_map: dict[str, str],
+    manager: Any | None,
+    *,
+    include_hidden: bool = False,
+) -> dict[str, str]:
+    """Fill in missing measure → table mappings from the live model.
+
+    The on-disk PBIP extract metadata is the canonical source, but it isn't
+    always present (e.g. a layout-only extract from a closed PBIX). When a
+    connection manager is supplied, we pull the same information from the
+    live TOM so visual writes carry the correct ``Entity`` reference and
+    callers don't see ``measure_home_table_needs_repair`` after the write.
+
+    Returns the (possibly augmented) map. Existing entries take priority so
+    the on-disk metadata always wins on conflict.
+    """
+    if manager is None:
+        return measure_home_map
+    try:
+        model = pbi_model_info_tool(manager, include_hidden=include_hidden, include_row_counts=False)
+    except Exception:
+        return measure_home_map
+    if not model.get("ok"):
+        return measure_home_map
+    existing_lower = {key.casefold() for key in measure_home_map}
+    for measure in model.get("measures", []) or []:
+        name = str(measure.get("name", ""))
+        table_name = str(measure.get("table", ""))
+        if not name or not table_name:
+            continue
+        if name.casefold() in existing_lower:
+            continue
+        measure_home_map[name] = table_name
+        existing_lower.add(name.casefold())
+    return measure_home_map
+
+
 def _build_select_entry(
     reference: str,
     aliases: dict[str, str],
     measure_home_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    # Normalise so Date[Année] / 'Date'[Année] / Date.Année all enter the same path.
+    reference = _normalize_reference(reference)
     if "." in reference:
         table, column = _split_column_ref(reference)
         alias = aliases.setdefault(table, f"s{len(aliases)}")
@@ -587,32 +678,73 @@ def _validate_field_references_live(
     manager: Any | None,
     references: list[str],
     *,
+    expected_kinds: dict[str, str] | None = None,
     include_hidden: bool = False,
 ) -> dict[str, Any]:
     """If a connection manager is available, verify each reference exists in
-    the live model. Returns a status dict; raises PowerBIValidationError on
-    missing fields so callers fail fast before writing the layout.
+    the live model. Raises ``PowerBIValidationError`` on missing fields so
+    callers fail fast before writing the layout.
 
     A reference is either ``"TableName.ColumnName"`` (column) or a bare
-    ``"MeasureName"`` (measure). Skips silently when the live model is
-    unavailable so offline/test usage still works.
+    ``"MeasureName"`` (measure). Bracket forms (``Table[Column]``,
+    ``'Table'[Column]``) are accepted and normalised. Skips silently when the
+    live model is unavailable so offline/test usage still works.
+
+    ``expected_kinds`` (optional): map ``reference -> "column" | "measure"``
+    so the error message can call out role expectation when a user passes the
+    wrong format (e.g. ``"Year"`` for a Category role that wants a column).
+    The reported ``kind`` for each missing entry then becomes the role
+    expectation rather than only the inferred-from-format guess, so
+    diagnostic messages match the visual's role contract.
     """
     if manager is None or not references:
         return {"status": "skipped"}
     index, status = _live_model_field_index(manager, include_hidden=include_hidden)
     if index is None:
         return status
+    expected_kinds = expected_kinds or {}
     missing: list[dict[str, str]] = []
     for ref in references:
         if not isinstance(ref, str) or not ref.strip():
             continue
-        if "." in ref:
-            table, column = ref.split(".", 1)
+        normalized = _normalize_reference(ref)
+        expected_kind = expected_kinds.get(ref)
+        if "." in normalized:
+            table, column = normalized.split(".", 1)
             if (table.casefold(), column.casefold()) not in index["columns"]:
-                missing.append({"reference": ref, "kind": "column"})
+                missing.append({
+                    "reference": ref,
+                    "kind": expected_kind or "column",
+                    "inferred_kind": "column",
+                    "hint": "use 'Table.Column', 'Table[Column]', or \"'Table With Spaces'[Column]\"",
+                })
         else:
-            if ref.casefold() not in index["measures"]:
-                missing.append({"reference": ref, "kind": "measure"})
+            # Bare form: it could be a measure OR an unqualified column name.
+            measure_hit = normalized.casefold() in index["measures"]
+            column_short_hit = any(col_lc == normalized.casefold() for _table_lc, col_lc in index["columns"])
+            if expected_kind == "column":
+                if not column_short_hit:
+                    missing.append({
+                        "reference": ref,
+                        "kind": "column",
+                        "inferred_kind": "measure" if measure_hit else "unknown",
+                        "hint": "axis/category/rows expect a column — qualify with the table (e.g. 'Date.Year' or 'Date[Year]').",
+                    })
+            elif expected_kind == "measure":
+                if not measure_hit:
+                    missing.append({
+                        "reference": ref,
+                        "kind": "measure",
+                        "inferred_kind": "column" if column_short_hit else "unknown",
+                        "hint": "values/Y expect a measure — check spelling against the live model's measure list.",
+                    })
+            else:
+                if not measure_hit:
+                    missing.append({
+                        "reference": ref,
+                        "kind": "measure",
+                        "inferred_kind": "column" if column_short_hit else "unknown",
+                    })
     if missing:
         raise PowerBIValidationError(
             f"Field reference(s) not found in the live model: "
@@ -1130,24 +1262,74 @@ def _create_chart_container(
     )
 
 
+def _extract_pbix_zip_natively(pbix: Path, target: Path) -> dict[str, Any]:
+    """Fallback PBIX extraction using the standard ZIP. Used when the bundled
+    pbi-tools.core does not support 'extract' (it only ships 'compile').
+
+    Copies the Report payload (Layout, StaticResources/Themes) so downstream
+    layout-touching tools work. The data model stays inside the PBIX —
+    consumers needing model definitions should rely on the live TOM
+    connection via pbi_connect.
+    """
+    target.mkdir(parents=True, exist_ok=True)
+    extracted: list[str] = []
+    layout_path = target / LAYOUT_RELATIVE_PATH
+    layout_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(pbix, "r") as zf:
+        names = set(zf.namelist())
+        if "Report/Layout" in names:
+            layout_path.write_bytes(zf.read("Report/Layout"))
+            extracted.append("Report/Layout")
+        # Copy theme JSONs so apply_theme / build_dashboard with theme references resolve.
+        for name in names:
+            if name.startswith("Report/StaticResources/") and not name.endswith("/"):
+                dest = target / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(zf.read(name))
+                extracted.append(name)
+    return {"method": "zip_native", "extracted_entries": extracted}
+
+
 def pbi_extract_report_tool(pbix_path: str, extract_folder: str | None = None) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         pbix = _resolve_pbix_path(pbix_path, must_exist=True)
         target = _resolve_extract_folder(str(extract_folder or pbix.with_name(f"{pbix.stem}_extracted")), must_exist=False)
         target.mkdir(parents=True, exist_ok=True)
-        _run_pbi_tools(["extract", str(pbix), "-extractFolder", str(target), "-modelSerialization", "Legacy"])
+        method = "pbi_tools_extract"
+        try:
+            _run_pbi_tools(["extract", str(pbix), "-extractFolder", str(target), "-modelSerialization", "Legacy"])
+        except (VisualToolError, PBIToolsNotInstalledError) as exc:
+            # pbi-tools.core (bundled) only ships the 'compile' action — the
+            # CLI returns "Unknown action: 'extract'" or "No action was
+            # specified". Fall back to a native ZIP-based extraction so the
+            # tool stays usable for layout-touching workflows.
+            details = getattr(exc, "details", {}) or {}
+            stdout = str(details.get("stdout", "")) + str(details.get("stderr", ""))
+            cli_lacks_extract = (
+                "Unknown action" in stdout
+                or "No action was specified" in stdout
+                or isinstance(exc, PBIToolsNotInstalledError)
+            )
+            if not cli_lacks_extract:
+                raise
+            logger.info(
+                "pbi-tools CLI cannot extract (likely the .core build); falling back to ZIP-native extraction."
+            )
+            fallback = _extract_pbix_zip_natively(pbix, target)
+            method = fallback["method"]
         layout_path = target / LAYOUT_RELATIVE_PATH
         if not layout_path.exists():
-            layout_path.parent.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(pbix, "r") as z:
-                if "Report/Layout" in z.namelist():
-                    layout_path.write_bytes(z.read("Report/Layout"))
+            # Defensive last-mile fallback: even if the CLI reported success,
+            # verify the layout landed and rebuild from the ZIP if not.
+            _extract_pbix_zip_natively(pbix, target)
+            method = method + "+zip_native_fallback"
         _, layout = _load_layout(target)
         pages = [_page_summary(section) for section in layout.get("sections", [])]
         return ok(
             "Report extracted successfully.",
             pbix_path=str(pbix),
             extract_folder=str(target),
+            extraction_method=method,
             pages=pages,
             visual_count=sum(page["visual_count"] for page in pages),
         )
@@ -1789,7 +1971,7 @@ def pbi_add_card_tool(
     a manager the tool still works (offline mode), preserving prior behavior.
     """
     _validate_field_references_live(manager, [measure])
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
         page,
@@ -1823,7 +2005,7 @@ def pbi_add_bar_chart_tool(
     *,
     manager: Any | None = None,
 ) -> dict[str, Any]:
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     projections = {"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]}
     references = [category_column, value_measure]
     if legend_column:
@@ -1865,7 +2047,7 @@ def pbi_add_line_chart_tool(
     if not value_measures:
         raise PowerBIValidationError("value_measures must contain at least one measure.")
     _validate_field_references_live(manager, [axis_column, *value_measures])
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
         page,
@@ -1890,7 +2072,7 @@ def pbi_add_line_chart_tool(
 
 def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 320, height: int = 280, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
     _validate_field_references_live(manager, [category_column, value_measure])
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
         page,
@@ -1914,7 +2096,7 @@ def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str]
     if not columns:
         raise PowerBIValidationError("columns must contain at least one field or measure.")
     _validate_field_references_live(manager, list(columns))
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
         page,
@@ -1936,7 +2118,7 @@ def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str]
 
 def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 420, height: int = 300, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
     _validate_field_references_live(manager, [category_column, value_measure])
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
         page,
@@ -1961,7 +2143,7 @@ def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: 
     if slicer_kind not in {"dropdown", "list", "range", "tile"}:
         raise PowerBIValidationError("slicer_type must be one of: dropdown, list, range, tile.", details={"slicer_type": slicer_type})
     _validate_field_references_live(manager, [column])
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     if slicer_kind == "tile":
         # Horizontal tile slicer: native list type with horizontal orientation flag.
         emitted_kind = "list"
@@ -2035,7 +2217,7 @@ def pbi_add_gauge_tool(
     if fill_color_measure:
         refs_to_validate.append(fill_color_measure)
     _validate_field_references_live(manager, refs_to_validate)
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     projections = {"Y": [{"queryRef": _query_ref(measure)}]}
     references = [measure]
     if target_measure:
@@ -2190,7 +2372,7 @@ def pbi_add_scatter_chart_tool(
         projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
         references.append(legend_column)
     _validate_field_references_live(manager, references)
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
         page,
@@ -2246,7 +2428,7 @@ def pbi_add_combo_chart_tool(
         projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
         references.append(legend_column)
     _validate_field_references_live(manager, references)
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
         page,
@@ -2317,7 +2499,7 @@ def pbi_add_kpi_tool(
             ]
         }
     }
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
         page,
@@ -2391,7 +2573,7 @@ def pbi_add_matrix_tool(
             ],
         }
     }
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
         page,
@@ -2425,7 +2607,8 @@ def pbi_add_text_box_tool(
     bold: bool = False,
     color: str = "#222222",
 ) -> dict[str, Any]:
-    measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
+    # Text boxes have no field references so manager-augmented home table is unused.
+    measure_home_map = _resolve_measure_home_map(extract_folder)
     return _append_visual(
         extract_folder,
         page,
@@ -3064,6 +3247,68 @@ def _dispatch_labelled_card(extract, page, x, y, w, h, title, cfg):
     )
 
 
+def _dispatch_map(extract, page, x, y, w, h, title, cfg):
+    location = cfg.get("location") or cfg.get("category_column") or cfg.get("category")
+    measure = cfg.get("measure") or cfg.get("value_measure")
+    if not location:
+        raise PowerBIValidationError(
+            "map requires config.location (Table.Column with the geographic field)",
+            details={"visual_type": "map"},
+        )
+    return pbi_add_map_tool(extract, page, location, measure, x, y, w, h, title)
+
+
+def pbi_add_map_tool(
+    extract_folder: str,
+    page: str,
+    location_column: str,
+    value_measure: str | None,
+    x: int,
+    y: int,
+    width: int = 420,
+    height: int = 320,
+    title: str = "",
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    """Add a bubble/map visual (``map``).
+
+    Roles: ``Category`` (column with the geographic field — country, city,
+    Lat/Long…) and optional ``Y`` (measure that drives bubble size).
+
+    Provides feature parity with ``pbi_build_dashboard``'s ``map`` spec so
+    callers can use the simpler ``pbi_add_visual_tool(visual_type="map", …)``
+    surface without dropping into the dashboard builder.
+    """
+    projections: dict[str, list[dict[str, str]]] = {
+        "Category": [{"queryRef": _query_ref(location_column)}]
+    }
+    references = [location_column]
+    if value_measure:
+        projections["Y"] = [{"queryRef": _query_ref(value_measure)}]
+        references.append(value_measure)
+    _validate_field_references_live(manager, references)
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
+    return _append_visual(
+        extract_folder,
+        page,
+        lambda section, home_map: _create_chart_container(
+            section,
+            visual_type="map",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title or None,
+            projections=projections,
+            references=references,
+            measure_home_map=home_map,
+            manager=manager,
+        ),
+        measure_home_map,
+    )
+
+
 def _dispatch_text_box(extract, page, x, y, w, h, title, cfg):
     text = cfg.get("text")
     if text is None:
@@ -3093,6 +3338,7 @@ _VISUAL_TYPE_DISPATCH.update({
     "waterfall": _dispatch_waterfall,
     "slicer": _dispatch_slicer,
     "gauge": _dispatch_gauge,
+    "map": _dispatch_map,
     "text_box": _dispatch_text_box,
     "textbox": _dispatch_text_box,
 })
@@ -3108,6 +3354,7 @@ __all__ = [
     "pbi_add_kpi_tool",
     "pbi_add_labelled_card_tool",
     "pbi_add_line_chart_tool",
+    "pbi_add_map_tool",
     "pbi_add_matrix_tool",
     "pbi_add_scatter_chart_tool",
     "pbi_add_slicer_tool",

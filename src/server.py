@@ -104,6 +104,7 @@ from tools import (
     pbi_add_kpi_tool,
     pbi_add_labelled_card_tool,
     pbi_add_line_chart_tool,
+    pbi_add_map_tool,
     pbi_add_matrix_tool,
     pbi_add_role_member_tool,
     pbi_add_scatter_chart_tool,
@@ -1053,13 +1054,29 @@ def pbi_export_validation_report(
 
 
 @mcp.tool()
-def pbi_lint_report_layout(extract_folder: str, page: str | None = None) -> dict[str, Any]:
-    """Lint extracted Report/Layout for overlaps, whitespace, tiny visuals, and missing titles."""
+def pbi_lint_report_layout(
+    extract_folder: str,
+    page: str | None = None,
+    ignore_warnings: list[str] | None = None,
+    only_pages: list[str] | None = None,
+    max_visuals_per_page: int | None = None,
+) -> dict[str, Any]:
+    """Lint extracted Report/Layout for overlaps, whitespace, tiny visuals, and missing titles.
+
+    ``ignore_warnings``: list of warning types to drop (e.g.
+    ``["too_many_visuals", "visual_too_small", "missing_title",
+    "excessive_whitespace"]``) — useful on intentionally dense pages.
+    ``only_pages``: restrict the scan to specific page names. ``max_visuals_per_page``:
+    override the default ``too_many_visuals`` threshold.
+    """
     return _run(
         "pbi_lint_report_layout",
         pbi_lint_report_layout_tool,
         extract_folder=extract_folder,
         page=page,
+        ignore_warnings=ignore_warnings,
+        only_pages=only_pages,
+        max_visuals_per_page=max_visuals_per_page,
     )
 
 
@@ -2230,6 +2247,40 @@ def pbi_add_kpi(
         title=title,
         goal_measure=goal_measure,
         direction=direction,
+        manager=CONNECTION_MANAGER,
+    )
+
+
+@mcp.tool()
+def pbi_add_map(
+    extract_folder: str,
+    page: str,
+    location_column: str,
+    x: int,
+    y: int,
+    value_measure: str | None = None,
+    width: int = 420,
+    height: int = 320,
+    title: str = "",
+) -> dict[str, Any]:
+    """Add a map / bubble visual. Roles: location_column (geographic field —
+    country, city, lat/long…) and optional value_measure (drives bubble size).
+
+    References accept ``Table.Column``, ``Table[Column]``, or
+    ``'Table With Spaces'[Column]``.
+    """
+    return _run(
+        "pbi_add_map",
+        pbi_add_map_tool,
+        extract_folder=extract_folder,
+        page=page,
+        location_column=location_column,
+        value_measure=value_measure,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        title=title,
         manager=CONNECTION_MANAGER,
     )
 

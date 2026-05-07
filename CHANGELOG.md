@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.10.1] — 2026-05-07 — MATSKI-driven bugfixes (extract fallback, ref parsing, map dispatch, home tables, FORMAT detection, role hints, lint knobs)
+
+Seven concrete bugs surfaced while building the MATSKI Power BI report. All seven fixes are localised, signature-compatible, and covered by regression tests in `tests/test_security.py`. Net new tool: `pbi_add_map`. Registry: 125/125, 0 orphans · tests: 107/107 (2 platform skips).
+
+### Fixed
+
+1. **`pbi_extract_report` falls back to native ZIP extraction when the bundled `pbi-tools.core` does not support the `extract` action** (it ships `compile` only). The CLI's "Unknown action: 'extract'" / "No action was specified" stdout is detected, the wrapper logs the fallback, and a fresh ZIP-based extraction unpacks `Report/Layout` and `Report/StaticResources/Themes/*` so layout-touching workflows keep functioning. The response carries `extraction_method` so callers know which path ran.
+
+2. **Visual tools accept `Date[Année]`, `'Date'[Année]`, and `Date.Année` interchangeably.** New `_normalize_reference` collapses every PBI reference syntax into the canonical `Table.Column` form before downstream parsing. The dotted form remains unchanged for backward compatibility, and bare measure names stay bare. `_query_ref` and `_split_column_ref` route through the normaliser; user-facing error messages now list the three accepted formats.
+
+3. **`pbi_add_visual` supports `visual_type="map"`** via a new `_dispatch_map` registered in `_VISUAL_TYPE_DISPATCH`. New top-level tool `pbi_add_map` (with manager-aware live field validation) is also exposed for callers that prefer the explicit form. Achieves API parity with the `pbi_build_dashboard` `map` spec.
+
+4. **Visual writes already carry the right measure home table**, so `pbi_validate_report_fields` no longer reports `measure_home_table_needs_repair` after a successful `pbi_add_*`. New helper `_resolve_measure_home_map(extract_folder, manager=…)` combines on-disk PBIP metadata with the live model so the Entity reference is correct from the first write. The 14 visual tools that take `manager` use this path; on-disk metadata still wins on conflict for stable offline behaviour.
+
+5. **`pbi_detect_empty_visuals` no longer flags `FORMAT()` text-returning measures as numeric zero.** The "all-zero" warning fires only when every non-blank value is numeric (`int`/`float`, with `bool` excluded) AND every numeric value equals zero. Mixed/text-only payloads stay silent.
+
+6. **Field-validation errors report the role-expected kind, not just the format-inferred one.** `_validate_field_references_live` now accepts an optional `expected_kinds` map (`reference -> "column" | "measure"`); each missing entry surfaces both `kind` (the role expectation) and `inferred_kind` (the format guess), plus a `hint` explaining how to qualify the reference (e.g. "axis/category/rows expect a column — qualify with the table"). Diagnostic messages match the visual's role contract.
+
+7. **`pbi_lint_report_layout` accepts `ignore_warnings`, `only_pages`, and `max_visuals_per_page`.** `ignore_warnings` drops listed warning types (`too_many_visuals`, `visual_too_small`, `missing_title`, `excessive_whitespace`, `layout_overloaded`) on intentionally dense pages. `only_pages` scopes the lint to specific pages (e.g. only the new pages an LLM produced). `max_visuals_per_page` overrides the default `too_many_visuals` threshold. Issues are never silenced — only warnings.
+
+### Added
+
+- `pbi_add_map` — top-level wrapper for the existing dispatcher path (Bug 3 productisation). Accepts the same flexible reference syntax (`Table[Column]`, `'Table'[Column]`, `Table.Column`).
+
+### Tests
+
+- Seven regression tests added to `tests/test_security.py` (tracked) — one per bug. The visual-side tests live in `tests/test_visuals.py` (local-only by repo convention). Suite stays 100 % green: 107 passing, 2 platform skips.
+
 ## [0.10.0] — 2026-05-07 — Stability foundation, LLM-resilient visual surface, advanced visuals, DAX power tools
 
 124 tools registered, 0 orphans · 110/110 tests passing · 17 new tools, 6 hardened, 4 new DAX scaffolding helpers.

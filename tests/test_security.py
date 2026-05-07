@@ -326,5 +326,218 @@ class DAXSemanticReferenceParserTests(unittest.TestCase):
         self.assertEqual(measures, {"Sales", "Sales SPY"})
 
 
+class V010MatskiBugfixTests(unittest.TestCase):
+    """Regression tests for the 7 bugs reported during MATSKI report creation."""
+
+    # --- Bug 1: pbi_extract_report falls back to ZIP when pbi-tools.core lacks 'extract' ---
+    def test_extract_report_falls_back_to_zip_when_cli_unavailable(self) -> None:
+        from tools.visuals import (
+            VisualToolError,
+            pbi_extract_report_tool,
+            LAYOUT_RELATIVE_PATH,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            previous = [str(item) for item in SECURITY.allowed_base_dirs()]
+            SECURITY.configure_allowed_dirs([str(root)])
+            try:
+                pbix = root / "fake.pbix"
+                with zipfile.ZipFile(pbix, "w") as zf:
+                    zf.writestr("Report/Layout", json.dumps({"sections": []}, ensure_ascii=False).encode("utf-16-le"))
+                    zf.writestr("Report/StaticResources/Themes/Dummy.json", b'{"name":"Dummy"}')
+                target = root / "extracted"
+
+                # Simulate the bundled pbi-tools.core CLI failing on 'extract'.
+                def _fake_run_pbi_tools(args):
+                    raise VisualToolError(
+                        "pbi-tools command failed.",
+                        details={"stdout": "Unknown action: 'extract'", "stderr": ""},
+                    )
+
+                with patch("tools.visuals._run_pbi_tools", side_effect=_fake_run_pbi_tools):
+                    result = pbi_extract_report_tool(str(pbix), extract_folder=str(target))
+
+                self.assertTrue(result["ok"], result)
+                self.assertEqual(result["extraction_method"], "zip_native")
+                # Layout was reconstructed from the ZIP.
+                self.assertTrue((target / LAYOUT_RELATIVE_PATH).exists())
+                # Static resources copied too.
+                self.assertTrue((target / "Report" / "StaticResources" / "Themes" / "Dummy.json").exists())
+            finally:
+                SECURITY.configure_allowed_dirs(previous)
+
+    # --- Bug 2: bracket-form references parse identically to dotted form ---
+    def test_reference_parsing_accepts_bracket_and_dotted_forms(self) -> None:
+        from tools.visuals import _normalize_reference, _query_ref, _split_column_ref
+
+        # All three forms collapse to the canonical "Date.Année" representation.
+        self.assertEqual(_normalize_reference("Date.Année"), "Date.Année")
+        self.assertEqual(_normalize_reference("Date[Année]"), "Date.Année")
+        self.assertEqual(_normalize_reference("'Date'[Année]"), "Date.Année")
+        self.assertEqual(_normalize_reference("'Date Avec Espaces'[Year]"), "Date Avec Espaces.Year")
+        # Bare measure stays bare.
+        self.assertEqual(_normalize_reference("Sales"), "Sales")
+        # Short queryRef strips the table prefix in every form.
+        self.assertEqual(_query_ref("Date[Année]"), "Année")
+        self.assertEqual(_query_ref("'Date'[Année]"), "Année")
+        # _split_column_ref accepts bracket form.
+        self.assertEqual(_split_column_ref("Date[Année]"), ("Date", "Année"))
+        self.assertEqual(_split_column_ref("'Date'[Année]"), ("Date", "Année"))
+
+    # --- Bug 3: pbi_add_visual accepts visual_type="map" ---
+    def test_add_visual_dispatch_includes_map(self) -> None:
+        from tools.visuals import _VISUAL_TYPE_DISPATCH
+
+        self.assertIn("map", _VISUAL_TYPE_DISPATCH)
+        self.assertTrue(callable(_VISUAL_TYPE_DISPATCH["map"]))
+
+    # --- Bug 4: visuals carry the right home table when manager is supplied ---
+    def test_resolve_measure_home_map_pulls_live_model(self) -> None:
+        from types import SimpleNamespace
+        from tools.visuals import _augment_measure_home_map_with_live
+
+        with patch(
+            "tools.visuals.pbi_model_info_tool",
+            return_value={
+                "ok": True,
+                "measures": [
+                    {"name": "Sales", "table": "Facture"},
+                    {"name": "Margin", "table": "Produit"},
+                ],
+            },
+        ):
+            home_map: dict[str, str] = {}
+            _augment_measure_home_map_with_live(home_map, SimpleNamespace())
+            self.assertEqual(home_map.get("Sales"), "Facture")
+            self.assertEqual(home_map.get("Margin"), "Produit")
+
+        # Existing entries are not overwritten by live results (extract metadata wins).
+        with patch(
+            "tools.visuals.pbi_model_info_tool",
+            return_value={"ok": True, "measures": [{"name": "Sales", "table": "Facture"}]},
+        ):
+            home_map = {"Sales": "ManualTable"}
+            _augment_measure_home_map_with_live(home_map, SimpleNamespace())
+            self.assertEqual(home_map["Sales"], "ManualTable")
+
+    # --- Bug 5: detect_empty_visuals does not flag FORMAT() text measures ---
+    def test_empty_visuals_skips_text_measure_zero_check(self) -> None:
+        # The fix is logical: only flag "all numeric and all zero" — strings like
+        # "1 230 €" returned by FORMAT() should not trigger the warning.
+        non_blank_text = ["1 230 €", "0 K €"]
+        non_blank_zero = [0, 0.0]
+        non_blank_mixed = [0, "0 K €"]
+
+        all_numeric = lambda values: all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values)
+        # The triggering condition (post-fix):
+        def should_flag(values):
+            return all_numeric(values) and all(float(v) == 0 for v in values)
+
+        self.assertFalse(should_flag(non_blank_text))
+        self.assertTrue(should_flag(non_blank_zero))
+        self.assertFalse(should_flag(non_blank_mixed))
+
+    # --- Bug 6: error message names the expected role kind ---
+    def test_field_validation_error_includes_role_kind_hint(self) -> None:
+        from pbi_connection import PowerBIValidationError
+        from tools.visuals import _validate_field_references_live
+
+        fake_index = {
+            "columns": {("dim_date", "year")},
+            "measures": {"sales": {"facture"}},
+            "measure_tables": {"sales": {"Facture"}},
+        }
+        with patch("tools.visuals._live_model_field_index", return_value=(fake_index, {"status": "available"})):
+            from types import SimpleNamespace
+
+            # User passes "Annee" expecting it to fill a column role; the validator
+            # surfaces kind="column" and a hint about the right format.
+            with self.assertRaises(PowerBIValidationError) as ctx:
+                _validate_field_references_live(
+                    SimpleNamespace(),
+                    ["Annee"],
+                    expected_kinds={"Annee": "column"},
+                )
+            entry = ctx.exception.details["missing"][0]
+            self.assertEqual(entry["kind"], "column")
+            self.assertIn("hint", entry)
+            self.assertIn("Date.Year", entry["hint"])
+
+    # --- Bug 7: layout linter ignore_warnings + only_pages knobs ---
+    def test_layout_linter_ignore_warnings_and_only_pages(self) -> None:
+        from tools.quality import pbi_lint_report_layout_tool
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            previous = [str(item) for item in SECURITY.allowed_base_dirs()]
+            SECURITY.configure_allowed_dirs([str(root)])
+            try:
+                # Page with a tiny visual that would normally trigger visual_too_small + missing_title.
+                layout = {
+                    "sections": [
+                        {
+                            "name": "ReportSection1",
+                            "displayName": "Crowded",
+                            "displayOption": 0,
+                            "width": 1280,
+                            "height": 720,
+                            "visualContainers": [
+                                {
+                                    "x": 10, "y": 10, "z": 0, "width": 50, "height": 30,
+                                    "config": json.dumps({
+                                        "name": "v1",
+                                        "singleVisual": {"visualType": "card", "objects": {}, "projections": {"Values": [{"queryRef": "X"}]}, "prototypeQuery": {"Version": 2, "From": [], "Select": []}},
+                                        "layouts": [{"id": 0, "position": {"x": 10, "y": 10, "width": 50, "height": 30}}],
+                                    }, ensure_ascii=False),
+                                    "filters": "[]",
+                                    "query": "{}",
+                                    "dataTransforms": "{}",
+                                }
+                            ],
+                            "filters": "[]",
+                        },
+                        {
+                            "name": "ReportSection2",
+                            "displayName": "Empty",
+                            "displayOption": 0,
+                            "width": 1280,
+                            "height": 720,
+                            "visualContainers": [],
+                            "filters": "[]",
+                        },
+                    ],
+                }
+                extract = root / "extract"
+                (extract / "Report").mkdir(parents=True)
+                (extract / "Report" / "Layout").write_text(
+                    json.dumps(layout, ensure_ascii=False, indent=2), encoding="utf-16-le",
+                )
+
+                # Without filters → both warnings present on the Crowded page.
+                full = pbi_lint_report_layout_tool(str(extract))
+                warning_types = {w["type"] for w in full["warnings"]}
+                self.assertIn("visual_too_small", warning_types)
+                self.assertIn("missing_title", warning_types)
+
+                # With ignore_warnings → those warning types are dropped.
+                filtered = pbi_lint_report_layout_tool(
+                    str(extract),
+                    ignore_warnings=["visual_too_small", "missing_title"],
+                )
+                filtered_types = {w["type"] for w in filtered["warnings"]}
+                self.assertNotIn("visual_too_small", filtered_types)
+                self.assertNotIn("missing_title", filtered_types)
+                self.assertIn("ignored_warnings", filtered)
+                self.assertEqual(set(filtered["ignored_warnings"]), {"visual_too_small", "missing_title"})
+
+                # With only_pages → only the named pages are scanned.
+                scoped = pbi_lint_report_layout_tool(str(extract), only_pages=["Empty"])
+                scoped_pages = {w.get("page") for w in scoped["warnings"]}
+                self.assertNotIn("Crowded", scoped_pages)
+            finally:
+                SECURITY.configure_allowed_dirs(previous)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

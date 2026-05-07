@@ -570,21 +570,55 @@ def pbi_validate_relationship_plan_tool(
     )
 
 
-def pbi_lint_report_layout_tool(extract_folder: str, page: str | None = None) -> dict[str, Any]:
-    """Detect overlaps, excessive whitespace, tiny visuals, and missing titles."""
+def pbi_lint_report_layout_tool(
+    extract_folder: str,
+    page: str | None = None,
+    *,
+    ignore_warnings: list[str] | None = None,
+    only_pages: list[str] | None = None,
+    max_visuals_per_page: int | None = None,
+) -> dict[str, Any]:
+    """Detect overlaps, excessive whitespace, tiny visuals, and missing titles.
+
+    Optional knobs to silence noise on intentionally dense pages:
+
+    - ``ignore_warnings``: list of warning types to drop (e.g.
+      ``["too_many_visuals", "visual_too_small", "missing_title",
+      "excessive_whitespace", "layout_overloaded"]``). Issues are never
+      ignored — only warnings.
+    - ``only_pages``: restrict the scan to a list of page display names /
+      internal names. Use to lint just the new pages an LLM produced.
+    - ``max_visuals_per_page``: override the default ``too_many_visuals``
+      threshold (defaults to ``MAX_VISUALS_PER_PAGE``). Set high to
+      effectively disable the warning without ignoring it.
+    """
     folder, layout = _load_layout(extract_folder)
     issues: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     sections = layout.get("sections", [])
+    ignore_set = {str(item).strip() for item in (ignore_warnings or []) if str(item).strip()}
+    pages_filter: set[str] | None = None
+    if only_pages:
+        pages_filter = {str(item).strip() for item in only_pages if str(item).strip()}
+    visual_threshold = int(max_visuals_per_page) if max_visuals_per_page is not None else MAX_VISUALS_PER_PAGE
+
+    def _add_warning(item: dict[str, Any]) -> None:
+        if item.get("type") not in ignore_set:
+            warnings.append(item)
+
     for section in sections:
-        if page and page not in {str(section.get("name")), str(section.get("displayName"))}:
+        section_name = str(section.get("name", ""))
+        section_display = str(section.get("displayName") or section.get("name") or "")
+        if page and page not in {section_name, section_display}:
             continue
-        page_name = str(section.get("displayName") or section.get("name") or "")
+        if pages_filter is not None and section_name not in pages_filter and section_display not in pages_filter:
+            continue
+        page_name = section_display
         width = float(section.get("width", 1280) or 1280)
         height = float(section.get("height", 720) or 720)
         containers = [item for item in section.get("visualContainers", []) if isinstance(item, dict)]
-        if len(containers) > MAX_VISUALS_PER_PAGE:
-            warnings.append({"type": "too_many_visuals", "page": page_name, "count": len(containers), "limit": MAX_VISUALS_PER_PAGE})
+        if len(containers) > visual_threshold:
+            _add_warning({"type": "too_many_visuals", "page": page_name, "count": len(containers), "limit": visual_threshold})
         used_area = 0.0
         for index, container in enumerate(containers):
             x, y, visual_width, visual_height = _bounds(container)
@@ -592,9 +626,9 @@ def pbi_lint_report_layout_tool(extract_folder: str, page: str | None = None) ->
             visual_type = _visual_type(container)
             used_area += visual_width * visual_height
             if visual_type not in {"textbox", "slicer"} and (visual_width < MIN_VISUAL_WIDTH or visual_height < MIN_VISUAL_HEIGHT):
-                warnings.append({"type": "visual_too_small", "page": page_name, "visual": name, "width": visual_width, "height": visual_height})
+                _add_warning({"type": "visual_too_small", "page": page_name, "visual": name, "width": visual_width, "height": visual_height})
             if visual_type not in {"textbox", "slicer"} and not _visual_has_title(container):
-                warnings.append({"type": "missing_title", "page": page_name, "visual": name, "visual_type": visual_type})
+                _add_warning({"type": "missing_title", "page": page_name, "visual": name, "visual_type": visual_type})
             if x < 0 or y < 0 or x + visual_width > width or y + visual_height > height:
                 issues.append({"type": "visual_outside_canvas", "page": page_name, "visual": name})
             for other in containers[index + 1:]:
@@ -603,9 +637,9 @@ def pbi_lint_report_layout_tool(extract_folder: str, page: str | None = None) ->
                     issues.append({"type": "visual_overlap", "page": page_name, "visual_a": name, "visual_b": _visual_name(other), "area": round(area, 2)})
         density = used_area / max(width * height, 1)
         if density < 0.35 and containers:
-            warnings.append({"type": "excessive_whitespace", "page": page_name, "density": round(density, 3)})
+            _add_warning({"type": "excessive_whitespace", "page": page_name, "density": round(density, 3)})
         if density > 0.9:
-            warnings.append({"type": "layout_overloaded", "page": page_name, "density": round(density, 3)})
+            _add_warning({"type": "layout_overloaded", "page": page_name, "density": round(density, 3)})
 
     return ok(
         f"Layout lint found {len(issues)} issue(s), {len(warnings)} warning(s).",
@@ -614,6 +648,8 @@ def pbi_lint_report_layout_tool(extract_folder: str, page: str | None = None) ->
         valid=not issues,
         issue_count=len(issues),
         warning_count=len(warnings),
+        ignored_warnings=sorted(ignore_set) or [],
+        max_visuals_per_page=visual_threshold,
         issues=issues,
         warnings=warnings,
     )
@@ -783,8 +819,15 @@ def pbi_detect_empty_visuals_tool(
                     non_blank = [value for value in measure_values if value is not None]
                     if not non_blank:
                         warnings.append({"type": "visual_measures_all_blank", "page": page_name, "visual": visual_name, "visual_type": visual_type})
-                    elif all(float(value or 0) == 0 for value in non_blank if isinstance(value, (int, float))):
-                        warnings.append({"type": "visual_numeric_measures_all_zero", "page": page_name, "visual": visual_name, "visual_type": visual_type})
+                    else:
+                        # FIX: don't flag text-returning measures (e.g. FORMAT()) as
+                        # "numeric zero". Only emit the warning when ALL non-blank
+                        # values are numeric AND all evaluate to 0. Otherwise the
+                        # measure returns a non-numeric value (text, date, …) which
+                        # is a legitimate non-zero result.
+                        all_numeric = all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in non_blank)
+                        if all_numeric and all(float(value) == 0 for value in non_blank):
+                            warnings.append({"type": "visual_numeric_measures_all_zero", "page": page_name, "visual": visual_name, "visual_type": visual_type})
 
     return ok(
         f"Empty visual scan found {len(issues)} issue(s), {len(warnings)} warning(s).",
