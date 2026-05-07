@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.10.4] — 2026-05-08 — Analysis & scoring tools, line-chart pre-flight, column qualification docs
+
+Six new analysis tools for grading and rubric scoring of Power BI deliverables, plus a pre-flight diagnostic for the line-chart constant-measure failure mode and clarified column-qualification docs across the visual surface. No tool removals; existing signatures unchanged.
+
+### Added
+
+- **`pbi_validate_star_schema`** — classifies tables into fact / dim / bridge / isolated based on relationship topology, flags snowflake (dim-to-dim) chains and fact-to-fact joins as issues, surfaces multiple-fact and isolated-table warnings. Optional `fact_table_hints` lets graders tag fact tables that have no incoming relationships yet.
+- **`pbi_detect_circular_dependencies`** — builds a measure dependency graph from DAX `[Name]` tokens, runs DFS to find cycles, reports self-references separately. Returns the actual cycle paths so the user can break the loop.
+- **`pbi_validate_power_query_steps`** — checks an M expression for required step patterns. Each entry is a substring or `re:` regex; useful for grading transformations like `Text.PadStart(_, 5, "0")` or null-customer filtering.
+- **`pbi_detect_missing_visuals`** — scans a page's layout for required visuals. Each requirement is `{visual_type, count?, contains_field?, label?}`. Catches missing carte géographique, missing tranches-de-factures visual, etc.
+- **`pbi_score_rubric`** — weighted aggregator that runs the above validators (`star_schema`, `no_circular_deps`, `power_query_steps`, `missing_visuals`, `measure_exists`) plus per-criterion weights and returns a normalised score in [0, 1].
+- **`pbi_export_correction_report`** — generates a Markdown grading report (model overview, star-schema verdict, cycles, audit issues, optional rubric scoring with checkmarks).
+
+### Fixed
+
+- **Line chart now warns on constant measures and unresolved home tables.** New `_inspect_value_measures` helper checks each Y-measure of `pbi_add_line_chart_tool`. When a measure has no DAX column/measure reference (looks like a scalar constant such as `Ratio = 0.92`) or when its home table cannot be resolved (binding falls back to the synthetic `$Measures` entity), the response carries a `warnings` list with a `hint` explaining the fix. Reproduces the cause of the "constant measure breaks line chart" symptom even when full PBI repro isn't available — the linked root cause (model persistence) is tracked for v0.10.5.
+
+### Changed
+
+- **Column qualification documented in tool descriptions.** The MCP wrappers for `pbi_add_line_chart`, `pbi_add_bar_chart`, `pbi_add_donut_chart`, `pbi_add_table_visual`, `pbi_add_scatter_chart`, `pbi_add_waterfall`, and `pbi_add_slicer` now state explicitly that columns require table qualification (`Table[Column]`, `'Table'[Column]`, or `Table.Column`). Bare names like `Year` are rejected — the LLM no longer needs to discover this from an error message.
+
+### Internals
+
+- 6 new tools registered via `tools/__init__.py` and `src/server.py`. Registry audit clean.
+- New helper `_inspect_value_measures(value_measures, measure_home_map, manager)` in `src/tools/visuals.py`.
+- New file `tests/test_v0_10_4_analysis.py` with 11 offline unit tests (mock manager + patched snapshot, no live PBI required).
+
+### Tests
+
+- 162 passing (was 151 in v0.10.3) — 11 new offline tests for star-schema topology, cycle detection, power-query step matching, missing-visual detection, rubric aggregation, and correction-report writing. Two platform skips unchanged.
+
+### Known limitations (not yet fixed)
+
+- Measures created via `pbi_create_measure` live only in the AS in-memory model, not in the on-disk `.pbix`. Restarting Power BI Desktop drops them. A `pbi_patch_model` writing TMDL to `DataModel/` is tracked for v0.10.5.
+- No `pbi_save_model` (forced Ctrl+S) — requires UI automation, opt-in only.
+- Visual binding updates still require remove + re-add (no `pbi_update_visual_bindings` yet).
+
 ## [0.10.3] — 2026-05-07 — Stability: single-instance lock, parent watcher, instance discovery cache
 
 Server-side reliability and cold-start performance. Eliminates the multi-instance / zombie-process failure mode and removes redundant work from the connection bootstrap. No tool surface changes.

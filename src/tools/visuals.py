@@ -494,6 +494,65 @@ def _augment_measure_home_map_with_live(
     return measure_home_map
 
 
+def _inspect_value_measures(
+    value_measures: list[str],
+    measure_home_map: dict[str, str],
+    manager: Any | None,
+) -> list[dict[str, Any]]:
+    """Diagnostic warnings for line/area/combo Y measures.
+
+    Detects two failure modes that PBI Desktop reports as opaque rendering errors:
+
+    - ``measure_home_unresolved``: the measure exists in the live model but no
+      home table could be resolved (extract metadata absent and live lookup
+      failed). The binding falls back to the synthetic ``$Measures`` entity
+      which PBI refuses to plot in cartesian charts.
+    - ``constant_measure``: the DAX expression has no column or measure
+      reference, e.g. ``Ratio = 0.92``. Line/combo charts trigger an internal
+      error on some PBI builds when every Y value collapses to the same scalar
+      with no axis dependency. Wrap the value in ``VAR`` or persist the model
+      to bind it through a real table entity first.
+    """
+    from .measures import pbi_list_measures_tool  # local: avoid circular imports
+
+    warnings: list[dict[str, Any]] = []
+    expressions: dict[str, str] = {}
+    if manager is not None:
+        try:
+            listed = pbi_list_measures_tool(manager, include_hidden=True)
+            for entry in listed.get("measures", []) or []:
+                expressions[str(entry.get("name", ""))] = str(entry.get("expression", ""))
+        except Exception:  # pragma: no cover — manager might be detached
+            pass
+
+    for measure in value_measures:
+        if measure not in measure_home_map:
+            warnings.append({
+                "measure": measure,
+                "issue": "measure_home_unresolved",
+                "hint": (
+                    "Home table not found on disk or live. Binding will fall "
+                    "back to '$Measures' which PBI refuses to render. Save the "
+                    ".pbix (Ctrl+S) to persist the measure before adding it to "
+                    "a cartesian chart."
+                ),
+            })
+        expr = expressions.get(measure, "")
+        if expr and "[" not in expr:
+            warnings.append({
+                "measure": measure,
+                "issue": "constant_measure",
+                "hint": (
+                    "DAX expression has no column or measure reference (looks "
+                    "like a scalar constant). Line/combo charts may error out "
+                    "on render — wrap the value via CALCULATE/VAR with a "
+                    "harmless filter, or use a card visual instead."
+                ),
+                "expression_preview": expr[:120],
+            })
+    return warnings
+
+
 def _build_select_entry(
     reference: str,
     aliases: dict[str, str],
@@ -2093,7 +2152,8 @@ def pbi_add_line_chart_tool(
         expected_kinds[m] = "measure"
     _validate_field_references_live(manager, [axis_column, *value_measures], expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
-    return _append_visual(
+    diagnostics = _inspect_value_measures(value_measures, measure_home_map, manager)
+    result = _append_visual(
         extract_folder,
         page,
         lambda section, home_map: _create_chart_container(
@@ -2113,6 +2173,9 @@ def pbi_add_line_chart_tool(
         ),
         measure_home_map,
     )
+    if diagnostics:
+        result["warnings"] = diagnostics
+    return result
 
 
 def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 320, height: int = 280, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:

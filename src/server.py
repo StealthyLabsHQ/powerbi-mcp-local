@@ -78,19 +78,25 @@ from tools import (
     pbi_validate_dax_tool,
     pbi_audit_model_tool,
     pbi_compare_report_versions_tool,
+    pbi_detect_circular_dependencies_tool,
     pbi_detect_dirty_dates_tool,
     pbi_detect_empty_visuals_tool,
+    pbi_detect_missing_visuals_tool,
     pbi_detect_name_collisions_tool,
+    pbi_export_correction_report_tool,
     pbi_export_validation_report_tool,
     pbi_generate_measure_tests_tool,
     pbi_lint_dax_tool,
     pbi_lint_report_layout_tool,
     pbi_run_scenario_tool,
     pbi_score_dashboard_tool,
+    pbi_score_rubric_tool,
     pbi_validate_filter_expression_tool,
     pbi_validate_pbix_persistence_tool,
     pbi_validate_pbix_reopen_tool,
+    pbi_validate_power_query_steps_tool,
     pbi_validate_relationship_plan_tool,
+    pbi_validate_star_schema_tool,
     pbi_validate_visual_bindings_tool,
     pbi_bulk_import_excel_tool,
     pbi_create_csv_import_query_tool,
@@ -879,6 +885,101 @@ def pbi_audit_model(include_hidden: bool = False) -> dict[str, Any]:
         pbi_audit_model_tool,
         CONNECTION_MANAGER,
         include_hidden=include_hidden,
+    )
+
+
+@mcp.tool()
+def pbi_validate_star_schema(
+    include_hidden: bool = False,
+    fact_table_hints: list[str] | None = None,
+) -> dict[str, Any]:
+    """Verify the model is a star schema (1 fact table per group, dim tables only on the one-side)."""
+    return _run(
+        "pbi_validate_star_schema",
+        pbi_validate_star_schema_tool,
+        CONNECTION_MANAGER,
+        include_hidden=include_hidden,
+        fact_table_hints=fact_table_hints,
+    )
+
+
+@mcp.tool()
+def pbi_detect_circular_dependencies(include_hidden: bool = False) -> dict[str, Any]:
+    """Find cycles and self-references in the measure dependency graph."""
+    return _run(
+        "pbi_detect_circular_dependencies",
+        pbi_detect_circular_dependencies_tool,
+        CONNECTION_MANAGER,
+        include_hidden=include_hidden,
+    )
+
+
+@mcp.tool()
+def pbi_validate_power_query_steps(
+    table: str,
+    expected_steps: list[str],
+    partition_name: str | None = None,
+    case_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Verify that a Power Query (M) expression contains expected step patterns (substrings or `re:` regex)."""
+    return _run(
+        "pbi_validate_power_query_steps",
+        pbi_validate_power_query_steps_tool,
+        CONNECTION_MANAGER,
+        table=table,
+        expected_steps=expected_steps,
+        partition_name=partition_name,
+        case_sensitive=case_sensitive,
+    )
+
+
+@mcp.tool()
+def pbi_detect_missing_visuals(
+    extract_folder: str,
+    page: str,
+    requirements: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Detect required visuals missing from a page (visual_type + optional contains_field/count)."""
+    return _run(
+        "pbi_detect_missing_visuals",
+        pbi_detect_missing_visuals_tool,
+        extract_folder,
+        page=page,
+        requirements=requirements,
+    )
+
+
+@mcp.tool()
+def pbi_score_rubric(
+    criteria: list[dict[str, Any]],
+    extract_folder: str | None = None,
+) -> dict[str, Any]:
+    """Run a weighted rubric across multiple validators (star_schema, no_circular_deps, power_query_steps, missing_visuals, measure_exists)."""
+    return _run(
+        "pbi_score_rubric",
+        pbi_score_rubric_tool,
+        CONNECTION_MANAGER,
+        criteria=criteria,
+        extract_folder=extract_folder,
+    )
+
+
+@mcp.tool()
+def pbi_export_correction_report(
+    output_path: str,
+    extract_folder: str | None = None,
+    rubric_criteria: list[dict[str, Any]] | None = None,
+    fact_table_hints: list[str] | None = None,
+) -> dict[str, Any]:
+    """Generate a Markdown correction report (model overview, star schema, cycles, audit, optional rubric)."""
+    return _run(
+        "pbi_export_correction_report",
+        pbi_export_correction_report_tool,
+        CONNECTION_MANAGER,
+        output_path=output_path,
+        extract_folder=extract_folder,
+        rubric_criteria=rubric_criteria,
+        fact_table_hints=fact_table_hints,
     )
 
 
@@ -2047,7 +2148,11 @@ def pbi_add_bar_chart(
     title: str = "",
     legend_column: str | None = None,
 ) -> dict[str, Any]:
-    """Add a clustered bar chart visual."""
+    """Add a clustered bar chart visual.
+
+    Columns must be qualified: ``Table[Column]``, ``'Table'[Column]``, or
+    ``Table.Column``. Bare names like ``Year`` are rejected.
+    """
     return _run(
         "pbi_add_bar_chart",
         pbi_add_bar_chart_tool,
@@ -2077,7 +2182,11 @@ def pbi_add_line_chart(
     height: int = 300,
     title: str = "",
 ) -> dict[str, Any]:
-    """Add a line chart visual."""
+    """Add a line chart visual.
+
+    Columns must be qualified with the table: ``Table[Column]``, ``'Table'[Column]``,
+    or ``Table.Column``. Bare names like ``Year`` are rejected — use ``Date.Year``.
+    """
     return _run(
         "pbi_add_line_chart",
         pbi_add_line_chart_tool,
@@ -2106,7 +2215,10 @@ def pbi_add_donut_chart(
     height: int = 280,
     title: str = "",
 ) -> dict[str, Any]:
-    """Add a donut chart visual."""
+    """Add a donut chart visual.
+
+    Columns must be qualified: ``Table[Column]``, ``'Table'[Column]``, or ``Table.Column``.
+    """
     return _run(
         "pbi_add_donut_chart",
         pbi_add_donut_chart_tool,
@@ -2134,7 +2246,11 @@ def pbi_add_table_visual(
     height: int = 320,
     title: str = "",
 ) -> dict[str, Any]:
-    """Add a table visual."""
+    """Add a table visual.
+
+    Each column must be qualified: ``Table[Column]``, ``'Table'[Column]``, or
+    ``Table.Column``. Bare measure names are accepted.
+    """
     return _run(
         "pbi_add_table_visual",
         pbi_add_table_visual_tool,
@@ -2167,7 +2283,10 @@ def pbi_add_scatter_chart(
 ) -> dict[str, Any]:
     """Add a scatter chart. Roles: Category (column), X (measure), Y (measure),
     Size (measure, optional), Series (column, optional). Use for correlation
-    analysis between two measures grouped by a dimension."""
+    analysis between two measures grouped by a dimension.
+
+    Columns must be qualified: ``Table[Column]`` / ``'Table'[Column]`` / ``Table.Column``.
+    """
     return _run(
         "pbi_add_scatter_chart",
         pbi_add_scatter_chart_tool,
@@ -2342,7 +2461,10 @@ def pbi_add_waterfall(
     height: int = 300,
     title: str = "",
 ) -> dict[str, Any]:
-    """Add a waterfall chart visual."""
+    """Add a waterfall chart visual.
+
+    Columns must be qualified: ``Table[Column]``, ``'Table'[Column]``, or ``Table.Column``.
+    """
     return _run(
         "pbi_add_waterfall",
         pbi_add_waterfall_tool,
@@ -2370,7 +2492,11 @@ def pbi_add_slicer(
     height: int = 120,
     slicer_type: str = "dropdown",
 ) -> dict[str, Any]:
-    """Add a slicer visual. slicer_type: dropdown | list | range | tile (horizontal list)."""
+    """Add a slicer visual. slicer_type: dropdown | list | range | tile (horizontal list).
+
+    The slicer ``column`` must be qualified: ``Table[Column]``, ``'Table'[Column]``,
+    or ``Table.Column``.
+    """
     return _run(
         "pbi_add_slicer",
         pbi_add_slicer_tool,

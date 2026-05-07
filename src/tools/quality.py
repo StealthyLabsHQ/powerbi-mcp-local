@@ -1453,21 +1453,527 @@ def pbi_validate_pbix_reopen_tool(
     )
 
 
+def pbi_validate_star_schema_tool(
+    manager: Any,
+    *,
+    include_hidden: bool = False,
+    fact_table_hints: list[str] | None = None,
+) -> dict[str, Any]:
+    """Confirm a model follows star schema topology.
+
+    Heuristic: a *fact* table participates as the many-side in ≥1 relationship,
+    a *dimension* table participates as the one-side. Tables that are both
+    are flagged as bridge tables. Direct dimension-to-dimension relationships
+    are flagged as snowflake violations. Fact tables wired to other facts are
+    flagged as fact-to-fact (constellation).
+
+    Optional ``fact_table_hints`` lets callers force-tag tables as facts
+    (matched case-insensitively); useful when a fact table has no incoming
+    relationships yet because the model is being built incrementally.
+    """
+    snapshot = _model_snapshot(manager, include_hidden=include_hidden)
+    relationships = snapshot.get("relationships", []) or []
+    visible_tables = {
+        str(item.get("name", "")): item
+        for item in snapshot.get("tables", []) or []
+        if include_hidden or not item.get("is_hidden")
+    }
+
+    one_side: set[str] = set()
+    many_side: set[str] = set()
+    for rel in relationships:
+        from_table = str(rel.get("from_table", ""))
+        to_table = str(rel.get("to_table", ""))
+        if from_table:
+            many_side.add(from_table)
+        if to_table:
+            one_side.add(to_table)
+
+    hints = {h.casefold() for h in (fact_table_hints or [])}
+
+    fact_tables: list[str] = []
+    dim_tables: list[str] = []
+    bridge_tables: list[str] = []
+    isolated_tables: list[str] = []
+    for name in visible_tables:
+        is_many = name in many_side
+        is_one = name in one_side
+        forced_fact = name.casefold() in hints
+        if forced_fact or (is_many and not is_one):
+            fact_tables.append(name)
+        elif is_one and not is_many:
+            dim_tables.append(name)
+        elif is_one and is_many:
+            bridge_tables.append(name)
+        else:
+            isolated_tables.append(name)
+
+    fact_set = {n.casefold() for n in fact_tables}
+    non_fact = {n.casefold() for n in (dim_tables + bridge_tables)}
+
+    issues: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+
+    for rel in relationships:
+        a = str(rel.get("from_table", "")).casefold()
+        b = str(rel.get("to_table", "")).casefold()
+        if a in non_fact and b in non_fact:
+            issues.append({"type": "snowflake_dim_to_dim", "from": rel.get("from_table"), "to": rel.get("to_table")})
+        elif a in fact_set and b in fact_set:
+            issues.append({"type": "fact_to_fact", "from": rel.get("from_table"), "to": rel.get("to_table")})
+
+    if not fact_tables:
+        issues.append({"type": "no_fact_table_detected"})
+    if len(fact_tables) > 1:
+        warnings.append({"type": "multiple_fact_tables", "tables": fact_tables})
+    if bridge_tables:
+        warnings.append({"type": "bridge_tables", "tables": bridge_tables})
+    if isolated_tables and len(visible_tables) > 1:
+        warnings.append({"type": "isolated_tables", "tables": isolated_tables})
+
+    return ok(
+        f"Star-schema validation: {len(fact_tables)} fact, {len(dim_tables)} dim, "
+        f"{len(issues)} issue(s), {len(warnings)} warning(s).",
+        valid=not issues,
+        is_star_schema=not issues and len(fact_tables) >= 1,
+        fact_tables=fact_tables,
+        dim_tables=dim_tables,
+        bridge_tables=bridge_tables,
+        isolated_tables=isolated_tables,
+        relationship_count=len(relationships),
+        issue_count=len(issues),
+        warning_count=len(warnings),
+        issues=issues,
+        warnings=warnings,
+    )
+
+
+def pbi_detect_circular_dependencies_tool(
+    manager: Any,
+    *,
+    include_hidden: bool = False,
+) -> dict[str, Any]:
+    """Detect cycles in the measure dependency graph.
+
+    Builds a graph of measure → referenced measures (parsed from DAX
+    ``[Name]`` tokens that match a known measure name) and runs a DFS to
+    find strongly connected cycles. Self-references are reported separately.
+    """
+    import re
+
+    snapshot = _model_snapshot(manager, include_hidden=include_hidden)
+    measures = snapshot.get("measures", []) or []
+    measure_names = {str(m.get("name", "")).casefold(): str(m.get("name", "")) for m in measures}
+    expressions: dict[str, str] = {
+        str(m.get("name", "")): str(m.get("expression", "") or "")
+        for m in measures
+    }
+
+    ref_pattern = re.compile(r"(?<!')\[([^\[\]]+)\]")
+    graph: dict[str, set[str]] = {name: set() for name in expressions}
+    self_refs: list[str] = []
+    for name, expr in expressions.items():
+        for match in ref_pattern.findall(expr):
+            target_key = match.casefold()
+            if target_key in measure_names:
+                target = measure_names[target_key]
+                if target == name:
+                    self_refs.append(name)
+                else:
+                    graph[name].add(target)
+
+    cycles: list[list[str]] = []
+    visited: set[str] = set()
+    stack_set: set[str] = set()
+    stack: list[str] = []
+
+    def _dfs(node: str) -> None:
+        if node in stack_set:
+            idx = stack.index(node)
+            cycle = stack[idx:] + [node]
+            if cycle not in cycles:
+                cycles.append(cycle)
+            return
+        if node in visited:
+            return
+        visited.add(node)
+        stack.append(node)
+        stack_set.add(node)
+        for nxt in sorted(graph.get(node, set())):
+            _dfs(nxt)
+        stack.pop()
+        stack_set.discard(node)
+
+    for name in sorted(graph):
+        _dfs(name)
+
+    return ok(
+        f"Circular dependency scan: {len(cycles)} cycle(s), {len(self_refs)} self-reference(s).",
+        valid=not cycles and not self_refs,
+        cycle_count=len(cycles),
+        self_reference_count=len(self_refs),
+        cycles=cycles,
+        self_references=self_refs,
+        measure_count=len(measures),
+    )
+
+
+def pbi_validate_power_query_steps_tool(
+    manager: Any,
+    *,
+    table: str,
+    expected_steps: list[str],
+    partition_name: str | None = None,
+    case_sensitive: bool = False,
+) -> dict[str, Any]:
+    """Verify that a Power Query (M) expression contains expected step patterns.
+
+    Each entry in ``expected_steps`` is treated as a substring (or regex if it
+    starts with ``re:``) that must appear at least once in the M expression.
+    Useful for grading exercises: e.g. checking that a postal-code column has
+    been left-padded to 5 chars, or that rows with null customer ids are
+    filtered out.
+    """
+    import re
+    from .power_query import pbi_get_power_query_tool
+
+    if not expected_steps:
+        raise PowerBIValidationError("expected_steps must contain at least one entry.")
+
+    payload = pbi_get_power_query_tool(manager, table=table, partition_name=partition_name)
+    expression = str(payload.get("expression", "") or "")
+    haystack = expression if case_sensitive else expression.casefold()
+
+    found: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for step in expected_steps:
+        is_regex = step.startswith("re:")
+        needle = step[3:] if is_regex else step
+        if not is_regex:
+            target = needle if case_sensitive else needle.casefold()
+            ok_match = target in haystack
+        else:
+            flags = 0 if case_sensitive else re.IGNORECASE
+            ok_match = re.search(needle, expression, flags) is not None
+        entry = {"step": step, "is_regex": is_regex}
+        (found if ok_match else missing).append(entry)
+
+    return ok(
+        f"Power Query steps: {len(found)}/{len(expected_steps)} found.",
+        valid=not missing,
+        table=table,
+        partition_name=partition_name,
+        found_count=len(found),
+        missing_count=len(missing),
+        found=found,
+        missing=missing,
+        expression_length=len(expression),
+    )
+
+
+def pbi_detect_missing_visuals_tool(
+    extract_folder: str,
+    *,
+    page: str,
+    requirements: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Detect required visuals that are absent from a page.
+
+    Each requirement entry is a dict with at least ``visual_type`` and
+    optionally ``count`` (default 1), ``contains_field`` (a reference like
+    ``Date.Year`` that must appear in the visual's prototypeQuery), and
+    ``label`` (free-form name surfaced in the report).
+    """
+    folder, layout = _load_layout(extract_folder)
+    section = None
+    for sec in layout.get("sections", []) or []:
+        if isinstance(sec, dict) and (
+            sec.get("displayName") == page or sec.get("name") == page
+        ):
+            section = sec
+            break
+    if section is None:
+        raise PowerBIValidationError(
+            f"Page '{page}' was not found in the layout.",
+            details={"extract_folder": str(folder), "page": page},
+        )
+
+    containers = section.get("visualContainers", []) or []
+    parsed: list[dict[str, Any]] = []
+    for container in containers:
+        cfg = _visual_config(container)
+        single = cfg.get("singleVisual") or {}
+        vt = str(single.get("visualType", "")).casefold()
+        proto = single.get("prototypeQuery") or {}
+        fields: set[str] = set()
+        for entry in proto.get("Select", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("Name", "")).casefold()
+            if name:
+                fields.add(name)
+        parsed.append({"visual_type": vt, "fields": fields})
+
+    found: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    for req in requirements:
+        if not isinstance(req, dict):
+            missing.append({"requirement": req, "reason": "invalid_entry"})
+            continue
+        wanted_type = str(req.get("visual_type", "")).casefold()
+        if not wanted_type:
+            missing.append({"requirement": req, "reason": "visual_type_missing"})
+            continue
+        wanted_count = int(req.get("count", 1))
+        contains = str(req.get("contains_field", "") or "").casefold()
+        contains_short = contains.rsplit(".", 1)[-1] if contains else ""
+        matches = [
+            v for v in parsed
+            if v["visual_type"] == wanted_type
+            and (not contains_short or contains_short in v["fields"])
+        ]
+        entry = {
+            "requirement": req,
+            "matched_count": len(matches),
+            "expected_count": wanted_count,
+        }
+        if len(matches) >= wanted_count:
+            found.append(entry)
+        else:
+            missing.append({**entry, "reason": "insufficient_matches"})
+
+    return ok(
+        f"Page '{page}': {len(found)}/{len(requirements)} requirements satisfied.",
+        valid=not missing,
+        page=page,
+        visual_count=len(parsed),
+        found_count=len(found),
+        missing_count=len(missing),
+        found=found,
+        missing=missing,
+    )
+
+
+def pbi_score_rubric_tool(
+    manager: Any,
+    *,
+    extract_folder: str | None = None,
+    criteria: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate scoring across multiple validators.
+
+    Each criterion is a dict with:
+    - ``id`` (str): unique identifier
+    - ``label`` (str): human description
+    - ``check`` (str): one of ``star_schema``, ``no_circular_deps``,
+      ``power_query_steps``, ``missing_visuals``, ``measure_exists``
+    - ``weight`` (float, default 1.0)
+    - ``params`` (dict): check-specific parameters
+
+    Returns per-criterion verdicts plus a weighted total score in [0, 1].
+    """
+    if not criteria:
+        raise PowerBIValidationError("criteria must contain at least one entry.")
+
+    measure_names: set[str] | None = None
+
+    def _ensure_measure_names() -> set[str]:
+        nonlocal measure_names
+        if measure_names is None:
+            snapshot = _model_snapshot(manager, include_hidden=True)
+            measure_names = {
+                str(m.get("name", "")).casefold()
+                for m in snapshot.get("measures", []) or []
+            }
+        return measure_names
+
+    results: list[dict[str, Any]] = []
+    total_weight = 0.0
+    earned = 0.0
+
+    for criterion in criteria:
+        if not isinstance(criterion, dict):
+            results.append({"id": None, "passed": False, "reason": "invalid_criterion"})
+            continue
+        cid = str(criterion.get("id", "") or f"criterion_{len(results)}")
+        label = str(criterion.get("label", "") or cid)
+        check = str(criterion.get("check", ""))
+        weight = float(criterion.get("weight", 1.0))
+        params = criterion.get("params") or {}
+        passed = False
+        details: dict[str, Any] = {}
+        try:
+            if check == "star_schema":
+                payload = pbi_validate_star_schema_tool(manager, **params)
+                passed = bool(payload.get("is_star_schema"))
+                details = {"issue_count": payload.get("issue_count"), "fact_tables": payload.get("fact_tables")}
+            elif check == "no_circular_deps":
+                payload = pbi_detect_circular_dependencies_tool(manager, **params)
+                passed = bool(payload.get("valid"))
+                details = {"cycle_count": payload.get("cycle_count")}
+            elif check == "power_query_steps":
+                payload = pbi_validate_power_query_steps_tool(manager, **params)
+                passed = bool(payload.get("valid"))
+                details = {"found_count": payload.get("found_count"), "missing_count": payload.get("missing_count")}
+            elif check == "missing_visuals":
+                if not extract_folder:
+                    raise PowerBIValidationError("extract_folder required for missing_visuals check.")
+                payload = pbi_detect_missing_visuals_tool(extract_folder, **params)
+                passed = bool(payload.get("valid"))
+                details = {"found_count": payload.get("found_count"), "missing_count": payload.get("missing_count")}
+            elif check == "measure_exists":
+                target = str(params.get("name", "")).casefold()
+                if not target:
+                    raise PowerBIValidationError("measure_exists requires params.name")
+                passed = target in _ensure_measure_names()
+                details = {"name": params.get("name")}
+            else:
+                results.append({"id": cid, "label": label, "passed": False, "reason": "unknown_check", "check": check, "weight": weight})
+                total_weight += weight
+                continue
+        except Exception as exc:
+            results.append({"id": cid, "label": label, "passed": False, "reason": "check_failed", "error": str(exc), "weight": weight})
+            total_weight += weight
+            continue
+
+        if passed:
+            earned += weight
+        total_weight += weight
+        results.append({
+            "id": cid,
+            "label": label,
+            "check": check,
+            "weight": weight,
+            "passed": passed,
+            "details": details,
+        })
+
+    score = (earned / total_weight) if total_weight else 0.0
+    passed_count = sum(1 for r in results if r.get("passed"))
+
+    return ok(
+        f"Rubric: {passed_count}/{len(results)} passed, score={score:.2%}.",
+        score=round(score, 4),
+        earned_weight=round(earned, 4),
+        total_weight=round(total_weight, 4),
+        passed_count=passed_count,
+        criterion_count=len(results),
+        results=results,
+    )
+
+
+def pbi_export_correction_report_tool(
+    manager: Any,
+    *,
+    output_path: str,
+    extract_folder: str | None = None,
+    rubric_criteria: list[dict[str, Any]] | None = None,
+    fact_table_hints: list[str] | None = None,
+) -> dict[str, Any]:
+    """Generate a Markdown correction report aggregating all analysis tools.
+
+    Output sections: model overview, star-schema verdict, circular
+    dependency scan, optional rubric scoring, audit issues. Writes to
+    ``output_path`` and returns the path plus an inline summary.
+    """
+    out = resolve_local_path(output_path, must_exist=False)
+    if out.is_dir():
+        raise PowerBIValidationError(
+            "output_path must be a file path, not a directory.",
+            details={"output_path": str(out)},
+        )
+
+    snapshot = _model_snapshot(manager, include_hidden=False)
+    star = pbi_validate_star_schema_tool(manager, fact_table_hints=fact_table_hints)
+    cycles = pbi_detect_circular_dependencies_tool(manager)
+    audit = pbi_audit_model_tool(manager)
+    rubric: dict[str, Any] | None = None
+    if rubric_criteria:
+        rubric = pbi_score_rubric_tool(manager, extract_folder=extract_folder, criteria=rubric_criteria)
+
+    lines: list[str] = []
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    lines.append("# Power BI correction report")
+    lines.append("")
+    lines.append(f"_Generated {now}_")
+    lines.append("")
+    lines.append("## Model overview")
+    lines.append("")
+    lines.append(f"- Tables: {len(snapshot.get('tables', []) or [])}")
+    lines.append(f"- Measures: {len(snapshot.get('measures', []) or [])}")
+    lines.append(f"- Relationships: {len(snapshot.get('relationships', []) or [])}")
+    lines.append("")
+    lines.append("## Star schema")
+    lines.append("")
+    lines.append(f"- Verdict: **{'PASS' if star.get('is_star_schema') else 'FAIL'}**")
+    lines.append(f"- Fact tables: {', '.join(star.get('fact_tables', []) or []) or '_none_'}")
+    lines.append(f"- Dimension tables: {', '.join(star.get('dim_tables', []) or []) or '_none_'}")
+    if star.get("issues"):
+        lines.append("- Issues:")
+        for issue in star["issues"]:
+            lines.append(f"  - `{issue.get('type')}`: {issue}")
+    lines.append("")
+    lines.append("## Circular dependencies")
+    lines.append("")
+    lines.append(f"- Verdict: **{'PASS' if cycles.get('valid') else 'FAIL'}**")
+    lines.append(f"- Cycles: {cycles.get('cycle_count', 0)}, self-refs: {cycles.get('self_reference_count', 0)}")
+    for cycle in cycles.get("cycles", []) or []:
+        lines.append(f"  - cycle: {' → '.join(cycle)}")
+    for sr in cycles.get("self_references", []) or []:
+        lines.append(f"  - self-ref: `{sr}`")
+    lines.append("")
+    lines.append("## Model audit")
+    lines.append("")
+    lines.append(f"- Issues: {audit.get('issue_count', 0)}")
+    lines.append(f"- Warnings: {audit.get('warning_count', 0)}")
+    for issue in audit.get("issues", []) or []:
+        lines.append(f"  - issue: `{issue.get('type')}`")
+    if rubric:
+        lines.append("")
+        lines.append("## Rubric scoring")
+        lines.append("")
+        lines.append(f"- Score: **{rubric.get('score', 0):.2%}**")
+        lines.append(f"- Passed: {rubric.get('passed_count')}/{rubric.get('criterion_count')}")
+        for entry in rubric.get("results", []) or []:
+            mark = "✓" if entry.get("passed") else "✗"
+            lines.append(f"  - {mark} `{entry.get('id')}` — {entry.get('label')} (weight {entry.get('weight')})")
+
+    content = "\n".join(lines) + "\n"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(content, encoding="utf-8")
+
+    return ok(
+        f"Correction report written to {out}.",
+        output_path=str(out),
+        bytes_written=len(content.encode("utf-8")),
+        is_star_schema=star.get("is_star_schema"),
+        cycle_count=cycles.get("cycle_count"),
+        audit_issue_count=audit.get("issue_count"),
+        rubric_score=(rubric.get("score") if rubric else None),
+    )
+
+
 __all__ = [
     "pbi_audit_model_tool",
     "pbi_compare_report_versions_tool",
+    "pbi_detect_circular_dependencies_tool",
     "pbi_detect_dirty_dates_tool",
     "pbi_detect_empty_visuals_tool",
+    "pbi_detect_missing_visuals_tool",
     "pbi_detect_name_collisions_tool",
+    "pbi_export_correction_report_tool",
     "pbi_export_validation_report_tool",
     "pbi_generate_measure_tests_tool",
     "pbi_lint_dax_tool",
     "pbi_lint_report_layout_tool",
     "pbi_run_scenario_tool",
     "pbi_score_dashboard_tool",
+    "pbi_score_rubric_tool",
     "pbi_validate_filter_expression_tool",
     "pbi_validate_pbix_persistence_tool",
     "pbi_validate_pbix_reopen_tool",
+    "pbi_validate_power_query_steps_tool",
     "pbi_validate_relationship_plan_tool",
+    "pbi_validate_star_schema_tool",
     "pbi_validate_visual_bindings_tool",
 ]
