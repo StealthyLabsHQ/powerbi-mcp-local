@@ -703,7 +703,18 @@ def _validate_field_references_live(
     if index is None:
         return status
     expected_kinds = expected_kinds or {}
-    missing: list[dict[str, str]] = []
+
+    import difflib
+    measure_names = sorted(index.get("measures", {}).keys())
+    column_short_names = sorted({col_lc for _t, col_lc in index.get("columns", set())})
+
+    def _close_measure_names(needle: str, n: int = 5) -> list[str]:
+        return difflib.get_close_matches(needle.casefold(), measure_names, n=n, cutoff=0.6)
+
+    def _close_column_names(needle: str, n: int = 5) -> list[str]:
+        return difflib.get_close_matches(needle.casefold(), column_short_names, n=n, cutoff=0.6)
+
+    missing: list[dict[str, Any]] = []
     for ref in references:
         if not isinstance(ref, str) or not ref.strip():
             continue
@@ -712,44 +723,73 @@ def _validate_field_references_live(
         if "." in normalized:
             table, column = normalized.split(".", 1)
             if (table.casefold(), column.casefold()) not in index["columns"]:
+                suggestions = _close_column_names(column)
                 missing.append({
                     "reference": ref,
                     "kind": expected_kind or "column",
                     "inferred_kind": "column",
                     "hint": "use 'Table.Column', 'Table[Column]', or \"'Table With Spaces'[Column]\"",
+                    "did_you_mean": suggestions,
                 })
         else:
             # Bare form: it could be a measure OR an unqualified column name.
             measure_hit = normalized.casefold() in index["measures"]
             column_short_hit = any(col_lc == normalized.casefold() for _table_lc, col_lc in index["columns"])
             if expected_kind == "column":
-                if not column_short_hit:
-                    missing.append({
-                        "reference": ref,
-                        "kind": "column",
-                        "inferred_kind": "measure" if measure_hit else "unknown",
-                        "hint": "axis/category/rows expect a column — qualify with the table (e.g. 'Date.Year' or 'Date[Year]').",
-                    })
+                # Even when a column with that short name exists somewhere, the
+                # bare form cannot fill a column role: the layout writer needs
+                # the table prefix to disambiguate. Always flag.
+                qualified_examples = sorted(
+                    {f"{tbl}.{col}" for tbl_lc, col_lc in index["columns"]
+                     for tbl, col in [(_t, _c) for (_t, _c) in [(tbl_lc, col_lc)]]
+                     if col_lc == normalized.casefold()}
+                )
+                hint = (
+                    "axis/category/rows expect a column — qualify with the table "
+                    "(e.g. 'Date.Year' or 'Date[Year]')."
+                )
+                if qualified_examples:
+                    hint += f" Try one of: {', '.join(qualified_examples)}."
+                missing.append({
+                    "reference": ref,
+                    "kind": "column",
+                    "inferred_kind": "measure" if measure_hit else ("column" if column_short_hit else "unknown"),
+                    "hint": hint,
+                    "did_you_mean": _close_column_names(normalized),
+                })
             elif expected_kind == "measure":
                 if not measure_hit:
                     missing.append({
                         "reference": ref,
                         "kind": "measure",
                         "inferred_kind": "column" if column_short_hit else "unknown",
-                        "hint": "values/Y expect a measure — check spelling against the live model's measure list.",
+                        "hint": "values/Y/indicator expect a measure — check spelling against the live model's measure list.",
+                        "did_you_mean": _close_measure_names(normalized),
                     })
             else:
                 if not measure_hit:
+                    suggestions = _close_measure_names(normalized) or _close_column_names(normalized)
                     missing.append({
                         "reference": ref,
                         "kind": "measure",
                         "inferred_kind": "column" if column_short_hit else "unknown",
+                        "hint": (
+                            "no measure with that exact name in the live model — "
+                            "check spelling, or pass a 'Table.Column' / 'Table[Column]' "
+                            "form if you meant a column."
+                        ),
+                        "did_you_mean": suggestions,
                     })
     if missing:
         raise PowerBIValidationError(
             f"Field reference(s) not found in the live model: "
             f"{', '.join(item['reference'] for item in missing)}",
-            details={"missing": missing, "checked": list(references)},
+            details={
+                "missing": missing,
+                "checked": list(references),
+                "available_measure_count": len(measure_names),
+                "available_column_count": len(column_short_names),
+            },
         )
     return {"status": "validated", "checked": len(references)}
 
@@ -1970,7 +2010,7 @@ def pbi_add_card_tool(
     against the live model first and the call fails fast on a typo. Without
     a manager the tool still works (offline mode), preserving prior behavior.
     """
-    _validate_field_references_live(manager, [measure])
+    _validate_field_references_live(manager, [measure], expected_kinds={measure: "measure"})
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
@@ -2008,10 +2048,12 @@ def pbi_add_bar_chart_tool(
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     projections = {"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]}
     references = [category_column, value_measure]
+    expected_kinds = {category_column: "column", value_measure: "measure"}
     if legend_column:
         projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
         references.append(legend_column)
-    _validate_field_references_live(manager, references)
+        expected_kinds[legend_column] = "column"
+    _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     return _append_visual(
         extract_folder,
         page,
@@ -2046,7 +2088,10 @@ def pbi_add_line_chart_tool(
 ) -> dict[str, Any]:
     if not value_measures:
         raise PowerBIValidationError("value_measures must contain at least one measure.")
-    _validate_field_references_live(manager, [axis_column, *value_measures])
+    expected_kinds = {axis_column: "column"}
+    for m in value_measures:
+        expected_kinds[m] = "measure"
+    _validate_field_references_live(manager, [axis_column, *value_measures], expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
@@ -2071,7 +2116,7 @@ def pbi_add_line_chart_tool(
 
 
 def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 320, height: int = 280, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
-    _validate_field_references_live(manager, [category_column, value_measure])
+    _validate_field_references_live(manager, [category_column, value_measure], expected_kinds={category_column: "column", value_measure: "measure"})
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
@@ -2117,7 +2162,7 @@ def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str]
 
 
 def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 420, height: int = 300, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
-    _validate_field_references_live(manager, [category_column, value_measure])
+    _validate_field_references_live(manager, [category_column, value_measure], expected_kinds={category_column: "column", value_measure: "measure"})
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
@@ -2142,7 +2187,7 @@ def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: 
     slicer_kind = slicer_type.strip().casefold()
     if slicer_kind not in {"dropdown", "list", "range", "tile"}:
         raise PowerBIValidationError("slicer_type must be one of: dropdown, list, range, tile.", details={"slicer_type": slicer_type})
-    _validate_field_references_live(manager, [column])
+    _validate_field_references_live(manager, [column], expected_kinds={column: "column"})
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     if slicer_kind == "tile":
         # Horizontal tile slicer: native list type with horizontal orientation flag.
@@ -2212,11 +2257,14 @@ def pbi_add_gauge_tool(
         # Measure binding takes precedence — drop the static fill silently to keep callers tidy.
         fill_color = None
     refs_to_validate: list[str] = [measure]
+    expected_kinds = {measure: "measure"}
     if target_measure:
         refs_to_validate.append(target_measure)
+        expected_kinds[target_measure] = "measure"
     if fill_color_measure:
         refs_to_validate.append(fill_color_measure)
-    _validate_field_references_live(manager, refs_to_validate)
+        expected_kinds[fill_color_measure] = "measure"
+    _validate_field_references_live(manager, refs_to_validate, expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     projections = {"Y": [{"queryRef": _query_ref(measure)}]}
     references = [measure]
@@ -2300,7 +2348,7 @@ def pbi_add_labelled_card_tool(
             "label_height must be > 0 and smaller than height.",
             details={"label_height": label_height, "height": height},
         )
-    _validate_field_references_live(manager, [measure])
+    _validate_field_references_live(manager, [measure], expected_kinds={measure: "measure"})
     label_response = pbi_add_text_box_tool(
         extract_folder,
         page,
@@ -2365,13 +2413,16 @@ def pbi_add_scatter_chart_tool(
         "Y": [{"queryRef": _query_ref(y_measure)}],
     }
     references = [category_column, x_measure, y_measure]
+    expected_kinds = {category_column: "column", x_measure: "measure", y_measure: "measure"}
     if size_measure:
         projections["Size"] = [{"queryRef": _query_ref(size_measure)}]
         references.append(size_measure)
+        expected_kinds[size_measure] = "measure"
     if legend_column:
         projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
         references.append(legend_column)
-    _validate_field_references_live(manager, references)
+        expected_kinds[legend_column] = "column"
+    _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
@@ -2424,10 +2475,16 @@ def pbi_add_combo_chart_tool(
         "Y2": [{"queryRef": _query_ref(item)} for item in line_measures],
     }
     references = [category_column, *bar_measures, *line_measures]
+    expected_kinds = {category_column: "column"}
+    for m in bar_measures:
+        expected_kinds[m] = "measure"
+    for m in line_measures:
+        expected_kinds[m] = "measure"
     if legend_column:
         projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
         references.append(legend_column)
-    _validate_field_references_live(manager, references)
+        expected_kinds[legend_column] = "column"
+    _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
@@ -2481,10 +2538,12 @@ def pbi_add_kpi_tool(
         "TrendLine": [{"queryRef": _query_ref(trend_axis_column)}],
     }
     references = [indicator_measure, trend_axis_column]
+    expected_kinds = {indicator_measure: "measure", trend_axis_column: "column"}
     if goal_measure:
         projections["Goal"] = [{"queryRef": _query_ref(goal_measure)}]
         references.append(goal_measure)
-    _validate_field_references_live(manager, references)
+        expected_kinds[goal_measure] = "measure"
+    _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     # Encode direction in the visual's objects so PBI's KPI rendering picks the right colour rule.
     extra_single_visual = {
         "objects": {
@@ -2559,10 +2618,14 @@ def pbi_add_matrix_tool(
         "Values": [{"queryRef": _query_ref(item)} for item in values],
     }
     references = [*rows, *values]
+    expected_kinds = {r: "column" for r in rows}
+    expected_kinds.update({v: "measure" for v in values})
     if columns:
         projections["Columns"] = [{"queryRef": _query_ref(item)} for item in columns]
         references.extend(columns)
-    _validate_field_references_live(manager, references)
+        for c in columns:
+            expected_kinds[c] = "column"
+    _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     extra_single_visual = {
         "objects": {
             "subTotals": [
@@ -3112,13 +3175,21 @@ def pbi_add_visual_tool(
     height: int | None = None,
     title: str = "",
     config: dict[str, Any] | None = None,
+    *,
+    manager: Any | None = None,
 ) -> dict[str, Any]:
-    """Generic visual dispatcher. Keeps the 9 per-type tools as stable API surface.
+    """Generic visual dispatcher. Keeps the per-type tools as stable API surface.
 
     visual_type: one of card, bar_chart, line_chart, donut, table, waterfall,
-                 slicer, gauge, text_box.
+                 slicer, gauge, kpi, scatter_chart, combo_chart, matrix, map,
+                 text_box, labelled_card.
     config: per-type keyword arguments (e.g. {"measure": "Total Sales"} for card,
             {"category_column": "...", "value_measure": "..."} for bar_chart).
+
+    When ``manager`` is supplied the dispatchers forward it to the underlying
+    ``pbi_add_*_tool`` so live field validation and home-table resolution
+    happen — preventing post-write ``measure_home_table_needs_repair`` issues
+    on map / scatter / combo / kpi / matrix visuals.
     """
     cfg = dict(config or {})
     visual_key = visual_type.strip().casefold()
@@ -3132,6 +3203,11 @@ def pbi_add_visual_tool(
             f"Unknown visual_type '{visual_type}'. Allowed: {sorted(_VISUAL_TYPE_DISPATCH)}",
             details={"visual_type": visual_type},
         )
+    # Inject manager into cfg so each dispatcher can opt-in without breaking
+    # callers that don't supply one. Dispatchers respecting this convention
+    # call ``cfg.get("__manager__")`` on entry.
+    if manager is not None and "__manager__" not in cfg:
+        cfg["__manager__"] = manager
     return handler(extract_folder, page, x, y, effective_width, effective_height, title, cfg)
 
 
@@ -3139,7 +3215,7 @@ def _dispatch_card(extract, page, x, y, w, h, title, cfg):
     measure = cfg.get("measure")
     if not measure:
         raise PowerBIValidationError("card visual requires config.measure", details={"visual_type": "card"})
-    return pbi_add_card_tool(extract, page, measure, x, y, w, h, title)
+    return pbi_add_card_tool(extract, page, measure, x, y, w, h, title, manager=cfg.get("__manager__"))
 
 
 def _dispatch_bar(extract, page, x, y, w, h, title, cfg):
@@ -3150,7 +3226,7 @@ def _dispatch_bar(extract, page, x, y, w, h, title, cfg):
             "bar_chart requires config.category_column and config.value_measure",
             details={"visual_type": "bar_chart"},
         )
-    return pbi_add_bar_chart_tool(extract, page, cat, value, x, y, w, h, title, cfg.get("legend_column"))
+    return pbi_add_bar_chart_tool(extract, page, cat, value, x, y, w, h, title, cfg.get("legend_column"), manager=cfg.get("__manager__"))
 
 
 def _dispatch_line(extract, page, x, y, w, h, title, cfg):
@@ -3161,7 +3237,7 @@ def _dispatch_line(extract, page, x, y, w, h, title, cfg):
             "line_chart requires config.axis_column and config.value_measures (list)",
             details={"visual_type": "line_chart"},
         )
-    return pbi_add_line_chart_tool(extract, page, axis, measures, x, y, w, h, title)
+    return pbi_add_line_chart_tool(extract, page, axis, measures, x, y, w, h, title, manager=cfg.get("__manager__"))
 
 
 def _dispatch_donut(extract, page, x, y, w, h, title, cfg):
@@ -3172,14 +3248,14 @@ def _dispatch_donut(extract, page, x, y, w, h, title, cfg):
             "donut requires config.category_column and config.value_measure",
             details={"visual_type": "donut"},
         )
-    return pbi_add_donut_chart_tool(extract, page, cat, value, x, y, w, h, title)
+    return pbi_add_donut_chart_tool(extract, page, cat, value, x, y, w, h, title, manager=cfg.get("__manager__"))
 
 
 def _dispatch_table(extract, page, x, y, w, h, title, cfg):
     columns = cfg.get("columns") or []
     if not columns:
         raise PowerBIValidationError("table requires config.columns (list)", details={"visual_type": "table"})
-    return pbi_add_table_visual_tool(extract, page, columns, x, y, w, h, title)
+    return pbi_add_table_visual_tool(extract, page, columns, x, y, w, h, title, manager=cfg.get("__manager__"))
 
 
 def _dispatch_waterfall(extract, page, x, y, w, h, title, cfg):
@@ -3190,14 +3266,14 @@ def _dispatch_waterfall(extract, page, x, y, w, h, title, cfg):
             "waterfall requires config.category_column and config.value_measure",
             details={"visual_type": "waterfall"},
         )
-    return pbi_add_waterfall_tool(extract, page, cat, value, x, y, w, h, title)
+    return pbi_add_waterfall_tool(extract, page, cat, value, x, y, w, h, title, manager=cfg.get("__manager__"))
 
 
 def _dispatch_slicer(extract, page, x, y, w, h, title, cfg):
     column = cfg.get("column")
     if not column:
         raise PowerBIValidationError("slicer requires config.column", details={"visual_type": "slicer"})
-    return pbi_add_slicer_tool(extract, page, column, x, y, w, h, cfg.get("slicer_type", "dropdown"))
+    return pbi_add_slicer_tool(extract, page, column, x, y, w, h, cfg.get("slicer_type", "dropdown"), manager=cfg.get("__manager__"))
 
 
 def _dispatch_gauge(extract, page, x, y, w, h, title, cfg):
@@ -3220,6 +3296,7 @@ def _dispatch_gauge(extract, page, x, y, w, h, title, cfg):
         fill_color=cfg.get("fill_color"),
         target_color=cfg.get("target_color"),
         fill_color_measure=cfg.get("fill_color_measure"),
+        manager=cfg.get("__manager__"),
     )
 
 
@@ -3244,6 +3321,7 @@ def _dispatch_labelled_card(extract, page, x, y, w, h, title, cfg):
         label_font_size=int(cfg.get("label_font_size", 11)),
         label_bold=bool(cfg.get("label_bold", True)),
         label_color=str(cfg.get("label_color", "#1F2937")),
+        manager=cfg.get("__manager__"),
     )
 
 
@@ -3255,7 +3333,7 @@ def _dispatch_map(extract, page, x, y, w, h, title, cfg):
             "map requires config.location (Table.Column with the geographic field)",
             details={"visual_type": "map"},
         )
-    return pbi_add_map_tool(extract, page, location, measure, x, y, w, h, title)
+    return pbi_add_map_tool(extract, page, location, measure, x, y, w, h, title, manager=cfg.get("__manager__"))
 
 
 def pbi_add_map_tool(
@@ -3284,10 +3362,12 @@ def pbi_add_map_tool(
         "Category": [{"queryRef": _query_ref(location_column)}]
     }
     references = [location_column]
+    expected_kinds = {location_column: "column"}
     if value_measure:
         projections["Y"] = [{"queryRef": _query_ref(value_measure)}]
         references.append(value_measure)
-    _validate_field_references_live(manager, references)
+        expected_kinds[value_measure] = "measure"
+    _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,

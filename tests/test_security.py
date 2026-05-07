@@ -307,9 +307,10 @@ class TimeIntelligenceTemplateTests(unittest.TestCase):
     def test_template_renders(self) -> None:
         from tools.measures import _TIME_INTELLIGENCE_TEMPLATES
         rendered = _TIME_INTELLIGENCE_TEMPLATES["YTD"]["template"].format(
-            base="Sales", date_table="Date", date_column="Date",
+            base="Sales", date_ref="'Date'[Date]",
         )
-        self.assertEqual(rendered, "CALCULATE([Sales], DATESYTD(Date[Date]))")
+        # Table name now quoted so reserved-word collisions (Date, Time…) work.
+        self.assertEqual(rendered, "CALCULATE([Sales], DATESYTD('Date'[Date]))")
 
 
 class DAXSemanticReferenceParserTests(unittest.TestCase):
@@ -537,6 +538,130 @@ class V010MatskiBugfixTests(unittest.TestCase):
                 self.assertNotIn("Crowded", scoped_pages)
             finally:
                 SECURITY.configure_allowed_dirs(previous)
+
+
+class V0102TestReportFollowupTests(unittest.TestCase):
+    """Regression tests for the v0.10.1 follow-up bugs surfaced by the
+    real-world v0.10.1 test report."""
+
+    # --- Bug 4: kind shadowing in pbi_validate_dax_semantic ---
+    def test_validate_dax_semantic_kind_not_shadowed(self) -> None:
+        """The function-level ``kind`` parameter must not be clobbered by the
+        per-reference ``kind`` local in the unknown-references loop."""
+        from tools.query import pbi_validate_dax_semantic_tool
+
+        fake_index = {
+            "columns": {("date", "year")},
+            "measures": {"sales": {"facture"}},
+            "measure_tables": {"sales": {"Facture"}},
+        }
+        from types import SimpleNamespace
+
+        # Simulate a minimally-functional manager: run_adomd_query is called by
+        # the runtime probe; we mock both the live index and the probe so the
+        # tool runs end-to-end against a virtual model.
+        fake_manager = SimpleNamespace()
+        fake_manager.run_adomd_query = lambda query, **kw: {"rows": [{"__probe": 1}], "columns": [], "row_count": 1, "truncated": False}
+        with patch("tools.visuals._live_model_field_index", return_value=(fake_index, {"status": "available"})):
+            result = pbi_validate_dax_semantic_tool(
+                fake_manager,
+                expression="[MesureFantome] + MAX(Date[Année])",
+                kind="scalar",
+            )
+        # Before the fix, this would raise "kind must be 'scalar' or 'table'"
+        # because the inner loop overwrote ``kind = 'measure_or_column'``.
+        self.assertTrue(result["ok"], result)
+        # The semantic layer reports the missing references.
+        self.assertGreaterEqual(len(result["semantic"]["unknown_references"]), 1)
+
+    # --- Bug 5/6: DAX templates quote table names ---
+    def test_time_intelligence_template_quotes_table_name(self) -> None:
+        from tools.measures import _TIME_INTELLIGENCE_TEMPLATES, _dax_column_ref
+
+        date_ref = _dax_column_ref("Date", "Date")
+        self.assertEqual(date_ref, "'Date'[Date]")
+        rendered = _TIME_INTELLIGENCE_TEMPLATES["SPY"]["template"].format(
+            base="Sales", date_ref=date_ref,
+        )
+        # Quoted form means DAX won't confuse the table with the DATE() function.
+        self.assertEqual(rendered, "CALCULATE([Sales], SAMEPERIODLASTYEAR('Date'[Date]))")
+
+    def test_dax_column_ref_handles_embedded_quote(self) -> None:
+        from tools.measures import _dax_column_ref
+
+        self.assertEqual(_dax_column_ref("It's a Table", "Col"), "'It''s a Table'[Col]")
+
+    # --- Bug 2/3: enriched validation errors with hints + did_you_mean ---
+    def test_field_validation_error_carries_hint_and_suggestions(self) -> None:
+        from pbi_connection import PowerBIValidationError
+        from tools.visuals import _validate_field_references_live
+
+        fake_index = {
+            "columns": {("date", "year")},
+            "measures": {"ca total": {"facture"}, "ca annuel": {"facture"}},
+            "measure_tables": {"ca total": {"Facture"}, "ca annuel": {"Facture"}},
+        }
+        with patch("tools.visuals._live_model_field_index", return_value=(fake_index, {"status": "available"})):
+            from types import SimpleNamespace
+
+            # Bare typo without expected_kinds hint → still gets a hint + suggestions.
+            with self.assertRaises(PowerBIValidationError) as ctx:
+                _validate_field_references_live(SimpleNamespace(), ["CA Tota"])
+            entry = ctx.exception.details["missing"][0]
+            self.assertIn("hint", entry)
+            self.assertIn("did_you_mean", entry)
+            self.assertIn("ca total", entry["did_you_mean"])
+            self.assertIn("available_measure_count", ctx.exception.details)
+
+            # When expected_kind="column" and the reference is bare, surface the
+            # role expectation instead of "kind=measure".
+            with self.assertRaises(PowerBIValidationError) as ctx2:
+                _validate_field_references_live(
+                    SimpleNamespace(),
+                    ["Year"],
+                    expected_kinds={"Year": "column"},
+                )
+            entry2 = ctx2.exception.details["missing"][0]
+            self.assertEqual(entry2["kind"], "column")
+            # "Year" shouldn't match a column; suggestions might be empty for short
+            # names but the field must be present.
+            self.assertIn("did_you_mean", entry2)
+
+    # --- Bug 1: pbi_add_visual forwards manager to dispatchers via __manager__ in cfg ---
+    def test_add_visual_dispatch_propagates_manager(self) -> None:
+        from tools.visuals import pbi_add_visual_tool
+
+        # Use a fake handler that records the cfg it received.
+        captured_cfg: dict[str, Any] = {}
+
+        def _fake_handler(extract, page, x, y, w, h, title, cfg):
+            captured_cfg.update(cfg)
+            return {"ok": True, "page": page, "captured": True}
+
+        from tools.visuals import _VISUAL_TYPE_DISPATCH
+
+        sentinel = object()
+        _VISUAL_TYPE_DISPATCH["__test_dispatch__"] = _fake_handler
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                previous = [str(item) for item in SECURITY.allowed_base_dirs()]
+                SECURITY.configure_allowed_dirs([str(root)])
+                try:
+                    extract = root / "extract"
+                    (extract / "Report").mkdir(parents=True)
+                    (extract / "Report" / "Layout").write_text(
+                        '{"sections":[]}', encoding="utf-16-le",
+                    )
+                    pbi_add_visual_tool(
+                        str(extract), "page", "__test_dispatch__", 0, 0,
+                        manager=sentinel,
+                    )
+                finally:
+                    SECURITY.configure_allowed_dirs(previous)
+            self.assertIs(captured_cfg.get("__manager__"), sentinel)
+        finally:
+            _VISUAL_TYPE_DISPATCH.pop("__test_dispatch__", None)
 
 
 if __name__ == "__main__":

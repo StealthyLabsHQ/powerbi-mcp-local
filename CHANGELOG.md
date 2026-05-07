@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.10.2] — 2026-05-07 — Field validation, manager propagation, and DAX template hardening
+
+Six follow-up bugs surfaced by a real-world v0.10.1 test pass on a 7-page / 62-visual report. All fixes are localised, signature-compatible, and covered by regression tests. Registry: 125/125, 0 orphans · tests: 112/112 (2 platform skips).
+
+### Fixed
+
+1. **`pbi_add_visual` now forwards the connection manager to every dispatcher.** The generic dispatcher injects the active manager into the dispatch ``cfg`` (under the reserved ``__manager__`` key), and each ``_dispatch_*`` function passes it to the underlying ``pbi_add_*_tool``. Map / scatter / combo / kpi / matrix visuals created via the generic dispatcher now go through live field validation and home-table resolution — eliminating the ``measure_home_table_needs_repair`` follow-up signal previously seen on map writes.
+
+2. **Missing-reference errors now carry a `hint` plus a `did_you_mean` list.** `_validate_field_references_live` runs `difflib.get_close_matches` over the live model's measure / column lists and surfaces up to 5 nearest names. Each missing entry includes a role-aware `hint` (e.g. "axis/category/rows expect a column — qualify with the table; try one of: Date.Year, Date.Year-Month."). The error payload also reports `available_measure_count` / `available_column_count` for context.
+
+3. **Every `pbi_add_*_tool` now passes `expected_kinds` to the validator.** Each visual builds a `{reference: "column" | "measure"}` map matching its role schema (Category/Series/Rows → column, Y/Values/Indicator/Goal → measure, Slicer → column, Map.Location → column, KPI.TrendLine → column). When a user passes a bare `Year` to a Category role, the validator now reports `kind="column"` with a hint listing qualified candidates — instead of silently inferring `kind="measure"` from the format.
+
+4. **Bare references can no longer satisfy a column-expecting role.** Even if a column with the same short name exists somewhere in the model, a `Year`-style bare reference cannot fill an `axis/category/rows` slot because the layout writer needs the table prefix. The validator now flags every bare reference passed to a column role and lists every `Table.Column` candidate that resolves to that short name.
+
+5. **`pbi_validate_dax_semantic_tool` no longer overwrites its `kind` parameter.** A renamed local variable (`ref_kind`) inside the unknown-references loop replaces the previous `kind` shadowing that corrupted the runtime probe call. The tool now correctly returns `{semantic: {unknown_references: […]}}` instead of failing with `"kind must be 'scalar' or 'table'"`.
+
+6. **DAX templates always quote table names** so reserved-word collisions (`Date`, `Time`, `Year`, …) work. Time-intelligence (`YTD`/`MTD`/`QTD`/`SPY`/`MA3`), variance, contribution, top-N, and rolling-average templates now route table names through `_dax_column_ref(table, column)` which emits `'Table'[Column]` (with embedded single quotes doubled per the DAX grammar). Generated DAX is valid against models with date tables literally named `Date`.
+
+### Internals
+
+- New helpers `_dax_table_ref` / `_dax_column_ref` in `src/tools/measures.py` for quoted DAX column references.
+- New reserved key `__manager__` in `pbi_add_visual_tool` cfg propagates the live manager to every per-type dispatcher.
+
+### Tests
+
+- 112 passing (2 platform skips). Six new regression cases in `tests/test_security.py` covering: kind shadowing, quoted DAX templates, embedded-quote escaping, hint+did_you_mean enrichment, role-aware column-vs-measure error reporting, and manager propagation through `pbi_add_visual_tool`.
+
 ## [0.10.1] — 2026-05-07 — bugfixes (extract fallback, ref parsing, map dispatch, home tables, FORMAT detection, role hints, lint knobs)
 
 Seven concrete bugs surfaced while building the Power BI report. All seven fixes are localised, signature-compatible, and covered by regression tests in `tests/test_security.py`. Net new tool: `pbi_add_map`. Registry: 125/125, 0 orphans · tests: 107/107 (2 platform skips).

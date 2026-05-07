@@ -489,26 +489,44 @@ def pbi_create_measures_tool(
 # Time intelligence templates
 # ---------------------------------------------------------------------------
 
+def _dax_table_ref(table: str) -> str:
+    """Quote a DAX table reference with single quotes.
+
+    Power BI allows ``Sales`` and ``'Sales'`` interchangeably, but when the
+    table name collides with a reserved word (``Date``, ``Time``, ``Year``…)
+    only the quoted form parses correctly. Always quoting is safe and avoids
+    surprising syntax errors when callers pass perfectly normal names like
+    ``Date``. Embedded single quotes are doubled per DAX grammar.
+    """
+    return "'" + str(table).replace("'", "''") + "'"
+
+
+def _dax_column_ref(table: str, column: str) -> str:
+    return f"{_dax_table_ref(table)}[{column}]"
+
+
 _TIME_INTELLIGENCE_TEMPLATES: dict[str, dict[str, str]] = {
-    # Each entry: name suffix + DAX template parameterised on {base}, {date_table}, {date_column}.
+    # Each entry: name suffix + DAX template parameterised on {base} and {date_ref}.
+    # ``{date_ref}`` is the already-quoted ``'Date'[Date]`` form so reserved-word
+    # collisions (Date, Time, …) stay safe.
     "YTD": {
         "suffix": "YTD",
-        "template": "CALCULATE([{base}], DATESYTD({date_table}[{date_column}]))",
+        "template": "CALCULATE([{base}], DATESYTD({date_ref}))",
         "description": "Year-to-date of [{base}].",
     },
     "MTD": {
         "suffix": "MTD",
-        "template": "CALCULATE([{base}], DATESMTD({date_table}[{date_column}]))",
+        "template": "CALCULATE([{base}], DATESMTD({date_ref}))",
         "description": "Month-to-date of [{base}].",
     },
     "QTD": {
         "suffix": "QTD",
-        "template": "CALCULATE([{base}], DATESQTD({date_table}[{date_column}]))",
+        "template": "CALCULATE([{base}], DATESQTD({date_ref}))",
         "description": "Quarter-to-date of [{base}].",
     },
     "SPY": {
         "suffix": "SPY",
-        "template": "CALCULATE([{base}], SAMEPERIODLASTYEAR({date_table}[{date_column}]))",
+        "template": "CALCULATE([{base}], SAMEPERIODLASTYEAR({date_ref}))",
         "description": "Same period last year of [{base}].",
     },
     "YOY": {
@@ -528,7 +546,7 @@ _TIME_INTELLIGENCE_TEMPLATES: dict[str, dict[str, str]] = {
         "suffix": "MA3",
         "template": (
             "AVERAGEX("
-            "DATESINPERIOD({date_table}[{date_column}], LASTDATE({date_table}[{date_column}]), -3, MONTH),"
+            "DATESINPERIOD({date_ref}, LASTDATE({date_ref}), -3, MONTH),"
             " [{base}])"
         ),
         "description": "Trailing 3-month moving average of [{base}].",
@@ -632,8 +650,7 @@ def pbi_create_time_intelligence_pack_tool(
         new_name = f"{base_measure} {suffix}"
         expression = tmpl["template"].format(
             base=base_measure,
-            date_table=date_table,
-            date_column=date_column,
+            date_ref=_dax_column_ref(date_table, date_column),
         )
         chosen_format = (
             format_string
@@ -812,7 +829,7 @@ def pbi_create_variance_measure_tool(
     name = measure_name or f"{base_measure} Variance"
     expression = (
         f"[{base_measure}] - CALCULATE([{base_measure}], "
-        f"DATEADD({date_table}[{date_column}], {int(compare_period_offset)}, {granularity_token}))"
+        f"DATEADD({_dax_column_ref(date_table, date_column)}, {int(compare_period_offset)}, {granularity_token}))"
     )
     return pbi_create_measure_tool(
         manager,
@@ -859,7 +876,7 @@ def pbi_create_contribution_measure_tool(
                 details={"column": col},
             )
         tbl, column = col.split(".", 1)
-        qualified.append(f"{tbl}[{column}]")
+        qualified.append(_dax_column_ref(tbl, column))
     name = measure_name or f"{base_measure} % of total"
     expression = f"DIVIDE([{base_measure}], CALCULATE([{base_measure}], ALL({', '.join(qualified)})))"
     return pbi_create_measure_tool(
@@ -904,7 +921,7 @@ def pbi_create_topn_measure_tool(
     rank_ref = rank_measure or base_measure
     name = measure_name or f"{base_measure} Top {n}"
     expression = (
-        f"IF(RANKX(ALL({dimension_table}[{dimension_column}]), [{rank_ref}], , DESC) <= {int(n)}, "
+        f"IF(RANKX(ALL({_dax_column_ref(dimension_table, dimension_column)}), [{rank_ref}], , DESC) <= {int(n)}, "
         f"[{base_measure}], BLANK())"
     )
     return pbi_create_measure_tool(
@@ -950,9 +967,10 @@ def pbi_create_rolling_average_measure_tool(
             details={"granularity": granularity},
         )
     name = measure_name or f"{base_measure} Rolling {window} {granularity_token.title()}"
+    date_ref = _dax_column_ref(date_table, date_column)
     expression = (
         f"AVERAGEX("
-        f"DATESINPERIOD({date_table}[{date_column}], LASTDATE({date_table}[{date_column}]), "
+        f"DATESINPERIOD({date_ref}, LASTDATE({date_ref}), "
         f"-{int(window)}, {granularity_token}), [{base_measure}])"
     )
     return pbi_create_measure_tool(

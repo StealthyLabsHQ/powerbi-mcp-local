@@ -2630,7 +2630,16 @@ def pbi_add_visual(
     title: str = "",
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Add any visual via a generic dispatcher. visual_type: card|bar_chart|line_chart|donut|table|waterfall|slicer|gauge|text_box."""
+    """Add any visual via a generic dispatcher.
+
+    visual_type: card | bar_chart | line_chart | donut | table | waterfall |
+    slicer | gauge | kpi | scatter_chart | combo_chart | matrix | map |
+    text_box | labelled_card.
+
+    The active connection manager is forwarded to every dispatcher so live
+    field validation and home-table resolution happen — no
+    ``measure_home_table_needs_repair`` after the write.
+    """
     return _run(
         "pbi_add_visual",
         pbi_add_visual_tool,
@@ -2643,6 +2652,7 @@ def pbi_add_visual(
         height=height,
         title=title,
         config=config,
+        manager=CONNECTION_MANAGER,
     )
 
 

@@ -407,12 +407,14 @@ def pbi_validate_dax_semantic_tool(
             if measure_name.casefold() not in index["measures"]:
                 # An unknown bare ``[X]`` could also be a column whose table prefix was elided.
                 # Report it as ``measure_or_column`` so callers know the heuristic is fuzzy.
-                kind = "measure_or_column"
+                # NB: use a distinct local name (``ref_kind``) so we never shadow the outer
+                # ``kind`` parameter that the runtime probe needs intact.
+                ref_kind = "measure_or_column"
                 if any(col_lc == measure_name.casefold() for _, col_lc in index["columns"]):
                     # It IS an existing column name, just unqualified — this is technically
                     # legal DAX but flagged as a style warning.
                     continue
-                unknown_references.append({"reference": f"[{measure_name}]", "kind": kind})
+                unknown_references.append({"reference": f"[{measure_name}]", "kind": ref_kind})
 
     # --- Layer 2: format compatibility heuristic ---
     suspicious_format: list[dict[str, str]] = []
