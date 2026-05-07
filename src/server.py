@@ -1506,7 +1506,13 @@ def pbi_add_card(
     height: int = 120,
     title: str = "",
 ) -> dict[str, Any]:
-    """Add a card visual to a report page."""
+    """Add a card visual to a report page.
+
+    The referenced measure is validated against the live model when a Power BI
+    Desktop instance is connected; a missing measure fails fast with a
+    structured ``validation_error`` instead of silently producing a broken
+    visual.
+    """
     return _run(
         "pbi_add_card",
         pbi_add_card_tool,
@@ -1518,6 +1524,7 @@ def pbi_add_card(
         width=width,
         height=height,
         title=title,
+        manager=CONNECTION_MANAGER,
     )
 
 
@@ -1732,6 +1739,7 @@ def pbi_add_gauge(
         fill_color=fill_color,
         target_color=target_color,
         fill_color_measure=fill_color_measure,
+        manager=CONNECTION_MANAGER,
     )
 
 
@@ -1769,6 +1777,7 @@ def pbi_add_labelled_card(
         label_font_size=label_font_size,
         label_bold=label_bold,
         label_color=label_color,
+        manager=CONNECTION_MANAGER,
     )
 
 

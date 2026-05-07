@@ -480,6 +480,45 @@ def _persistence_risks(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _validate_field_references_live(
+    manager: Any | None,
+    references: list[str],
+    *,
+    include_hidden: bool = False,
+) -> dict[str, Any]:
+    """If a connection manager is available, verify each reference exists in
+    the live model. Returns a status dict; raises PowerBIValidationError on
+    missing fields so callers fail fast before writing the layout.
+
+    A reference is either ``"TableName.ColumnName"`` (column) or a bare
+    ``"MeasureName"`` (measure). Skips silently when the live model is
+    unavailable so offline/test usage still works.
+    """
+    if manager is None or not references:
+        return {"status": "skipped"}
+    index, status = _live_model_field_index(manager, include_hidden=include_hidden)
+    if index is None:
+        return status
+    missing: list[dict[str, str]] = []
+    for ref in references:
+        if not isinstance(ref, str) or not ref.strip():
+            continue
+        if "." in ref:
+            table, column = ref.split(".", 1)
+            if (table.casefold(), column.casefold()) not in index["columns"]:
+                missing.append({"reference": ref, "kind": "column"})
+        else:
+            if ref.casefold() not in index["measures"]:
+                missing.append({"reference": ref, "kind": "measure"})
+    if missing:
+        raise PowerBIValidationError(
+            f"Field reference(s) not found in the live model: "
+            f"{', '.join(item['reference'] for item in missing)}",
+            details={"missing": missing, "checked": list(references)},
+        )
+    return {"status": "validated", "checked": len(references)}
+
+
 def _live_model_field_index(manager: Any | None, *, include_hidden: bool) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     if manager is None:
         return None, {"status": "unavailable", "reason": "manager_not_provided"}
@@ -1282,7 +1321,25 @@ def pbi_set_page_size_tool(extract_folder: str, page: str, width: int, height: i
     return _run(_impl)
 
 
-def pbi_add_card_tool(extract_folder: str, page: str, measure: str, x: int, y: int, width: int = 200, height: int = 120, title: str = "") -> dict[str, Any]:
+def pbi_add_card_tool(
+    extract_folder: str,
+    page: str,
+    measure: str,
+    x: int,
+    y: int,
+    width: int = 200,
+    height: int = 120,
+    title: str = "",
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    """Add a card visual.
+
+    If a connection ``manager`` is supplied, the measure name is checked
+    against the live model first and the call fails fast on a typo. Without
+    a manager the tool still works (offline mode), preserving prior behavior.
+    """
+    _validate_field_references_live(manager, [measure])
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     return _append_visual(
         extract_folder,
@@ -1496,6 +1553,7 @@ def pbi_add_gauge_tool(
     fill_color: str | None = None,
     target_color: str | None = None,
     fill_color_measure: str | None = None,
+    manager: Any | None = None,
 ) -> dict[str, Any]:
     """Add a gauge visual.
 
@@ -1504,10 +1562,20 @@ def pbi_add_gauge_tool(
     (conditional formatting), so the colour reacts to slicer / filter context.
     Mutually exclusive with ``fill_color``; if both are provided, the measure
     binding wins.
+
+    If a connection ``manager`` is supplied, every measure / column reference
+    (Y, target, fill_color_measure) is verified against the live model so a
+    typo fails fast instead of producing a broken visual.
     """
     if fill_color and fill_color_measure:
         # Measure binding takes precedence — drop the static fill silently to keep callers tidy.
         fill_color = None
+    refs_to_validate: list[str] = [measure]
+    if target_measure:
+        refs_to_validate.append(target_measure)
+    if fill_color_measure:
+        refs_to_validate.append(fill_color_measure)
+    _validate_field_references_live(manager, refs_to_validate)
     measure_home_map = _scan_measure_home_tables(_resolve_extract_folder(extract_folder, must_exist=True))
     projections = {"Y": [{"queryRef": _query_ref(measure)}]}
     references = [measure]
@@ -1578,16 +1646,20 @@ def pbi_add_labelled_card_tool(
     label_font_size: int = 11,
     label_bold: bool = True,
     label_color: str = "#1F2937",
+    manager: Any | None = None,
 ) -> dict[str, Any]:
     """Place a text label above a card value, matching docx-style 'label-on-top' card layout.
 
     Returns both created visuals so callers can move/style them together later.
+    If a connection ``manager`` is supplied, the measure name is verified
+    against the live model before either visual is created.
     """
     if label_height <= 0 or label_height >= height:
         raise PowerBIValidationError(
             "label_height must be > 0 and smaller than height.",
             details={"label_height": label_height, "height": height},
         )
+    _validate_field_references_live(manager, [measure])
     label_response = pbi_add_text_box_tool(
         extract_folder,
         page,

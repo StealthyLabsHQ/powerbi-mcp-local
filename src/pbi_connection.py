@@ -172,15 +172,29 @@ def ok(message: str, **data: Any) -> dict[str, Any]:
 
 
 def error_payload(exc: Exception | str, *, code: str | None = None) -> dict[str, Any]:
-    """Standard JSON response for failed operations."""
+    """Standard JSON response for failed operations.
+
+    For PowerBIError subclasses, returns the structured ``code``/``message``/
+    ``details`` exactly as raised. For other exceptions, the response surfaces:
+    - ``message`` — the full chained text via ``flatten_exception_message`` so
+      callers see the underlying cause (.NET InnerException, ``__cause__``,
+      ``__context__``) instead of only the topmost frame.
+    - ``details.cause_chain`` — list of `{type, message}` for each link in the
+      chain (top-most first), useful for programmatic error analysis.
+    """
     if isinstance(exc, PowerBIError):
+        details = serialize_value(exc.details) if exc.details else {}
+        if isinstance(details, dict):
+            chain = _exception_chain_summary(exc)
+            if len(chain) > 1:
+                details = {**details, "cause_chain": chain[1:]}
         return {
             "ok": False,
             "error": {
                 "code": exc.code,
                 "message": exc.message,
                 "retryable": exc.retryable,
-                "details": serialize_value(exc.details),
+                "details": details,
             },
         }
     if isinstance(exc, Exception):
@@ -188,9 +202,9 @@ def error_payload(exc: Exception | str, *, code: str | None = None) -> dict[str,
             "ok": False,
             "error": {
                 "code": code or "internal_error",
-                "message": str(exc),
+                "message": flatten_exception_message(exc),
                 "retryable": False,
-                "details": {},
+                "details": {"cause_chain": _exception_chain_summary(exc)},
             },
         }
     return {
@@ -202,6 +216,26 @@ def error_payload(exc: Exception | str, *, code: str | None = None) -> dict[str,
             "details": {},
         },
     }
+
+
+def _exception_chain_summary(exc: BaseException) -> list[dict[str, str]]:
+    """Walk the exception chain (Python ``__cause__``/``__context__`` and .NET
+    ``InnerException``) and return one ``{type, message}`` dict per link."""
+    out: list[dict[str, str]] = []
+    seen: set[int] = set()
+    current: Any = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        message = str(current).strip()
+        out.append({
+            "type": type(current).__name__,
+            "message": message,
+        })
+        nxt = getattr(current, "InnerException", None)
+        if nxt is None:
+            nxt = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+        current = nxt
+    return out
 
 
 def serialize_value(value: Any) -> Any:

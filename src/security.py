@@ -585,11 +585,36 @@ def resolve_local_path(
 
 
 def _reject_symlink_path(path: Path) -> None:
+    """Reject any symlink in the path, including ancestors.
+
+    ``Path.resolve()`` followed by an allowed-base-dir check already prevents
+    a symlink from escaping the allow-list, but rejecting the symlink upfront
+    gives a clearer error and defends against TOCTOU edge cases on slow
+    filesystems where the resolve and the subsequent open could observe
+    different targets.
+    """
     if path.exists() and path.is_symlink():
         raise SecurityPolicyError(
             "Symlink paths are blocked by the active security policy.",
             details={"path": str(path), "symlink": str(path)},
         )
+    # Walk each ancestor that exists. We stop at the filesystem root (parent == self).
+    current = path.parent
+    while True:
+        try:
+            if current.exists() and current.is_symlink():
+                raise SecurityPolicyError(
+                    "Symlink paths are blocked by the active security policy.",
+                    details={"path": str(path), "symlink": str(current)},
+                )
+        except OSError:
+            # Permission errors on a parent directory shouldn't leak the symlink
+            # check exception type — let the downstream open surface it instead.
+            return
+        parent = current.parent
+        if parent == current:
+            return
+        current = parent
 
 
 def inspect_excel_archive(

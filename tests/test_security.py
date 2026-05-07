@@ -168,5 +168,79 @@ class SecurityTests(unittest.TestCase):
             )
 
 
+class ErrorPayloadTests(unittest.TestCase):
+    """error_payload preserves the full exception chain."""
+
+    def test_python_cause_chain_is_preserved(self) -> None:
+        from pbi_connection import error_payload
+
+        try:
+            try:
+                raise ValueError("low-level boom")
+            except ValueError as exc:
+                raise RuntimeError("outer wrapper") from exc
+        except RuntimeError as outer:
+            payload = error_payload(outer)
+
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["error"]["code"], "internal_error")
+        # Message flattens the whole chain, so the underlying cause is visible.
+        self.assertIn("outer wrapper", payload["error"]["message"])
+        self.assertIn("low-level boom", payload["error"]["message"])
+        # Structured chain in details has at least 2 links (outer + cause).
+        chain = payload["error"]["details"]["cause_chain"]
+        self.assertGreaterEqual(len(chain), 2)
+        types = [link["type"] for link in chain]
+        self.assertIn("RuntimeError", types)
+        self.assertIn("ValueError", types)
+
+    def test_dotnet_inner_exception_traversed(self) -> None:
+        """Mimics the .NET exception shape (.InnerException) used by pythonnet."""
+        from pbi_connection import error_payload
+
+        class Inner(Exception):
+            pass
+
+        class Outer(Exception):
+            def __init__(self, message: str, inner: Exception) -> None:
+                super().__init__(message)
+                self.InnerException = inner
+
+        outer = Outer("save failed", Inner("constraint x"))
+        payload = error_payload(outer)
+        self.assertIn("save failed", payload["error"]["message"])
+        self.assertIn("constraint x", payload["error"]["message"])
+        chain_types = [link["type"] for link in payload["error"]["details"]["cause_chain"]]
+        self.assertEqual(chain_types[:2], ["Outer", "Inner"])
+
+
+class SymlinkParentRejectionTests(unittest.TestCase):
+    """``resolve_local_path`` rejects paths whose ancestors are symlinks."""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name).resolve()
+        self.previous_allowed = [str(item) for item in SECURITY.allowed_base_dirs()]
+        SECURITY.configure_allowed_dirs([str(self.root)])
+
+    def tearDown(self) -> None:
+        SECURITY.configure_allowed_dirs(self.previous_allowed)
+        self.temp_dir.cleanup()
+
+    def test_rejects_symlinked_parent_directory(self) -> None:
+        target = self.root / "real"
+        target.mkdir()
+        link = self.root / "via_symlink"
+        try:
+            link.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation not permitted on this platform")
+
+        suspect = link / "data.txt"
+        with self.assertRaises(SecurityPolicyError) as ctx:
+            resolve_local_path(str(suspect), must_exist=False)
+        self.assertIn("Symlink", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

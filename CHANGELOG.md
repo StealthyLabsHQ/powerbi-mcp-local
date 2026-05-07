@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.8.2] — 2026-05-07 — Live-model field validation, error chains, symlink hardening
+
+### Added — fail-fast field validation
+
+- New helper `_validate_field_references_live(manager, references)` checks every measure / column referenced by a visual against the live TOM model index. Raises `PowerBIValidationError` with a structured `details.missing` list naming the bad references and their kind (`measure` vs `column`). When no manager is supplied (offline scripting / tests), validation is silently skipped — preserves the existing offline workflow.
+- `pbi_add_card_tool`, `pbi_add_gauge_tool`, `pbi_add_labelled_card_tool` now accept an optional `manager` kwarg. The MCP wrappers forward `CONNECTION_MANAGER` automatically, so a typo in a measure name now fails before the layout is ever written instead of producing a "Fix this" placeholder visible only after refreshing PBI Desktop.
+
+### Fixed — error chain preservation
+
+- `error_payload()` now uses `flatten_exception_message()` for non-`PowerBIError` exceptions, so the response message contains the full chain instead of only the topmost frame. Ex.: `RuntimeError("outer") | ValueError("low-level boom")`.
+- New `details.cause_chain` field surfaces a structured `[{type, message}, …]` walk of the exception chain (Python `__cause__` / `__context__` plus .NET `InnerException`). Programmatic clients can now identify the underlying error type instead of regex-matching the message.
+
+### Hardened — symlink rejection
+
+- `_reject_symlink_path()` now walks every ancestor directory and rejects the call if *any* of them is a symlink. The previous implementation only rejected the leaf path; this defends against an unlikely TOCTOU edge case on slow filesystems where `path.resolve()` and the subsequent open could observe different targets if a parent symlink was swapped between the two calls. Permission errors on a parent are deferred to the downstream open (we don't leak a misleading symlink-rejection error).
+
+### Tests
+
+- 94 passing, 2 platform-conditional skips (`pythonnet` on non-Windows, symlink creation requires admin on Windows). New cases:
+  - `test_field_validation_blocks_missing_measure` — patched `_live_model_field_index` returns a tiny model; valid measure passes, typo raises with the right `details.missing`.
+  - `test_field_validation_skipped_without_manager` — no manager → no live check, offline path still works.
+  - `test_field_validation_gauge_checks_target_and_color_measure` — gauge validates Y, target_measure, and `fill_color_measure` together.
+  - `test_python_cause_chain_is_preserved` — Python `raise … from …` chain flows through the payload.
+  - `test_dotnet_inner_exception_traversed` — pythonnet-style `.InnerException` traversed.
+  - `test_rejects_symlinked_parent_directory` — symlink in an ancestor path is rejected (skipped on Windows without dev-mode).
+
 ## [0.8.1] — 2026-05-07 — Reliability fixes + visual format productisation
 
 ### Added — new tools
