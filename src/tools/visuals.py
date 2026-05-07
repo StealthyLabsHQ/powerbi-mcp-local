@@ -690,6 +690,17 @@ def _int_literal(value: int) -> dict[str, Any]:
     return {"expr": {"Literal": {"Value": f"{int(value)}L"}}}
 
 
+def _text_literal(value: str) -> dict[str, Any]:
+    """Power BI canonical text literal: 'value' with embedded quotes doubled.
+
+    PBI's Literal.Value field for text uses single-quoted form (the older
+    json.dumps-derived '"…"' style is silently ignored by some visual
+    serializers, which is why titles set that way never render).
+    """
+    escaped = str(value).replace("'", "''")
+    return {"expr": {"Literal": {"Value": f"'{escaped}'"}}}
+
+
 def _solid_color(color: str) -> dict[str, Any]:
     if not HEX_COLOR_RE.match(color):
         raise PowerBIValidationError(
@@ -710,6 +721,56 @@ def _gauge_axis_objects(min_value: float | None, max_value: float | None, target
     if not properties:
         return []
     return [{"properties": properties}]
+
+
+_VISUAL_FORMAT_TYPES = frozenset({"auto", "text", "bool", "int", "decimal", "color", "raw"})
+
+
+def _encode_visual_format_value(value: Any, hint: str | None = None) -> Any:
+    """Encode a Python value as a Power BI visual format property.
+
+    ``hint`` (optional, one of ``text``, ``bool``, ``int``, ``decimal``,
+    ``color``, ``raw``) selects the literal form. ``auto`` (default) infers
+    from the Python type. ``raw`` returns the value untouched so callers can
+    pass an already-shaped dict (e.g. a measure binding).
+    """
+    if hint is not None and hint not in _VISUAL_FORMAT_TYPES:
+        raise PowerBIValidationError(
+            f"unknown property type hint '{hint}'.",
+            details={"hint": hint, "allowed": sorted(_VISUAL_FORMAT_TYPES)},
+        )
+    if hint == "raw":
+        return value
+    if hint == "color":
+        if not isinstance(value, str):
+            raise PowerBIValidationError("color values must be strings.", details={"value": repr(value)})
+        return _solid_color(value)
+    if hint == "text":
+        return _text_literal(str(value))
+    if hint == "bool":
+        return _literal_value(bool(value))
+    if hint == "int":
+        return _int_literal(int(value))
+    if hint == "decimal":
+        return _decimal_literal(float(value))
+    # auto
+    if isinstance(value, bool):
+        return _literal_value(value)
+    if isinstance(value, int):
+        return _int_literal(value)
+    if isinstance(value, float):
+        return _decimal_literal(value)
+    if isinstance(value, str):
+        if HEX_COLOR_RE.match(value):
+            return _solid_color(value)
+        return _text_literal(value)
+    if isinstance(value, dict):
+        # Allow callers to pass already-shaped expr/Measure/etc. payloads
+        return value
+    raise PowerBIValidationError(
+        f"cannot encode value of type {type(value).__name__} for visual format property.",
+        details={"value": repr(value)},
+    )
 
 
 def _datapoint_fill_objects(fill_color: str | None, target_color: str | None) -> list[dict[str, Any]]:
@@ -1632,6 +1693,144 @@ def pbi_move_visual_tool(extract_folder: str, page: str, visual_id: str, x: int,
     return _run(_impl)
 
 
+def pbi_set_visual_format_property_tool(
+    extract_folder: str,
+    page: str,
+    visual_id: str,
+    object_name: str,
+    properties: dict[str, Any],
+    property_types: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Set formatting properties on an existing visual's ``singleVisual.objects[<object_name>][0].properties``.
+
+    Use to override titles, axis labels, data labels, etc. on a visual that's
+    already on the report — without rebuilding it. Encodes Python values as
+    proper Power BI literals (text in single quotes, ints with ``L`` suffix,
+    decimals with ``D`` suffix, ``#RRGGBB`` as solid color, bool as
+    ``true``/``false``).
+
+    ``property_types`` lets you force the encoding of a specific property:
+    ``"text"``, ``"bool"``, ``"int"``, ``"decimal"``, ``"color"``, or ``"raw"``
+    (pass-through).
+
+    Existing properties under the same object are preserved and merged with
+    the new values (write-through semantics).
+    """
+    def _impl() -> dict[str, Any]:
+        if not object_name or not str(object_name).strip():
+            raise PowerBIValidationError("object_name must be non-empty.")
+        if not isinstance(properties, dict) or not properties:
+            raise PowerBIValidationError(
+                "properties must be a non-empty dict of {property_name: value}.",
+                details={"properties": repr(properties)},
+            )
+        types_map = {k: str(v) for k, v in (property_types or {}).items()}
+
+        folder, layout = _load_layout(extract_folder)
+        section = _find_page(layout, page)
+        _, container, config = _find_visual(section, visual_id)
+        single_visual = config.setdefault("singleVisual", {})
+        objects = single_visual.setdefault("objects", {})
+        existing = objects.get(object_name) or [{"properties": {}}]
+        if not isinstance(existing, list) or not existing:
+            existing = [{"properties": {}}]
+        merged_props = dict(existing[0].get("properties", {}))
+
+        encoded: dict[str, Any] = {}
+        for prop_name, raw_value in properties.items():
+            if not prop_name or not str(prop_name).strip():
+                raise PowerBIValidationError(
+                    "property names must be non-empty strings.",
+                    details={"name": repr(prop_name)},
+                )
+            hint = types_map.get(prop_name)
+            encoded[prop_name] = _encode_visual_format_value(raw_value, hint=hint)
+        merged_props.update(encoded)
+        existing[0]["properties"] = merged_props
+        objects[object_name] = existing
+        container["config"] = _dump_embedded_json(config)
+        _save_layout(folder, layout)
+        return ok(
+            f"Format properties applied to visual '{visual_id}' (object '{object_name}').",
+            extract_folder=str(folder),
+            page=str(section.get("displayName") or section.get("name")),
+            visual_id=visual_id,
+            object=object_name,
+            applied=sorted(encoded.keys()),
+        )
+
+    return _run(_impl)
+
+
+def pbi_disable_card_autoscale_tool(
+    extract_folder: str,
+    page: str | None = None,
+    visual_ids: list[str] | None = None,
+    label_precision: int = 0,
+) -> dict[str, Any]:
+    """Disable the auto K/M/B unit-scaling on card visuals.
+
+    By default Power BI cards display large numeric values rescaled (e.g.
+    ``119,229`` becomes ``119K``). When the underlying measure already uses a
+    custom format string with ``K`` / ``€`` suffixes the result is the
+    classic "119K K €" double-suffix bug. This tool sets ``labelDisplayUnits=1``
+    (None) plus an explicit ``labelPrecision`` on every card on the report
+    (or restricted to ``page`` / ``visual_ids``).
+
+    ``label_precision``: 0 keeps integer display, raise to 2 if you need the
+    decimal portion of the underlying measure to render.
+    """
+    def _impl() -> dict[str, Any]:
+        if visual_ids is not None and not isinstance(visual_ids, list):
+            raise PowerBIValidationError("visual_ids must be a list of visual ids or None.")
+        ids_filter = {str(v).strip() for v in (visual_ids or []) if str(v).strip()}
+        folder, layout = _load_layout(extract_folder)
+
+        target_sections: list[dict[str, Any]]
+        if page:
+            target_sections = [_find_page(layout, page)]
+        else:
+            target_sections = list(layout.get("sections", []) or [])
+
+        patched: list[dict[str, Any]] = []
+        for section in target_sections:
+            for container in section.get("visualContainers", []) or []:
+                cfg_raw = container.get("config")
+                if not isinstance(cfg_raw, str):
+                    continue
+                cfg = json.loads(cfg_raw)
+                sv = cfg.get("singleVisual", {})
+                if sv.get("visualType") != "card":
+                    continue
+                visual_id = str(cfg.get("name", ""))
+                if ids_filter and visual_id not in ids_filter:
+                    continue
+                objects = sv.setdefault("objects", {})
+                labels = objects.get("labels")
+                if not isinstance(labels, list) or not labels:
+                    labels = [{"properties": {}}]
+                props = dict(labels[0].get("properties", {}))
+                props["labelDisplayUnits"] = _decimal_literal(1)  # 1 = None
+                props["labelPrecision"] = _decimal_literal(int(label_precision))
+                labels[0]["properties"] = props
+                objects["labels"] = labels
+                container["config"] = _dump_embedded_json(cfg)
+                patched.append({
+                    "visual_id": visual_id,
+                    "page": str(section.get("displayName") or section.get("name", "")),
+                })
+        _save_layout(folder, layout)
+        return ok(
+            f"Disabled autoscale on {len(patched)} card visual(s).",
+            extract_folder=str(folder),
+            patched=patched,
+            patched_count=len(patched),
+            label_precision=int(label_precision),
+        )
+
+    return _run(_impl)
+
+
 def pbi_apply_theme_tool(extract_folder: str, theme_json_path: str) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         folder, layout = _load_layout(extract_folder)
@@ -2134,7 +2333,9 @@ __all__ = [
     "pbi_move_visual_tool",
     "pbi_patch_layout_tool",
     "pbi_repair_report_fields_tool",
+    "pbi_disable_card_autoscale_tool",
     "pbi_remove_visual_tool",
     "pbi_set_page_size_tool",
+    "pbi_set_visual_format_property_tool",
     "pbi_validate_report_fields_tool",
 ]

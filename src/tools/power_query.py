@@ -763,8 +763,19 @@ def pbi_relocate_data_source_tool(
                     "preview_before": redact_sensitive_data(expression[:200]),
                     "preview_after": redact_sensitive_data(new_expression[:200]),
                 }
-                if not dry_run:
+                # Validate the rewritten M up front, even on dry_run, so the
+                # caller sees syntax/security errors during preview instead of
+                # only when they later commit the change.
+                try:
                     _validate_m_expression(new_expression)
+                    entry["validation"] = "ok"
+                except PowerBIValidationError as exc:
+                    entry["validation"] = "invalid"
+                    entry["validation_error"] = getattr(exc, "message", str(exc))
+                    if not dry_run:
+                        # Surface the original exception path on the live write.
+                        raise
+                if not dry_run:
                     _set_partition_m_expression(manager, database, partition, new_expression)
                     _request_refresh(manager, table, refresh_after)
                     entry["status"] = "rewritten"

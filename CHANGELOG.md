@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.8.1] — 2026-05-07 — Reliability fixes + visual format productisation
+
+### Added — new tools
+
+- `pbi_set_visual_format_property` — generic format setter for an existing visual. Merges properties into `singleVisual.objects[<object_name>][0].properties`, encoding Python values to PBI's canonical literals (single-quoted text, `L` int suffix, `D` decimal suffix, `'#RRGGBB'` solid color, `true`/`false` bool). Optional `property_types` lets callers force a specific encoding (`text`, `bool`, `int`, `decimal`, `color`, or `raw` for pre-shaped expr dicts). Productises the title / axis-label / data-label patches we used to do via direct layout edits.
+- `pbi_disable_card_autoscale` — bulk-set `labelDisplayUnits=1` (None) + `labelPrecision` on every card (or a filtered subset) to kill the "119K K €" double-suffix bug when a measure already pre-divides by 1000 with a `K €` format.
+
+### Fixed — connection manager
+
+- `_is_current_state_usable_locked()` now compares the cached `instance.pid` with the PID of the process currently bound to the cached port; if a different msmdsrv process has reused the port (PBI restart on the same port number), the connection is treated as stale and reopened. Helper `_pid_for_port()` added.
+
+### Fixed — relocate tool
+
+- `pbi_relocate_data_source` now validates each rewritten M expression even when `dry_run=True`. The dry-run output now includes a `validation: ok | invalid` field per entry (with `validation_error` on failure), so callers see syntax / security errors during preview instead of only at commit time.
+
+### Added — startup integrity
+
+- New helper `_audit_tool_registry()` in `server.py` runs at server start, walks `tools.__all__`, and confirms every public `pbi_*_tool` is wrapped by an `@mcp.tool()` registration. Logs WARN on orphaned implementations and INFO on wrappers without a matching `_tool` (workflows, etc.). Set `PBI_MCP_STRICT_REGISTRY=1` to make the server fail-fast on drift — useful in CI. Current state: 102/102 tools, 0 orphans.
+
+### Tests
+
+- 88 passing (`test_visuals + test_visual_field_validation + test_workflows + test_quality + test_security + test_query`).
+- New `test_visuals` cases: visual format property writes canonical PBI literals (single-quoted text, `L` int, hex auto-detected as solid color); explicit type hint forces decimal encoding; missing visual id surfaces a structured failure; `pbi_disable_card_autoscale` patches only cards (skips charts), supports `visual_ids` filter.
+
 ## [0.8.0] — 2026-05-06 — Portable data sources + visual format toolkit
 
 ### Added — new tools

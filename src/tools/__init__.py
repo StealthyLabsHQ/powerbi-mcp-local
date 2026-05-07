@@ -112,6 +112,7 @@ from .visuals import (
     pbi_add_labelled_card_tool,
     pbi_add_line_chart_tool,
     pbi_add_slicer_tool,
+    pbi_disable_card_autoscale_tool,
     pbi_add_table_visual_tool,
     pbi_add_text_box_tool,
     pbi_add_visual_tool,
@@ -130,6 +131,7 @@ from .visuals import (
     pbi_repair_report_fields_tool,
     pbi_remove_visual_tool,
     pbi_set_page_size_tool,
+    pbi_set_visual_format_property_tool,
     pbi_validate_report_fields_tool,
 )
 from .workflows import (
@@ -245,6 +247,8 @@ __all__ = [
     "pbi_add_slicer_tool",
     "pbi_add_text_box_tool",
     "pbi_apply_design_tool",
+    "pbi_disable_card_autoscale_tool",
+    "pbi_set_visual_format_property_tool",
     "pbi_remove_visual_tool",
     "pbi_move_visual_tool",
     "pbi_apply_theme_tool",

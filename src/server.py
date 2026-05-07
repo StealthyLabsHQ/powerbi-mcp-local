@@ -120,6 +120,8 @@ from tools import (
     pbi_remove_visual_tool,
     pbi_set_power_query_tool,
     pbi_set_page_size_tool,
+    pbi_set_visual_format_property_tool,
+    pbi_disable_card_autoscale_tool,
     pbi_validate_report_fields_tool,
     pbi_excel_import_workflow_tool,
     pbi_measure_workflow_tool,
@@ -1837,6 +1839,62 @@ def pbi_move_visual(
 
 
 @mcp.tool()
+def pbi_set_visual_format_property(
+    extract_folder: str,
+    page: str,
+    visual_id: str,
+    object_name: str,
+    properties: dict[str, Any],
+    property_types: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Override format properties on an existing visual.
+
+    object_name examples: ``title``, ``categoryAxis``, ``valueAxis``,
+    ``labels``, ``dataPoint``, ``general``. Properties are merged into
+    ``singleVisual.objects[object_name][0].properties`` and encoded to PBI's
+    canonical literal forms (single-quoted text, ``L`` int suffix, ``D``
+    decimal suffix, ``#RRGGBB`` solid color, ``true``/``false`` bool).
+
+    Pass property_types to force an encoding ("text", "bool", "int",
+    "decimal", "color", or "raw" for pre-shaped expr dicts).
+    """
+    return _run(
+        "pbi_set_visual_format_property",
+        pbi_set_visual_format_property_tool,
+        extract_folder=extract_folder,
+        page=page,
+        visual_id=visual_id,
+        object_name=object_name,
+        properties=properties,
+        property_types=property_types,
+    )
+
+
+@mcp.tool()
+def pbi_disable_card_autoscale(
+    extract_folder: str,
+    page: str | None = None,
+    visual_ids: list[str] | None = None,
+    label_precision: int = 0,
+) -> dict[str, Any]:
+    """Disable Power BI's auto K/M unit-scaling on card visuals.
+
+    Sets ``labelDisplayUnits=1`` (None) and an explicit ``labelPrecision``
+    on every card. Use to fix the "119K K €" double-suffix bug where a
+    measure already pre-divides by 1000 with a ``K €`` format string and
+    PBI auto-scales on top.
+    """
+    return _run(
+        "pbi_disable_card_autoscale",
+        pbi_disable_card_autoscale_tool,
+        extract_folder=extract_folder,
+        page=page,
+        visual_ids=visual_ids,
+        label_precision=label_precision,
+    )
+
+
+@mcp.tool()
 def pbi_apply_theme(extract_folder: str, theme_json_path: str) -> dict[str, Any]:
     """Apply a theme JSON to an extracted report."""
     return _run(
@@ -2306,6 +2364,11 @@ def main() -> None:
         SECURITY.set_runtime_readonly(True)
         logger.info("SECURITY: readonly mode enabled via --readonly")
 
+    # Pre-flight: detect registration drift between tools/__all__ and @mcp.tool()
+    # wrappers. Strict mode (CI) is opted-in via env var so production servers
+    # never fail to start over a missing wrapper.
+    _audit_tool_registry(strict=os.environ.get("PBI_MCP_STRICT_REGISTRY", "0") == "1")
+
     _apply_profile(args.profile)
 
     if args.transport == "sse":
@@ -2323,6 +2386,58 @@ def main() -> None:
         anyio.run(_run_sse_with_auth, args.host, args.port)
     else:
         mcp.run(transport="stdio")
+
+
+def _audit_tool_registry(strict: bool = False) -> dict[str, list[str]]:
+    """Verify every public ``pbi_*_tool`` from the tools package has an
+    @mcp.tool() wrapper registered in this server module.
+
+    Returns a dict with keys ``orphan_implementations`` (tool functions that
+    are exposed in tools/__all__ but never wrapped) and ``unknown_wrappers``
+    (registered MCP tools whose name does not match any underlying function).
+    Logs warnings on issues; if ``strict`` is True, raises RuntimeError so a
+    CI pre-flight can fail fast on registration drift.
+    """
+    import tools as _tools
+
+    exported = set(getattr(_tools, "__all__", ()))
+    pbi_impls = {name[: -len("_tool")] for name in exported if name.startswith("pbi_") and name.endswith("_tool")}
+
+    manager = getattr(mcp, "_tool_manager", None)
+    tools_map = getattr(manager, "_tools", None)
+    registered = set(tools_map.keys()) if isinstance(tools_map, dict) else set()
+    pbi_registered = {name for name in registered if name.startswith("pbi_")}
+
+    orphan_implementations = sorted(pbi_impls - pbi_registered)
+    unknown_wrappers = sorted(pbi_registered - pbi_impls)
+
+    if orphan_implementations:
+        logger.warning(
+            "tool_registry: %d implementation(s) not wrapped as @mcp.tool(): %s",
+            len(orphan_implementations),
+            ", ".join(orphan_implementations),
+        )
+    if unknown_wrappers:
+        # Acceptable cases: meta-wrappers, workflow tools, etc. Still log INFO so
+        # operators can spot rogue registrations.
+        logger.info(
+            "tool_registry: %d wrapper(s) without a matching pbi_*_tool: %s",
+            len(unknown_wrappers),
+            ", ".join(unknown_wrappers),
+        )
+
+    if strict and orphan_implementations:
+        raise RuntimeError(
+            "tool_registry strict check failed: "
+            f"{len(orphan_implementations)} unwrapped tools: {orphan_implementations}"
+        )
+
+    return {
+        "orphan_implementations": orphan_implementations,
+        "unknown_wrappers": unknown_wrappers,
+        "registered_count": len(pbi_registered),
+        "implementation_count": len(pbi_impls),
+    }
 
 
 def _apply_profile(profile: str) -> None:

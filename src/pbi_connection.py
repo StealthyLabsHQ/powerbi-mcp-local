@@ -578,14 +578,37 @@ class PowerBIConnectionManager:
     def _is_current_state_usable_locked(self) -> bool:
         if self._state is None:
             return False
-        port = self._state.instance.port
+        cached = self._state.instance
+        port = cached.port
         if not self._is_port_open(port):
             return False
         try:
             _ = self._state.tom_server.Connected
         except Exception:
             return False
+        # Detect "port reused by a different msmdsrv process": if the running
+        # process on this port has a different PID than what we cached, treat
+        # the connection as stale so we reopen against the new instance.
+        cached_pid = getattr(cached, "pid", None)
+        if cached_pid is not None:
+            current_pid = self._pid_for_port(port)
+            if current_pid is not None and current_pid != cached_pid:
+                return False
         return True
+
+    def _pid_for_port(self, port: int) -> int | None:
+        """Return the PID of the msmdsrv process currently bound to ``port``.
+
+        Best-effort: returns None if discovery fails. Used to detect port reuse
+        across PBI Desktop restarts.
+        """
+        try:
+            for instance in self._discover_process_instances():
+                if instance.port == port:
+                    return getattr(instance, "pid", None)
+        except Exception:
+            return None
+        return None
 
     def _discover_instances(self) -> list[DiscoveredInstance]:
         ensure_windows()
