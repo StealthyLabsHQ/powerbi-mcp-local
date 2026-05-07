@@ -389,6 +389,9 @@ class PowerBIConnectionManager:
         self._read_cache: dict[str, tuple[int, Any]] = {}
         # Ring buffer of recent operations for self-diagnostic by tools/LLMs.
         self._operation_log: collections.deque[dict[str, Any]] = collections.deque(maxlen=50)
+        # Short-lived cache for instance discovery (TTL 5s) to avoid rescanning on
+        # every tool call that needs a connection.
+        self._instance_cache: tuple[float, list[DiscoveredInstance]] | None = None
 
     def _record_operation(self, *, op: str, kind: str, started: float, ok_: bool, error: BaseException | None = None) -> None:
         """Append an entry to the operation history ring buffer."""
@@ -684,6 +687,11 @@ class PowerBIConnectionManager:
 
     def _discover_instances(self) -> list[DiscoveredInstance]:
         ensure_windows()
+
+        now = time.monotonic()
+        if self._instance_cache is not None and now - self._instance_cache[0] < 5.0:
+            return list(self._instance_cache[1])
+
         merged: dict[int, DiscoveredInstance] = {}
 
         for instance in self._discover_workspace_instances():
@@ -696,20 +704,23 @@ class PowerBIConnectionManager:
             current.port_file = current.port_file or instance.port_file
             current.modified_time = max(current.modified_time or 0.0, instance.modified_time or 0.0)
 
-        for instance in self._discover_process_instances():
-            current = merged.get(instance.port)
-            if current is None:
-                merged[instance.port] = instance
-                continue
-            current.discovered_via |= instance.discovered_via
-            current.pid = current.pid or instance.pid
-            current.process_name = current.process_name or instance.process_name
-            current.process_exe = current.process_exe or instance.process_exe
-            current.process_started_at = max(
-                current.process_started_at or 0.0,
-                instance.process_started_at or 0.0,
-            )
-            current.workspace_path = current.workspace_path or instance.workspace_path
+        # Skip the expensive psutil scan when workspace files already located every
+        # instance (port_file present → process is definitely running).
+        if not merged or not all(i.port_file for i in merged.values()):
+            for instance in self._discover_process_instances():
+                current = merged.get(instance.port)
+                if current is None:
+                    merged[instance.port] = instance
+                    continue
+                current.discovered_via |= instance.discovered_via
+                current.pid = current.pid or instance.pid
+                current.process_name = current.process_name or instance.process_name
+                current.process_exe = current.process_exe or instance.process_exe
+                current.process_started_at = max(
+                    current.process_started_at or 0.0,
+                    instance.process_started_at or 0.0,
+                )
+                current.workspace_path = current.workspace_path or instance.workspace_path
 
         instances = sorted(merged.values(), key=lambda item: item.sort_key(), reverse=True)
         if not instances:
@@ -717,6 +728,7 @@ class PowerBIConnectionManager:
                 "No running Power BI Desktop Analysis Services instance was found.",
                 details={"workspace_roots": [str(path) for path in self._workspace_roots()]},
             )
+        self._instance_cache = (now, instances)
         return instances
 
     def _select_instance(self, *, preferred_port: int | None = None) -> DiscoveredInstance:
@@ -778,12 +790,31 @@ class PowerBIConnectionManager:
                 seen.add(key)
         return deduped
 
+    @staticmethod
+    def _bounded_glob(root: Path, name: str, max_depth: int) -> Iterator[Path]:
+        """Walk *root* up to *max_depth* levels deep, yielding files named *name*.
+
+        Replaces rglob to avoid scanning the entire Packages hierarchy (100+ dirs).
+        Power BI port files live at depth ≤4 from the Packages root.
+        """
+        stack: list[tuple[Path, int]] = [(root, 0)]
+        while stack:
+            directory, depth = stack.pop()
+            try:
+                for entry in directory.iterdir():
+                    if entry.is_file() and entry.name == name:
+                        yield entry
+                    elif entry.is_dir() and depth < max_depth:
+                        stack.append((entry, depth + 1))
+            except OSError:
+                continue
+
     def _discover_workspace_instances(self) -> list[DiscoveredInstance]:
         instances: list[DiscoveredInstance] = []
         for root in self._workspace_roots():
             if not root.exists():
                 continue
-            for port_file in root.rglob("msmdsrv.port.txt"):
+            for port_file in self._bounded_glob(root, "msmdsrv.port.txt", max_depth=5):
                 try:
                     port = int(port_file.read_text(encoding="utf-8").strip())
                 except (OSError, ValueError):
@@ -1303,6 +1334,7 @@ class PowerBIConnectionManager:
         self._state = None
         self._write_generation += 1
         self._read_cache.clear()
+        self._instance_cache = None
 
     def _is_port_open(self, port: int) -> bool:
         try:

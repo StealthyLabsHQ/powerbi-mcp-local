@@ -3077,9 +3077,10 @@ def main() -> None:
         logger.info("SECURITY: readonly mode enabled via --readonly")
 
     # Pre-flight: detect registration drift between tools/__all__ and @mcp.tool()
-    # wrappers. Strict mode (CI) is opted-in via env var so production servers
-    # never fail to start over a missing wrapper.
-    _audit_tool_registry(strict=os.environ.get("PBI_MCP_STRICT_REGISTRY", "0") == "1")
+    # wrappers. Opt-in via env var so production servers skip the introspection
+    # cost at every startup. Strict mode (CI) fails on missing wrappers.
+    if os.environ.get("PBI_MCP_AUDIT", "0") == "1" or os.environ.get("PBI_MCP_STRICT_REGISTRY", "0") == "1":
+        _audit_tool_registry(strict=os.environ.get("PBI_MCP_STRICT_REGISTRY", "0") == "1")
 
     _apply_profile(args.profile)
 
