@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.10.3] — 2026-05-07 — Stability: single-instance lock, parent watcher, instance discovery cache
+
+Server-side reliability and cold-start performance. Eliminates the multi-instance / zombie-process failure mode and removes redundant work from the connection bootstrap. No tool surface changes.
+
+### Fixed
+
+1. **Single-instance enforcement at startup.** `main()` now writes a PID lock to `%TEMP%/powerbi-mcp.pid` (or `/tmp` on POSIX). When a second server starts and the recorded PID is still alive, the older process is killed via `psutil.Process.kill()` before the new one claims the lock. `atexit` plus `SIGINT`/`SIGTERM` handlers remove the lock on clean shutdown. Resolves the conflict where two `python.exe` instances fought for the stdio transport when an LLM CLI (Claude Code, Codex, …) restarted without reaping its child.
+
+2. **Parent-process watcher.** A daemon thread polls the parent PID every 2 seconds via `psutil`. If the parent disappears or becomes a zombie, the server releases the PID lock and exits with `os._exit(0)`. Handles the abnormal-termination case where the parent dies without sending SIGTERM and without closing the stdio pipe — previously the server would linger as a zombie until reboot.
+
+### Performance
+
+3. **Instance discovery cache (TTL 5 s).** `PowerBIConnectionManager._discover_instances()` now memoises results for 5 seconds. Tool calls that resolve through `connect()` / `list_instances()` / `_select_instance()` no longer trigger a full filesystem + process rescan on every invocation. Cache is invalidated on `_disconnect_locked()` so a Power BI Desktop restart is picked up within one TTL window.
+
+4. **Bounded workspace glob.** `_discover_workspace_instances()` no longer calls `Path.rglob`. New `_bounded_glob(root, name, max_depth=5)` walks the workspace tree breadth-limited via `iterdir`, avoiding the recursive scan over Packages/ hierarchies that contained 100 + GUID directories.
+
+5. **Lazy `psutil.process_iter` scan.** `_discover_instances()` skips `_discover_process_instances()` when every workspace-located instance already carries a `port_file` (which proves the process is alive). PID enrichment is no longer the critical path for connecting; `psutil.process_iter` only runs as a fallback when workspace discovery is incomplete.
+
+6. **Tool-registry audit gated by env var.** `_audit_tool_registry()` previously ran on every server start, walking `mcp._tool_manager` introspectively. It is now opt-in via `PBI_MCP_AUDIT=1` (or the existing `PBI_MCP_STRICT_REGISTRY=1` for CI). Production servers skip the introspection cost.
+
+### Internals
+
+- New module-level helpers in `src/server.py`: `_PID_LOCK_PATH`, `_release_pid_lock`, `_pid_alive`, `_acquire_single_instance_lock`, `_start_parent_watcher`. Plumbed into the stdio branch of `main()` only — SSE transport unchanged (port binding already provides single-instance semantics).
+- New field `PowerBIConnectionManager._instance_cache: tuple[float, list[DiscoveredInstance]] | None` and helper `_bounded_glob` (static).
+- Imports added: `atexit`, `signal`, `sys`, `tempfile`, `threading`, `time` in `server.py`. No new third-party dependencies — `psutil` was already required on Windows.
+
+### Validated
+
+- Local harness exercises the MCP `initialize` handshake (returns `protocolVersion`), the single-instance kill-and-claim path (second spawn terminates first within ~2 s), and the EOF cleanup path (closing parent stdin removes the PID file within 5 s). All three pass.
+
 ## [0.10.2] — 2026-05-07 — Field validation, manager propagation, and DAX template hardening
 
 Six follow-up bugs surfaced by a real-world v0.10.1 test pass on a 7-page / 62-visual report. All fixes are localised, signature-compatible, and covered by regression tests. Registry: 125/125, 0 orphans · tests: 112/112 (2 platform skips).

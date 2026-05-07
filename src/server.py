@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import atexit
 import os
+import signal
+import sys
+import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -3037,6 +3043,104 @@ async def _run_sse_with_auth(host: str, port: int) -> None:
     await server.serve()
 
 
+_PID_LOCK_PATH = Path(tempfile.gettempdir()) / "powerbi-mcp.pid"
+
+
+def _release_pid_lock() -> None:
+    try:
+        if _PID_LOCK_PATH.exists():
+            content = _PID_LOCK_PATH.read_text(encoding="utf-8").strip()
+            if content == str(os.getpid()):
+                _PID_LOCK_PATH.unlink()
+    except Exception:
+        pass
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        import psutil  # local import: psutil already a runtime dep on Windows
+        return psutil.pid_exists(pid) and psutil.Process(pid).is_running()
+    except Exception:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def _acquire_single_instance_lock() -> None:
+    """Force single-instance: kill any prior server holding the PID file, then claim it."""
+    try:
+        if _PID_LOCK_PATH.exists():
+            try:
+                old_pid = int(_PID_LOCK_PATH.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                old_pid = 0
+            if old_pid and old_pid != os.getpid() and _pid_alive(old_pid):
+                logger.info("Single-instance: killing prior server PID %d", old_pid)
+                try:
+                    import psutil
+                    psutil.Process(old_pid).kill()
+                except Exception as exc:
+                    logger.warning("Single-instance: could not kill PID %d: %s", old_pid, exc)
+                else:
+                    for _ in range(20):  # up to 2s
+                        if not _pid_alive(old_pid):
+                            break
+                        time.sleep(0.1)
+        _PID_LOCK_PATH.write_text(str(os.getpid()), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Single-instance lock acquire failed: %s", exc)
+        return
+
+    atexit.register(_release_pid_lock)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, lambda *_: sys.exit(0))
+        except (ValueError, OSError):
+            pass  # not available on this thread/platform
+
+
+def _start_parent_watcher() -> None:
+    """Daemon thread: if the LLM parent process disappears, exit so atexit fires.
+
+    FastMCP's stdio transport owns stdin, so we cannot read it ourselves. Polling
+    the parent PID is the cross-platform way to detect a crashed/killed parent
+    (Claude Code, Codex, ...). On normal shutdown the parent sends SIGTERM/SIGINT
+    or closes the pipe and FastMCP exits on its own — this watcher only handles
+    the abnormal case where neither happens.
+    """
+    try:
+        import psutil
+    except ImportError:
+        return  # cannot watch without psutil
+    parent_pid = os.getppid() if hasattr(os, "getppid") else None
+    if not parent_pid or parent_pid <= 1:
+        return  # detached / no parent
+
+    def _watch() -> None:
+        try:
+            parent = psutil.Process(parent_pid)
+        except Exception:
+            return
+        while True:
+            time.sleep(2.0)
+            try:
+                if not parent.is_running() or parent.status() == psutil.STATUS_ZOMBIE:
+                    logger.info("Parent PID %d exited — shutting down", parent_pid)
+                    _release_pid_lock()
+                    os._exit(0)
+            except psutil.NoSuchProcess:
+                logger.info("Parent PID %d gone — shutting down", parent_pid)
+                _release_pid_lock()
+                os._exit(0)
+            except Exception:
+                continue
+
+    t = threading.Thread(target=_watch, daemon=True, name="parent-watcher")
+    t.start()
+
+
 def main() -> None:
     """Entry point — supports stdio (default) and sse transport."""
     import argparse
@@ -3098,6 +3202,8 @@ def main() -> None:
         import anyio
         anyio.run(_run_sse_with_auth, args.host, args.port)
     else:
+        _acquire_single_instance_lock()
+        _start_parent_watcher()
         mcp.run(transport="stdio")
 
 
