@@ -150,63 +150,18 @@ def _run(callback: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> 
         return error_payload(exc)
 
 
-def _find_pbi_tools() -> str:
-    custom = os.environ.get("PBI_TOOLS_PATH", "").strip()
-    if custom:
-        candidate = Path(custom).expanduser()
-        if candidate.exists():
-            return str(candidate)
-        raise PBIToolsNotInstalledError(
-            "PBI_TOOLS_PATH points to a missing executable.",
-            details={"path": str(candidate)},
-        )
-    discovered = shutil.which("pbi-tools") or shutil.which("pbi-tools.exe") or shutil.which("pbi-tools.core.exe")
-    if discovered:
-        return discovered
-    # __file__ is src/tools/visuals/__init__.py — repo root is parents[3].
-    bundled = Path(__file__).resolve().parents[3] / "tools-bin" / "pbi-tools.core.exe"
-    if bundled.exists():
-        return str(bundled)
-    # Fallback: check common install locations
-    fallback_paths = [
-        Path.home() / "AppData" / "Local" / "pbi-tools" / "full" / "pbi-tools.exe",
-        Path.home() / "AppData" / "Local" / "pbi-tools" / "pbi-tools.core.exe",
-    ]
-    for fallback in fallback_paths:
-        if fallback.exists():
-            return str(fallback)
-    raise PBIToolsNotInstalledError(
-        "pbi-tools was not found on PATH. Install it with winget or dotnet tool install -g pbi-tools."
-    )
-
-
-def _run_pbi_tools(arguments: list[str]) -> dict[str, Any]:
-    executable = _find_pbi_tools()
-    try:
-        completed = subprocess.run(
-            [executable, *arguments],
-            capture_output=True,
-            text=True,
-            check=False,
-            shell=False,
-        )
-    except FileNotFoundError as exc:
-        raise PBIToolsNotInstalledError("pbi-tools executable could not be launched.") from exc
-    if completed.returncode != 0:
-        raise VisualToolError(
-            "pbi-tools command failed.",
-            details={
-                "command": [executable, *arguments],
-                "returncode": completed.returncode,
-                "stdout": completed.stdout[-2000:],
-                "stderr": completed.stderr[-2000:],
-            },
-        )
-    return {
-        "stdout": completed.stdout,
-        "stderr": completed.stderr,
-        "returncode": completed.returncode,
-    }
+from ._io import (
+    _extract_pbix_zip_natively,
+    _find_pbi_tools,
+    _force_kill_powerbi,
+    _maybe_force_close_powerbi,
+    _page_names_from_layout_bytes,
+    _run_pbi_tools,
+    _run_powershell,
+    _save_and_close_powerbi_gracefully,
+    pbi_compile_report_tool,
+    pbi_extract_report_tool,
+)
 
 
 from ._containers import (
@@ -259,177 +214,6 @@ from ._formatting import (
     _text_literal,
     _title_objects,
 )
-
-
-def _extract_pbix_zip_natively(pbix: Path, target: Path) -> dict[str, Any]:
-    """Fallback PBIX extraction using the standard ZIP. Used when the bundled
-    pbi-tools.core does not support 'extract' (it only ships 'compile').
-
-    Copies the Report payload (Layout, StaticResources/Themes) so downstream
-    layout-touching tools work. The data model stays inside the PBIX —
-    consumers needing model definitions should rely on the live TOM
-    connection via pbi_connect.
-    """
-    target.mkdir(parents=True, exist_ok=True)
-    extracted: list[str] = []
-    layout_path = target / LAYOUT_RELATIVE_PATH
-    layout_path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(pbix, "r") as zf:
-        names = set(zf.namelist())
-        if "Report/Layout" in names:
-            layout_path.write_bytes(zf.read("Report/Layout"))
-            extracted.append("Report/Layout")
-        # Copy theme JSONs so apply_theme / build_dashboard with theme references resolve.
-        for name in names:
-            if name.startswith("Report/StaticResources/") and not name.endswith("/"):
-                dest = target / name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(zf.read(name))
-                extracted.append(name)
-    return {"method": "zip_native", "extracted_entries": extracted}
-
-
-def pbi_extract_report_tool(pbix_path: str, extract_folder: str | None = None) -> dict[str, Any]:
-    def _impl() -> dict[str, Any]:
-        pbix = _resolve_pbix_path(pbix_path, must_exist=True)
-        target = _resolve_extract_folder(str(extract_folder or pbix.with_name(f"{pbix.stem}_extracted")), must_exist=False)
-        target.mkdir(parents=True, exist_ok=True)
-        method = "pbi_tools_extract"
-        try:
-            _run_pbi_tools(["extract", str(pbix), "-extractFolder", str(target), "-modelSerialization", "Legacy"])
-        except (VisualToolError, PBIToolsNotInstalledError) as exc:
-            # pbi-tools.core (bundled) only ships the 'compile' action — the
-            # CLI returns "Unknown action: 'extract'" or "No action was
-            # specified". Fall back to a native ZIP-based extraction so the
-            # tool stays usable for layout-touching workflows.
-            details = getattr(exc, "details", {}) or {}
-            stdout = str(details.get("stdout", "")) + str(details.get("stderr", ""))
-            cli_lacks_extract = (
-                "Unknown action" in stdout
-                or "No action was specified" in stdout
-                or isinstance(exc, PBIToolsNotInstalledError)
-            )
-            if not cli_lacks_extract:
-                raise
-            logger.info(
-                "pbi-tools CLI cannot extract (likely the .core build); falling back to ZIP-native extraction."
-            )
-            fallback = _extract_pbix_zip_natively(pbix, target)
-            method = fallback["method"]
-        layout_path = target / LAYOUT_RELATIVE_PATH
-        if not layout_path.exists():
-            # Defensive last-mile fallback: even if the CLI reported success,
-            # verify the layout landed and rebuild from the ZIP if not.
-            _extract_pbix_zip_natively(pbix, target)
-            method = method + "+zip_native_fallback"
-        _, layout = _load_layout(target)
-        pages = [_page_summary(section) for section in layout.get("sections", [])]
-        return ok(
-            "Report extracted successfully.",
-            pbix_path=str(pbix),
-            extract_folder=str(target),
-            extraction_method=method,
-            pages=pages,
-            visual_count=sum(page["visual_count"] for page in pages),
-        )
-
-    return _run(_impl)
-
-
-def _run_powershell(script: str, *, timeout: float = 20.0) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-        capture_output=True,
-        text=True,
-        check=False,
-        shell=False,
-        timeout=timeout,
-    )
-
-
-def _save_and_close_powerbi_gracefully(pbix_path: Path | None = None) -> bool:
-    target_path = str(pbix_path) if pbix_path is not None else ""
-    script = "$TargetPath = " + json.dumps(target_path) + r"""
-$ErrorActionPreference = 'SilentlyContinue'
-$ws = New-Object -ComObject WScript.Shell
-$names = @('PBIDesktop', 'pbidesktoprs')
-$initialWrite = $null
-if ($TargetPath -and (Test-Path -LiteralPath $TargetPath)) {
-    $initialWrite = (Get-Item -LiteralPath $TargetPath).LastWriteTimeUtc
-}
-$procs = Get-Process -Name $names | Where-Object { $_.MainWindowHandle -ne 0 }
-foreach ($proc in $procs) {
-    [void]$ws.AppActivate($proc.Id)
-    Start-Sleep -Milliseconds 500
-    $ws.SendKeys('^s')
-}
-if ($initialWrite -ne $null) {
-    $deadline = (Get-Date).AddSeconds(30)
-    do {
-        Start-Sleep -Seconds 1
-        $currentWrite = (Get-Item -LiteralPath $TargetPath).LastWriteTimeUtc
-    } while ($currentWrite -le $initialWrite -and (Get-Date) -lt $deadline)
-} else {
-    Start-Sleep -Seconds 8
-}
-foreach ($proc in @($procs)) {
-    $proc.Refresh()
-    if (-not $proc.HasExited) {
-        [void]$proc.CloseMainWindow()
-    }
-}
-$deadline = (Get-Date).AddSeconds(12)
-do {
-    Start-Sleep -Milliseconds 500
-    $open = @(Get-Process -Name $names | Where-Object { $_.MainWindowHandle -ne 0 }).Count
-} while ($open -gt 0 -and (Get-Date) -lt $deadline)
-if ($open -gt 0) { exit 1 }
-exit 0
-"""
-    try:
-        return _run_powershell(script, timeout=45.0).returncode == 0
-    except Exception:
-        return False
-
-
-def _force_kill_powerbi() -> None:
-    for image in ("PBIDesktop.exe", "pbidesktoprs.exe"):
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/IM", image],
-                capture_output=True,
-                text=True,
-                check=False,
-                shell=False,
-            )
-        except Exception:
-            pass
-
-
-def _maybe_force_close_powerbi(force: bool, pbix_path: Path | None = None) -> None:
-    if not force:
-        return
-    if os.name != "nt":
-        logger.debug("force=True ignored on non-Windows platform for PBIDesktop termination.")
-        return
-    if not _save_and_close_powerbi_gracefully(pbix_path):
-        _force_kill_powerbi()
-    time.sleep(1.5)
-
-
-def _page_names_from_layout_bytes(layout_bytes: bytes) -> list[str]:
-    try:
-        layout = json.loads(layout_bytes.decode("utf-16-le"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ReportLayoutError("Report/Layout content is invalid UTF-16-LE JSON.") from exc
-    if not isinstance(layout, dict):
-        raise ReportLayoutError("Report/Layout root must be a JSON object.")
-    names: list[str] = []
-    for section in layout.get("sections", []):
-        if not isinstance(section, dict):
-            continue
-        names.append(str(section.get("displayName") or section.get("name") or ""))
-    return names
 
 
 def pbi_patch_layout_tool(
@@ -518,23 +302,6 @@ def pbi_patch_layout_tool(
             layout_size=len(layout_bytes),
             pages=pages,
             persistence_risk_checked=fail_on_persistence_risk,
-        )
-
-    return _run(_impl)
-
-
-def pbi_compile_report_tool(extract_folder: str, output_path: str, force: bool = False) -> dict[str, Any]:
-    def _impl() -> dict[str, Any]:
-        folder = _resolve_extract_folder(extract_folder, must_exist=True)
-        output = _resolve_pbix_path(output_path, must_exist=False)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        _maybe_force_close_powerbi(force, output if output.exists() else None)
-        _run_pbi_tools(["compile", str(folder), "-outPath", str(output), "-overwrite"])
-        return ok(
-            "Report compiled successfully.",
-            extract_folder=str(folder),
-            output_path=str(output),
-            size_bytes=output.stat().st_size if output.exists() else None,
         )
 
     return _run(_impl)

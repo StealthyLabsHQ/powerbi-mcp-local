@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.10.9] — 2026-05-08 — Refactor phase 4: I/O block extracted
+
+External-tool plumbing pulled out of `src/tools/visuals/__init__.py`. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.
+
+### Changed
+
+1. **`_io.py`** (281 L) — pbi-tools CLI dispatch, PBIX zip extraction, PowerBI Desktop graceful-close + force-kill helpers. Functions extracted: `_find_pbi_tools`, `_run_pbi_tools`, `_extract_pbix_zip_natively`, `pbi_extract_report_tool`, `_run_powershell`, `_save_and_close_powerbi_gracefully`, `_force_kill_powerbi`, `_maybe_force_close_powerbi`, `_page_names_from_layout_bytes`, `pbi_compile_report_tool`. The `_maybe_force_close_powerbi` helper resolves its dependencies through the package re-export so existing test patches against `tools.visuals._save_and_close_powerbi_gracefully` and `tools.visuals._force_kill_powerbi` keep working.
+
+### Internals
+
+- `tools/visuals/__init__.py`: 2440 → 2207 lines.
+- 9 submodules total (`_base`, `_paths`, `_refs`, `_layout`, `_formatting`, `_home_tables`, `_bindings`, `_containers`, `_io`).
+- Registry audit clean: 131/131, 0 orphans.
+
+### Tests
+
+- 167 passing, 2 platform skips.
+
+### Deferred to v0.10.10+
+
+Page tools (`pbi_create_page_tool`, `pbi_delete_page_tool`, `pbi_describe_page_tool`, `pbi_set_page_size_tool`, `pbi_list_pages_tool`, `pbi_get_page_tool`), the 14 `pbi_add_*_tool` visual builders, ops (`pbi_remove_visual_tool`, `pbi_move_visual_tool`, `pbi_set_visual_format_property_tool`, `pbi_disable_card_autoscale_tool`, `pbi_convert_visual_type_tool`, `pbi_auto_grid_layout_tool`, `pbi_patch_layout_tool`), design (`pbi_apply_theme_tool`, `pbi_apply_design_tool`, `pbi_build_dashboard_tool`), repair (`pbi_validate_report_fields_tool`, `pbi_repair_report_fields_tool`), the dispatcher (`pbi_add_visual_tool` + `_VISUAL_TYPE_DISPATCH`), and the `server.py` wrapper split.
+
 ## [0.10.8] — 2026-05-08 — Refactor phase 3: bindings, home_tables, containers extracted
 
 Continuation of the visuals/ fan-out. Three more focused submodules pulled out of `src/tools/visuals/__init__.py`. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.
