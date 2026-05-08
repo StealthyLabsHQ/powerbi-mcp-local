@@ -17,6 +17,7 @@ from ._base import (
     DEFAULT_PAGE_WIDTH,
     VISUAL_FIELD_ROLES,
     ReportLayoutError,
+    _run,
 )
 from ._bindings import (
     _live_model_field_index,
@@ -34,15 +35,6 @@ from ._layout import (
     _save_layout,
 )
 from ._paths import _layout_path, _resolve_extract_folder, _resolve_pbix_path
-
-
-def _run(callback):
-    from pbi_connection import error_payload
-
-    try:
-        return callback()
-    except Exception as exc:
-        return error_payload(exc)
 
 
 def pbi_patch_layout_tool(

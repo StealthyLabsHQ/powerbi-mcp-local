@@ -19,6 +19,7 @@ from ._base import (
     DESIGN_THEME_RELATIVE_PATH,
     HEX_COLOR_RE,
     THEMES_RELATIVE_DIR,
+    _run,
 )
 from ._bindings import _assert_container_bindings
 from ._containers import _create_chart_container, _make_visual_container, _visual_payload
@@ -33,16 +34,6 @@ from ._layout import (
 )
 from ._paths import _resolve_theme_path
 from ._refs import _query_ref
-
-
-def _run(callback):
-    from pbi_connection import error_payload
-
-    try:
-        return callback()
-    except Exception as exc:
-        return error_payload(exc)
-
 
 DESIGN_PRESETS: dict[str, dict[str, Any]] = {
     "powerbi-navy-pro": {

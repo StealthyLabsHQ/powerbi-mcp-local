@@ -88,14 +88,9 @@ from ._refs import (
 
 logger = logging.getLogger(__name__)
 
-
-def _run(callback: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> dict[str, Any]:
-    try:
-        return callback(*args, **kwargs)
-    except Exception as exc:
-        return error_payload(exc)
-
-
+# Re-export the offline ``_run`` from ``_base`` so historic
+# ``from tools.visuals import _run`` imports keep working.
+from ._base import _run  # noqa: E402, F401
 from ._bindings import (
     _assert_container_bindings,
     _build_prototype_query,

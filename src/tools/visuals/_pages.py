@@ -6,7 +6,7 @@ from typing import Any
 
 from pbi_connection import PowerBIValidationError, ok
 
-from ._base import DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH
+from ._base import DEFAULT_PAGE_HEIGHT, DEFAULT_PAGE_WIDTH, _run
 from ._bindings import _live_model_field_index, _visual_binding_issues
 from ._containers import _validate_dimensions, _visual_payload
 from ._home_tables import _scan_measure_home_tables
@@ -19,15 +19,6 @@ from ._layout import (
     _save_layout,
 )
 from ._paths import _resolve_extract_folder
-
-
-def _run(callback):
-    from pbi_connection import error_payload
-
-    try:
-        return callback()
-    except Exception as exc:
-        return error_payload(exc)
 
 
 def pbi_list_pages_tool(extract_folder: str) -> dict[str, Any]:

@@ -6,18 +6,10 @@ from typing import Any
 
 from pbi_connection import ok
 
+from ._base import _run
 from ._bindings import _live_model_field_index, _scan_visual_bindings
 from ._home_tables import _persistence_risks, _scan_measure_home_tables
 from ._layout import _load_layout, _save_layout
-
-
-def _run(callback):
-    from pbi_connection import error_payload
-
-    try:
-        return callback()
-    except Exception as exc:
-        return error_payload(exc)
 
 
 def pbi_validate_report_fields_tool(

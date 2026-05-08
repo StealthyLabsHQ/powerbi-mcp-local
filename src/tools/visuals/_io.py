@@ -21,20 +21,12 @@ from ._base import (
     PBIToolsNotInstalledError,
     ReportLayoutError,
     VisualToolError,
+    _run,
 )
 from ._layout import _load_layout, _page_summary
 from ._paths import _resolve_extract_folder, _resolve_pbix_path
 
 logger = logging.getLogger("tools.visuals._io")
-
-
-def _run(callback):  # pragma: no cover — thin error-payload wrapper, mirrored by package
-    from pbi_connection import error_payload
-
-    try:
-        return callback()
-    except Exception as exc:
-        return error_payload(exc)
 
 
 def _find_pbi_tools() -> str:

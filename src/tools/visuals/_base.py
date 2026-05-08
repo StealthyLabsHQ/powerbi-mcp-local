@@ -1,4 +1,5 @@
-"""Visuals package: shared constants, error types, and design presets.
+"""Visuals package: shared constants, error types, and the offline ``_run``
+helper.
 
 Lives at the bottom of the package import graph so other submodules can
 freely import from it without risk of cycles.
@@ -7,9 +8,24 @@ freely import from it without risk of cycles.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from pbi_connection import PowerBIError
+from pbi_connection import PowerBIError, error_payload
+
+
+def _run(callback: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    """Execute ``callback`` and translate any raised exception into the
+    standard error payload. Each visuals tool wraps its body with this so
+    callers always get a well-shaped ``{ok: False, error: …}`` response
+    instead of a stack trace.
+    """
+    try:
+        return callback()
+    except Exception as exc:
+        return error_payload(exc)
+
 
 DEFAULT_PAGE_WIDTH = 1280
 DEFAULT_PAGE_HEIGHT = 720

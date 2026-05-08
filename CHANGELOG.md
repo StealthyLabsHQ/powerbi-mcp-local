@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.10.14] — 2026-05-08 — DRY: consolidated `_run` + metaprogrammed wrappers
+
+Two more items from the v0.10.12 retrospective. No tool surface change, no behavior change. 167/167 tests, registry strict 131/131 clean.
+
+### Changed
+
+1. **Consolidated `_run` offline helper** in `src/tools/visuals/_base.py`. The 5 visuals submodules (`_io`, `_pages`, `_design`, `_repair`, `_ops`) and the package `__init__.py` previously each defined their own near-identical `def _run(callback): try: return callback() except: return error_payload(exc)`. Single canonical definition now, imported via `from ._base import _run`. The package `__init__.py` re-exports it under the name `_run` so historic `from tools.visuals import _run` imports keep working.
+
+2. **`register_tool()` helper for metaprogrammed MCP wrappers** in `src/wrappers/_helpers.py`. Generates a pass-through wrapper from the underlying `pbi_*_tool` signature. Auto-detects manager-injection pattern (positional first param vs keyword-only with default `None` vs none). Preserves the parameter schema via `__signature__` so FastMCP picks up the right JSON schema. Copies docstring from the underlying tool.
+
+3. **All 14 wrapper modules collapsed** to one-line registrations. Each previously expanded the boilerplate `@mcp.tool()` + `def fn(...)` + `return _run("name", tool, ..., manager=CONNECTION_MANAGER)` for every tool. Now each wrapper file is just:
+   ```python
+   from tools import (pbi_xxx_tool, ...)
+   from ._helpers import register_tool
+
+   register_tool(pbi_xxx_tool)
+   ```
+
+### Internals
+
+- `src/wrappers/`: 3372 → 534 lines (-84%).
+- The single `register_tool` call replaces ~10-30 lines per wrapper × 144 wrappers.
+- Auto-detection: 7 connection wrappers + 4 relationships + 6 rls + 3 calc_groups + 10 model + 19 measures + 7 query + 21 quality + 13 excel + 11 power_query + 4 tmdl + 1 project + 36 visuals + 2 workflows = 144 wrappers, all pass-through compatible.
+- New `src/wrappers/_helpers.py` (115 L) is the single source of truth for wrapper boilerplate.
+
+### Tests
+
+- 167 passing, 2 platform skips. `ruff check` + `ruff format --check` clean. Strict registry audit (131/131) clean.
+
+### Lessons / footguns avoided
+
+- FastMCP's `@mcp.tool()` decorator inspects the function's signature for the JSON parameter schema. Setting `__signature__` on the generated wrapper is necessary to keep clients seeing typed parameters instead of `**kwargs`. Verified: `pbi_connect` schema correctly exposes `preferred_port`, `force_reconnect`.
+- Tools with extra wrapper-only logic (e.g. `pbi_add_visual` has `dry_run`) are still pure pass-through because the `dry_run` param exists on the underlying `pbi_add_visual_tool` itself. Nothing requires manual wrapping.
+- `functools.update_wrapper` plus an explicit `__signature__` reassignment is the right combination — `update_wrapper` would otherwise copy the underlying function's signature (with `manager`), which we want to drop.
+
 ## [0.10.13] — 2026-05-08 — Hardening: CI, ruff, coverage, public tests, strict audit
 
 Hotfix release on the items flagged as high-ROI in the v0.10.12 retrospective. No tool surface changes; pure infrastructure + style.

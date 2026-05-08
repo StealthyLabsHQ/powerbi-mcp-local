@@ -5,15 +5,14 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 
-from pbi_connection import PowerBIValidationError  # noqa: E402
 from m_expression_security import strip_m_literals_and_comments  # noqa: E402
+from pbi_connection import PowerBIValidationError  # noqa: E402
 from tools.power_query import (  # noqa: E402
     _build_csv_m,
     _build_excel_m,
