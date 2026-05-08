@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.10.11] — 2026-05-08 — Refactor phase 6 (final): charts, cards, structure, ops, dispatcher
+
+The visuals/ fan-out is **complete**. The original 3607-line monolithic `tools/visuals.py` is now a 17-module package with `__init__.py` reduced to a 260-line re-export façade. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.
+
+### Changed
+
+5 final submodules extracted from `src/tools/visuals/__init__.py`:
+
+1. **`_charts.py`** (263 L) — cartesian chart builders: `pbi_add_bar_chart_tool`, `pbi_add_line_chart_tool`, `pbi_add_donut_chart_tool`, `pbi_add_waterfall_tool`, `pbi_add_scatter_chart_tool`, `pbi_add_combo_chart_tool`.
+
+2. **`_cards.py`** (309 L) — card-style visuals: `pbi_add_card_tool`, `pbi_add_gauge_tool`, `pbi_add_kpi_tool`, `pbi_add_text_box_tool`, `pbi_add_labelled_card_tool`.
+
+3. **`_structure.py`** (201 L) — structure visuals: `pbi_add_table_visual_tool`, `pbi_add_slicer_tool`, `pbi_add_matrix_tool`, `pbi_add_map_tool`.
+
+4. **`_ops.py`** (479 L) — visual + layout ops: `pbi_patch_layout_tool`, `pbi_convert_visual_type_tool`, `pbi_auto_grid_layout_tool`, `pbi_remove_visual_tool`, `pbi_move_visual_tool`, `pbi_set_visual_format_property_tool`, `pbi_disable_card_autoscale_tool`.
+
+5. **`_dispatcher.py`** (243 L) — `pbi_add_visual_tool` + `_VISUAL_TYPE_DISPATCH` registry + every `_dispatch_*` adapter (card / labelled_card / bar / line / donut / table / waterfall / slicer / gauge / map / text_box).
+
+### Final structure
+
+```
+src/tools/visuals/
+├── __init__.py        260 L  (re-export façade — every existing import keeps working)
+├── _base.py            92 L  (constants + error classes)
+├── _paths.py           25 L  (path resolution)
+├── _refs.py            61 L  (field reference normalisation)
+├── _layout.py         168 L  (layout I/O + atomic write + dry_run + page helpers)
+├── _formatting.py     135 L  (literal / color / title encoders)
+├── _home_tables.py    173 L  (measure → home table resolution)
+├── _bindings.py       499 L  (prototype/select builders + validators)
+├── _containers.py     236 L  (visual container construction + append flow)
+├── _io.py             281 L  (pbi-tools CLI + zip + PowerShell)
+├── _pages.py          209 L  (page-level tools)
+├── _charts.py         263 L  (6 cartesian chart tools)
+├── _cards.py          309 L  (5 card-style tools)
+├── _structure.py      201 L  (4 structure tools)
+├── _ops.py            479 L  (7 visual + layout ops)
+├── _dispatcher.py     243 L  (generic pbi_add_visual + registry)
+├── _design.py         344 L  (DESIGN_PRESETS + theme + dashboard)
+└── _repair.py          91 L  (validate / repair report fields)
+```
+
+### Internals
+
+- `tools/visuals/__init__.py`: 3607 → 260 lines (-93% over phases 1–6).
+- 17 focused submodules, each ≤ 500 lines.
+- Registry audit clean: 131/131, 0 orphans.
+- Lazy `from . import …` lookups inside extracted submodules preserve patchability of test mocks against `tools.visuals.pbi_model_info_tool`, `tools.visuals._live_model_field_index`, `tools.visuals._save_and_close_powerbi_gracefully`, `tools.visuals._force_kill_powerbi`. Stdlib imports (`os`, `shutil`, `subprocess`, `tempfile`, `time`, `zipfile`, `Path`) remain re-exported at package level so `patch("tools.visuals.os.environ", …)` etc. keep working.
+
+### Tests
+
+- 167 passing, 2 platform skips.
+
+### Deferred to v0.10.12+
+
+`server.py` wrapper split into `src/wrappers/<domain>.py`. The visuals/ refactor is finished.
+
 ## [0.10.10] — 2026-05-08 — Refactor phase 5: pages, design, repair extracted
 
 Three more focused submodules pulled out of `src/tools/visuals/__init__.py`. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.
