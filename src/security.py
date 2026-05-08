@@ -100,6 +100,7 @@ GRADING_TOOLS = {
     "pbi_detect_missing_visuals",
     "pbi_validate_visual_bindings",
     "pbi_validate_report_fields",
+    "pbi_diagnose_render_risks",
     "pbi_score_rubric",
     "pbi_export_correction_report",
     "pbi_lint_dax",

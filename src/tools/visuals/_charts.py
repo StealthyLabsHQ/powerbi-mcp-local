@@ -159,7 +159,8 @@ def pbi_add_waterfall_tool(
         manager, [category_column, value_measure], expected_kinds={category_column: "column", value_measure: "measure"}
     )
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
-    return _append_visual(
+    diagnostics = _inspect_value_measures([value_measure], measure_home_map, manager)
+    result = _append_visual(
         extract_folder,
         page,
         lambda section, home_map: _create_chart_container(
@@ -179,6 +180,9 @@ def pbi_add_waterfall_tool(
         ),
         measure_home_map,
     )
+    if diagnostics:
+        result["warnings"] = diagnostics
+    return result
 
 
 def pbi_add_scatter_chart_tool(
@@ -280,7 +284,8 @@ def pbi_add_combo_chart_tool(
         expected_kinds[legend_column] = "column"
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
-    return _append_visual(
+    diagnostics = _inspect_value_measures([*bar_measures, *line_measures], measure_home_map, manager)
+    result = _append_visual(
         extract_folder,
         page,
         lambda section, home_map: _create_chart_container(
@@ -298,3 +303,6 @@ def pbi_add_combo_chart_tool(
         ),
         measure_home_map,
     )
+    if diagnostics:
+        result["warnings"] = diagnostics
+    return result

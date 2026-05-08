@@ -3,6 +3,95 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.11.2] — 2026-05-08 — Bug 0.92 diagnostic + render-risk aggregator
+
+Best-effort static diagnostic for the bug-0.92 family — line / combo /
+waterfall charts where a Y measure resolves to a scalar literal,
+which Power BI Desktop reports as an opaque internal render error.
+The full live repro still needs human eyes on the rendered visual,
+but the static checks now flag the most common offenders before
+compile.
+
+### Added
+
+1. **`pbi_diagnose_render_risks_tool`** in `src/tools/visuals/_repair.py`.
+   Read-only aggregate diagnostic that walks the extracted layout and
+   reports every render-risk it can detect statically:
+   - Constant Y measure on cartesian charts (line, combo, waterfall,
+     area, stackedArea).
+   - Unresolved measure home tables.
+   - Missing column / measure references in the live model (when a
+     `manager` is supplied).
+   - Wrong reference kind (column-only role bound to a measure or vice
+     versa).
+   - Query-ref mismatch between projections and prototypeQuery.
+
+   Returns `{ok, risk_count, healthy, binding_issues,
+   constant_measure_risks, model_validation, …}`. `page` and `visual_id`
+   narrow the scan; both omitted scans the whole report.
+
+2. **`_is_likely_constant_dax(expression)`** helper in
+   `src/tools/visuals/_home_tables.py`. Strips line + block comments and
+   string literals before checking for column/measure references, so:
+   - `0.92` → flagged.
+   - `BLANK()` → flagged.
+   - `"Sales[Amount]"` (string literal) → flagged.
+   - `/* Sales[Amount] */ 0.92` (commented ref) → flagged.
+   - `SUM(Sales[Amount])` → not flagged.
+   - `CALCULATE([Total Sales], Date[Year] = 2025)` → not flagged.
+
+   Misses dynamic-but-still-constant DAX (e.g.
+   `CALCULATE(SUM(Sales[Amount]), Sales[Amount] = 0)`) — those need a
+   runtime probe.
+
+### Changed
+
+3. **`_inspect_value_measures` now uses `_is_likely_constant_dax`** so the
+   line-chart, combo-chart, and waterfall builders share the same
+   tightened heuristic. Previously the inline check was `"[" not in expr`
+   on the raw expression, which a commented-out reference would defeat.
+
+4. **`pbi_add_combo_chart_tool` and `pbi_add_waterfall_tool` now emit
+   `warnings`** when their Y / Y2 measures look constant (parity with
+   `pbi_add_line_chart_tool`, which has carried this since v0.10.x).
+
+5. **Grading profile** now includes `pbi_diagnose_render_risks` so
+   evaluation flows can flag bug-0.92-class issues before they reach the
+   compile step.
+
+### Internals
+
+- Tool count: 133 → 134. Strict registry audit
+  (`PBI_MCP_STRICT_REGISTRY=1`) clean: 134/134.
+- New module-level constant `_CARTESIAN_VISUAL_TYPES` in `_repair.py`
+  scopes the constant-measure check to chart families known to fail in
+  the bug-0.92 way; bar / column / scatter etc. are unaffected.
+
+### Tests
+
+- 7 new offline tests in `tests/test_visuals.py`:
+  - 5 `_is_likely_constant_dax` cases (literal, BLANK, comment-stripping,
+    string-literal-stripping, real-aggregate negative).
+  - `test_diagnose_render_risks_flags_constant_line_chart_measure` — full
+    happy path: build a line chart with a constant measure, then query
+    the diagnostic and assert the risk surfaces.
+  - `test_diagnose_render_risks_clean_layout_returns_healthy` — empty
+    page returns `healthy=True`, `risk_count=0`.
+- 188 passing locally (was 181), 2 platform skips. ruff check + format
+  check clean.
+
+### Caveats
+
+- The "constant" heuristic is intentionally conservative: it only fires
+  when no `[...]` reference survives comment + string stripping, or when
+  the entire body is `BLANK()`. Pathological constants that happen to
+  reference a column whose value is always the same (`CALCULATE(SUM(...),
+  ...) = 0`) are not detected; those need a runtime probe of the AS
+  engine which is out of scope for a static tool.
+- The `cartesian_visual_count` field in the diagnostic response counts
+  every chart that *could* trigger bug-0.92, not just those that did. Use
+  `risk_count` and `constant_measure_risks` for actionable items.
+
 ## [0.11.1] — 2026-05-08 — pbi_persist_now: opt-in Ctrl+S for Power BI Desktop
 
 Closes the long-standing "TOM mutations are in-memory only" gap. Until now

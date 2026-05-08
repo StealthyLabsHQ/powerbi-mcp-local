@@ -41,6 +41,7 @@ from tools.visuals import (
     pbi_create_page_tool,
     pbi_delete_page_tool,
     pbi_describe_page_tool,
+    pbi_diagnose_render_risks_tool,
     pbi_disable_card_autoscale_tool,
     pbi_extract_report_tool,
     pbi_get_page_tool,
@@ -51,6 +52,7 @@ from tools.visuals import (
     pbi_set_visual_format_property_tool,
     pbi_update_visual_bindings_tool,
 )
+from tools.visuals._home_tables import _is_likely_constant_dax
 
 
 def _base_layout() -> dict:
@@ -943,6 +945,102 @@ class VisualToolTests(unittest.TestCase):
         self.assertTrue(result.get("dry_run"))
         after = json.dumps(_read_layout(self.extract_folder), sort_keys=True)
         self.assertEqual(before, after, "dry_run must not persist layout changes")
+
+    def test_is_likely_constant_dax_detects_literals(self) -> None:
+        is_const, hint = _is_likely_constant_dax("0.92")
+        self.assertTrue(is_const)
+        self.assertIn("scalar literal", hint or "")
+
+    def test_is_likely_constant_dax_detects_blank(self) -> None:
+        is_const, _ = _is_likely_constant_dax("BLANK()")
+        self.assertTrue(is_const)
+        is_const, _ = _is_likely_constant_dax("  blank ( )  ")
+        self.assertTrue(is_const)
+
+    def test_is_likely_constant_dax_ignores_string_literals(self) -> None:
+        # A column reference inside a string literal should NOT prevent the
+        # constant heuristic from firing.
+        is_const, _ = _is_likely_constant_dax('"Sales[Amount]"')
+        self.assertTrue(is_const)
+
+    def test_is_likely_constant_dax_passes_real_aggregates(self) -> None:
+        is_const, _ = _is_likely_constant_dax("SUM(Sales[Amount])")
+        self.assertFalse(is_const)
+        is_const, _ = _is_likely_constant_dax("CALCULATE([Total Sales], Date[Year] = 2025)")
+        self.assertFalse(is_const)
+
+    def test_is_likely_constant_dax_strips_comments(self) -> None:
+        # A reference inside a comment should not save the expression from
+        # the constant flag.
+        is_const, _ = _is_likely_constant_dax("/* Sales[Amount] */ 0.92")
+        self.assertTrue(is_const)
+        is_const, _ = _is_likely_constant_dax("// Sales[Amount]\n0.92")
+        self.assertTrue(is_const)
+
+    def test_diagnose_render_risks_flags_constant_line_chart_measure(self) -> None:
+        # Build a layout with a line chart whose Y measure is "0.92" — bug 0.92.
+        from tools.visuals import pbi_add_line_chart_tool
+
+        class _StubManager:
+            def __init__(self, measures: list[dict[str, str]]) -> None:
+                self._measures = measures
+
+        with patch(
+            "tools.visuals.pbi_model_info_tool",
+            return_value={
+                "ok": True,
+                "tables": [{"name": "Dim_Date", "columns": [{"name": "Year"}]}],
+                "measures": [
+                    {"name": "Constant", "table": "Dim_Date", "expression": "0.92"},
+                    {"name": "CA Total", "table": "Sales", "expression": "SUM(Sales[Amount])"},
+                ],
+            },
+        ):
+            with patch(
+                "tools.measures.pbi_list_measures_tool",
+                return_value={
+                    "ok": True,
+                    "measures": [
+                        {"name": "Constant", "table": "Dim_Date", "expression": "0.92"},
+                        {"name": "CA Total", "table": "Sales", "expression": "SUM(Sales[Amount])"},
+                    ],
+                },
+            ):
+                manager = _StubManager([])
+                added = pbi_add_line_chart_tool(
+                    str(self.extract_folder),
+                    "Overview",
+                    "Dim_Date.Year",
+                    ["Constant"],
+                    20,
+                    20,
+                    manager=manager,
+                )
+                self.assertTrue(added["ok"], added)
+                # The line-chart builder itself emits the warning at write time.
+                self.assertIn("warnings", added)
+                self.assertEqual(added["warnings"][0]["issue"], "constant_measure")
+
+                result = pbi_diagnose_render_risks_tool(
+                    str(self.extract_folder),
+                    "Overview",
+                    manager=manager,
+                )
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["risk_count"], 1)
+        self.assertFalse(result["healthy"])
+        risks = result["constant_measure_risks"]
+        self.assertEqual(len(risks), 1)
+        self.assertEqual(risks[0]["measure"], "Constant")
+        self.assertEqual(risks[0]["visual_type"], "lineChart")
+
+    def test_diagnose_render_risks_clean_layout_returns_healthy(self) -> None:
+        # Empty page → no visuals → no risks.
+        result = pbi_diagnose_render_risks_tool(str(self.extract_folder))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["risk_count"], 0)
+        self.assertTrue(result["healthy"])
 
     def test_format_presets_catalogue_and_apply(self) -> None:
         listing = pbi_list_format_presets_tool(filter_substring="percent")

@@ -9,6 +9,7 @@ live AS model, are merged so writes don't trigger a post-hoc
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,42 @@ from ._base import MODEL_TABLES_RELATIVE_DIR
 from ._paths import _resolve_extract_folder
 
 logger = logging.getLogger("tools.visuals._home_tables")
+
+_DAX_LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+_DAX_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_DAX_STRING_LITERAL_RE = re.compile(r'"(?:[^"]|"")*"')
+_DAX_BLANK_ONLY_RE = re.compile(r"^\s*BLANK\s*\(\s*\)\s*$", re.IGNORECASE)
+
+
+def _is_likely_constant_dax(expression: str) -> tuple[bool, str | None]:
+    """Best-effort heuristic for "DAX expression that resolves to a scalar
+    independent of filter context".
+
+    Returns ``(is_constant, hint)``. Strips comments and string literals
+    before checking so commented-out references and quoted hints don't
+    cause false negatives.
+
+    Catches:
+    - No ``[...]`` reference at all (pure literal arithmetic, hard-coded
+      numeric / boolean / null values).
+    - ``BLANK()`` as the entire expression body.
+
+    Misses dynamic-but-still-constant expressions that contain a column
+    reference but always evaluate to the same scalar (e.g.
+    ``CALCULATE(SUM(Sales[Amount]), Sales[Amount] = 0)``). Detecting those
+    requires a runtime probe.
+    """
+    raw = (expression or "").strip()
+    if not raw:
+        return False, None
+    cleaned = _DAX_LINE_COMMENT_RE.sub("", raw)
+    cleaned = _DAX_BLOCK_COMMENT_RE.sub("", cleaned)
+    cleaned = _DAX_STRING_LITERAL_RE.sub('""', cleaned)
+    if "[" not in cleaned:
+        return True, "no column or measure reference (looks like a scalar literal)"
+    if _DAX_BLANK_ONLY_RE.match(cleaned):
+        return True, "expression body is BLANK() — every Y value collapses to BLANK"
+    return False, None
 
 
 def _scan_measure_home_tables(extract_folder: Path) -> dict[str, str]:
@@ -151,16 +188,16 @@ def _inspect_value_measures(
                 }
             )
         expr = expressions.get(measure, "")
-        if expr and "[" not in expr:
+        is_constant, hint = _is_likely_constant_dax(expr)
+        if is_constant:
             warnings.append(
                 {
                     "measure": measure,
                     "issue": "constant_measure",
                     "hint": (
-                        "DAX expression has no column or measure reference (looks "
-                        "like a scalar constant). Line/combo charts may error out "
-                        "on render — wrap the value via CALCULATE/VAR with a "
-                        "harmless filter, or use a card visual instead."
+                        f"{hint}. Line/combo/waterfall charts may error out on render "
+                        "— wrap the value via CALCULATE/VAR with a real filter, or "
+                        "use a card visual instead."
                     ),
                     "expression_preview": expr[:120],
                 }

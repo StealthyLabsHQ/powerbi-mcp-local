@@ -191,6 +191,7 @@ from ._pages import (
     pbi_set_page_size_tool,
 )
 from ._repair import (
+    pbi_diagnose_render_risks_tool,
     pbi_repair_report_fields_tool,
     pbi_validate_report_fields_tool,
 )
@@ -233,6 +234,7 @@ __all__ = [
     "pbi_auto_grid_layout_tool",
     "pbi_convert_visual_type_tool",
     "pbi_describe_page_tool",
+    "pbi_diagnose_render_risks_tool",
     "pbi_disable_card_autoscale_tool",
     "pbi_remove_visual_tool",
     "pbi_set_page_size_tool",
