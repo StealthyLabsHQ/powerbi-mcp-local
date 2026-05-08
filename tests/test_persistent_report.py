@@ -101,7 +101,10 @@ class PersistentReportTests(unittest.TestCase):
             )
 
         self.assertTrue(result["ok"], result)
-        self.assertEqual(result["output_path"], str(output))
+        # Compare resolved paths so Windows short/long-form temp dirs (e.g.
+        # ``RUNNER~1`` vs ``runneradmin`` on GitHub Actions) don't fail the
+        # equality check.
+        self.assertEqual(Path(result["output_path"]).resolve(), output.resolve())
         self.assertEqual(result["table_count"], 1)
         self.assertEqual(result["measure_count"], 1)
         self.assertEqual(result["page_count"], 1)

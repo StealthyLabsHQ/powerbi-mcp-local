@@ -11,7 +11,8 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 109](https://img.shields.io/badge/tools-109-orange)](#tool-catalog)
+[![Tools 131](https://img.shields.io/badge/tools-131-orange)](#tool-catalog)
+[![CI](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml/badge.svg)](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml)
 
 </div>
 
@@ -35,12 +36,17 @@ No Power BI Pro license is required for the local Desktop workflow.
 ```text
 MCP Client --(stdio or sse)--> src/server.py
                               |
-                              +-- TOM/.NET -> Power BI Desktop local SSAS
-                              +-- ADOMD    -> DAX query execution
-                              +-- openpyxl -> Excel read/write/format
-                              +-- pbi-tools-> report extract/compile + visuals
-                              +-- security -> path, query, and payload safeguards
+                              +-- src/mcp_core.py     FastMCP instance, _run, lifecycle
+                              +-- src/wrappers/       14 thin wrappers/<domain>.py
+                              +-- src/tools/          business logic (the *_tool fns)
+                              +-- TOM/.NET ─────────> Power BI Desktop local SSAS
+                              +-- ADOMD ────────────> DAX query execution
+                              +-- openpyxl ─────────> Excel read/write/format
+                              +-- pbi-tools ────────> report extract/compile + visuals
+                              +-- src/security.py     path, DAX, payload safeguards
 ```
+
+Full module layering and the visuals/ submodule fan-out: see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Requirements
 
@@ -80,8 +86,10 @@ Useful launch modes:
 ```powershell
 python src/server.py --transport sse --port 8765
 python src/server.py --readonly
-python src/server.py --profile readonly
-python src/server.py --profile write
+python src/server.py --profile readonly   # ~56 read tools
+python src/server.py --profile write      # readonly + writes (no destructive)
+python src/server.py --profile grading    # 25-tool surface for evaluation workflows
+python src/server.py --profile all        # default — every tool
 ```
 
 For SSE auth:
@@ -133,7 +141,7 @@ Setup guides:
 <a id="tool-catalog"></a>
 ## Tool Catalog
 
-109 MCP tools are grouped into these areas:
+131 MCP tools are grouped into these areas:
 
 | Area | Coverage |
 | --- | --- |
@@ -202,25 +210,34 @@ Details: [SECURITY.md](SECURITY.md)
 
 ```powershell
 pip install -e ".[dev]"
-pytest -v
+pytest -q
+ruff check src tests
+ruff format --check src tests
 ```
+
+CI runs `pytest --cov=src --cov-fail-under=54` on Windows + an offline subset on Ubuntu, plus `ruff` lint + format check, on every PR. Strict registry audit (`PBI_MCP_STRICT_REGISTRY=1`) ensures every public `pbi_*_tool` has a matching `@mcp.tool()` wrapper.
 
 ## Repository Layout
 
 ```text
 powerbi-mcp-local/
-|-- src/
-|   |-- server.py
-|   |-- pbi_connection.py
-|   |-- security.py
-|   `-- tools/
-|-- tests/
-|-- docs/
-|-- specs/
-|-- SECURITY.md
-|-- README.md
-|-- pyproject.toml
-`-- requirements.txt
+├── src/
+│   ├── server.py            CLI + transport launcher + @mcp.resource/@mcp.prompt (~320 L)
+│   ├── mcp_core.py          FastMCP instance + CONNECTION_MANAGER + lifecycle (~250 L)
+│   ├── pbi_connection.py    TOM + ADOMD bring-up, write helpers, op history
+│   ├── security.py          path / DAX / payload guards + tool category sets
+│   ├── wrappers/            14 domain modules — `register_tool(pbi_*_tool)` calls
+│   └── tools/               business logic (*_tool functions)
+│       └── visuals/         17 focused submodules (layout, bindings, containers, charts, …)
+├── tests/                   167 offline unit tests (live-only scripts gitignored)
+├── .github/workflows/ci.yml pytest + coverage + ruff on Windows + Ubuntu, py3.11/3.12
+├── docs/, specs/
+├── ARCHITECTURE.md          module layering, visuals/ tree, profiles, registry audit
+├── CHANGELOG.md             active changelog (last 3 releases)
+├── CHANGELOG-archive.md     historical changelog
+├── SECURITY.md
+├── pyproject.toml           ruff, pytest, coverage config + dev deps
+└── requirements.txt
 ```
 
 ## License

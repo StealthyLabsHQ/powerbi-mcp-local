@@ -354,8 +354,8 @@ class VisualToolTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout="ok", stderr="")
 
         with (
-            patch("tools.visuals._find_pbi_tools", return_value="pbi-tools"),
-            patch("tools.visuals.subprocess.run", side_effect=_fake_run),
+            patch("tools.visuals._io._find_pbi_tools", return_value="pbi-tools"),
+            patch("tools.visuals._io.subprocess.run", side_effect=_fake_run),
         ):
             extracted = pbi_extract_report_tool(str(self.pbix_path))
             compiled = pbi_compile_report_tool(str(self.extract_folder), str(output_pbix))
