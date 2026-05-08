@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 
 from m_expression_security import validate_m_expression as validate_m_expression_policy
@@ -28,6 +27,7 @@ from security import (
 def _m_string(value: str) -> str:
     return '"' + str(value).replace('"', '""') + '"'
 
+
 def _validate_m_expression(expression: str) -> None:
     validate_expression_text(expression)
     validate_m_expression_policy(expression, allow_external=os.environ.get("PBI_MCP_ALLOW_EXTERNAL_M", "0") == "1")
@@ -36,7 +36,7 @@ def _validate_m_expression(expression: str) -> None:
 def _source_type_token(partition: Any) -> str:
     source = getattr(partition, "Source", None)
     source_name = type(source).__name__ if source is not None else ""
-    raw = str(getattr(partition, "SourceType") or "") if hasattr(partition, "SourceType") else ""
+    raw = str(partition.SourceType or "") if hasattr(partition, "SourceType") else ""
     token = normalize_token(source_name or raw)
     if token in {"m", "none", "query", "entity", "calculated", "calculationgroup"}:
         return {
@@ -71,7 +71,7 @@ def _partition_expression(partition: Any) -> str:
         if hasattr(source, "Expression"):
             return str(source.Expression or "")
     if hasattr(partition, "Expression"):
-        return str(getattr(partition, "Expression") or "")
+        return str(partition.Expression or "")
     return ""
 
 
@@ -179,7 +179,7 @@ def _build_excel_m(excel_path: str, sheet_name: str, promote_headers: bool = Tru
     final_step = "Promoted" if promote_headers else "Sheet"
     steps = [
         f"    Source = Excel.Workbook(File.Contents({_m_string(excel_path)}), null, true)",
-        f"    Sheet = Source{{[Item={_m_string(sheet_name)},Kind=\"Sheet\"]}}[Data]",
+        f'    Sheet = Source{{[Item={_m_string(sheet_name)},Kind="Sheet"]}}[Data]',
     ]
     if promote_headers:
         steps.append("    Promoted = Table.PromoteHeaders(Sheet, [PromoteAllScalars=true])")
@@ -456,16 +456,24 @@ def pbi_bulk_import_excel_tool(
         for sheet_name, table_name in mapping.items():
             table = find_named(model.Tables, table_name)
             if sheet_name not in available_sheet_set:
-                results.append({"table": table_name, "sheet": sheet_name, "status": "skipped", "reason": "sheet_not_found"})
+                results.append(
+                    {"table": table_name, "sheet": sheet_name, "status": "skipped", "reason": "sheet_not_found"}
+                )
                 continue
             if table is None:
-                results.append({"table": table_name, "sheet": sheet_name, "status": "skipped", "reason": "table_not_found"})
+                results.append(
+                    {"table": table_name, "sheet": sheet_name, "status": "skipped", "reason": "table_not_found"}
+                )
                 continue
             if bool(getattr(table, "IsHidden", False)):
-                results.append({"table": table_name, "sheet": sheet_name, "status": "skipped", "reason": "table_hidden"})
+                results.append(
+                    {"table": table_name, "sheet": sheet_name, "status": "skipped", "reason": "table_hidden"}
+                )
                 continue
             if int(table.Partitions.Count) == 0:
-                results.append({"table": table_name, "sheet": sheet_name, "status": "skipped", "reason": "no_partitions"})
+                results.append(
+                    {"table": table_name, "sheet": sheet_name, "status": "skipped", "reason": "no_partitions"}
+                )
                 continue
             if int(table.Partitions.Count) > 1:
                 results.append(
@@ -594,8 +602,7 @@ def pbi_parameterize_data_source_tool(
 
     # M parameter expression: literal string + meta record marking it as a parameter.
     parameter_expression = (
-        f'"{canonical_path}" meta [IsParameterQuery=true, '
-        f'Type=type text, IsParameterQueryRequired=true]'
+        f'"{canonical_path}" meta [IsParameterQuery=true, Type=type text, IsParameterQueryRequired=true]'
     )
 
     def _act(state: Any, database: Any, model: Any) -> dict[str, Any]:
@@ -726,7 +733,9 @@ def pbi_relocate_data_source_tool(
     skipped. ``dry_run=True`` returns the planned changes without writing.
     """
     if not old_path or not new_path:
-        raise PowerBIValidationError("old_path and new_path must both be non-empty.", details={"old_path": old_path, "new_path": new_path})
+        raise PowerBIValidationError(
+            "old_path and new_path must both be non-empty.", details={"old_path": old_path, "new_path": new_path}
+        )
     if not dry_run:
         # Only validate that the new path resolves when actually rewriting; allows dry-run from
         # any host and avoids resolving paths that may live outside the allowlist when probing.
@@ -754,6 +763,7 @@ def pbi_relocate_data_source_tool(
                 else:
                     # Preserve original casing of non-matching segments via regex w/ case-insensitive flag.
                     import re
+
                     new_expression = re.sub(re.escape(old_path), lambda _m: new_path, expression, flags=re.IGNORECASE)
                 if new_expression == expression:
                     continue
@@ -762,7 +772,9 @@ def pbi_relocate_data_source_tool(
                     "partition": str(partition.Name),
                     "previous_expression_length": len(expression),
                     "expression_length": len(new_expression),
-                    "occurrences": expression.count(old_path) if case_sensitive else len(re.findall(re.escape(old_path), expression, flags=re.IGNORECASE)),
+                    "occurrences": expression.count(old_path)
+                    if case_sensitive
+                    else len(re.findall(re.escape(old_path), expression, flags=re.IGNORECASE)),
                     "preview_before": redact_sensitive_data(expression[:200]),
                     "preview_after": redact_sensitive_data(new_expression[:200]),
                 }
@@ -797,7 +809,9 @@ def pbi_relocate_data_source_tool(
         }
 
     if dry_run:
-        payload = manager.run_read("relocate_data_source_dry", lambda state: _act(state, state.database, state.database.Model))
+        payload = manager.run_read(
+            "relocate_data_source_dry", lambda state: _act(state, state.database, state.database.Model)
+        )
         return ok(
             f"Dry run: {payload['match_count']} partitions would be rewritten.",
             **payload,

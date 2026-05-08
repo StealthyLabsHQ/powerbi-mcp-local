@@ -6,9 +6,17 @@ venv/
 .venv/
 dist/
 *.egg-info/
-tests/
 .pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+.ruff_cache/
 tools-bin/
 tmp_*/
 build/
 REMNANT.md
+
+# Live-only test scripts that need Power BI Desktop running.
+tests/demo_*.py
+tests/smoke_e2e.py
+tests/test_*_local.py

@@ -7,9 +7,10 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from ._base import (
     DEFAULT_PAGE_HEIGHT,
@@ -18,7 +19,6 @@ from ._base import (
     ReportLayoutError,
 )
 from ._paths import _layout_path, _resolve_extract_folder
-
 
 logger = logging.getLogger("tools.visuals._layout")
 
@@ -29,13 +29,19 @@ def _load_layout(extract_folder: str | Path) -> tuple[Path, dict[str, Any]]:
         raise ReportLayoutError("Extract folder does not exist or is not a directory.", details={"path": str(folder)})
     layout_path = _layout_path(folder)
     if not layout_path.exists():
-        raise ReportLayoutError("Report/Layout file was not found in the extract folder.", details={"path": str(layout_path)})
+        raise ReportLayoutError(
+            "Report/Layout file was not found in the extract folder.", details={"path": str(layout_path)}
+        )
     try:
         layout = json.loads(layout_path.read_text(encoding="utf-16-le"))
     except UnicodeDecodeError as exc:
-        raise ReportLayoutError("Report/Layout could not be decoded as UTF-16-LE.", details={"path": str(layout_path)}) from exc
+        raise ReportLayoutError(
+            "Report/Layout could not be decoded as UTF-16-LE.", details={"path": str(layout_path)}
+        ) from exc
     except json.JSONDecodeError as exc:
-        raise ReportLayoutError("Report/Layout is not valid JSON.", details={"path": str(layout_path), "line": exc.lineno}) from exc
+        raise ReportLayoutError(
+            "Report/Layout is not valid JSON.", details={"path": str(layout_path), "line": exc.lineno}
+        ) from exc
     if not isinstance(layout, dict):
         raise ReportLayoutError("Report/Layout root must be a JSON object.", details={"path": str(layout_path)})
     layout.setdefault("sections", [])
@@ -54,11 +60,13 @@ def _record_dry_run_write(folder: Path, layout: dict[str, Any]) -> None:
     if log is None:
         return
     sections = layout.get("sections", []) or []
-    log.append({
-        "folder": str(folder),
-        "section_count": len(sections),
-        "visual_count": sum(len(s.get("visualContainers", []) or []) for s in sections if isinstance(s, dict)),
-    })
+    log.append(
+        {
+            "folder": str(folder),
+            "section_count": len(sections),
+            "visual_count": sum(len(s.get("visualContainers", []) or []) for s in sections if isinstance(s, dict)),
+        }
+    )
 
 
 @contextmanager
@@ -153,7 +161,12 @@ def _find_page(layout: dict[str, Any], page: str) -> dict[str, Any]:
             return section
     raise PageNotFoundError(
         f"Page '{page}' was not found.",
-        details={"page": page, "available_pages": [str(item.get("displayName") or item.get("name")) for item in layout.get("sections", [])]},
+        details={
+            "page": page,
+            "available_pages": [
+                str(item.get("displayName") or item.get("name")) for item in layout.get("sections", [])
+            ],
+        },
     )
 
 

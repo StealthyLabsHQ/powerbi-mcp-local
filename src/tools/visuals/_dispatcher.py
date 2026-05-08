@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from pbi_connection import PowerBIValidationError
 
@@ -25,7 +26,6 @@ from ._structure import (
     pbi_add_slicer_tool,
     pbi_add_table_visual_tool,
 )
-
 
 _VISUAL_TYPE_DISPATCH: dict[str, Callable[..., dict[str, Any]]] = {}
 
@@ -98,7 +98,9 @@ def _dispatch_bar(extract, page, x, y, w, h, title, cfg):
             "bar_chart requires config.category_column and config.value_measure",
             details={"visual_type": "bar_chart"},
         )
-    return pbi_add_bar_chart_tool(extract, page, cat, value, x, y, w, h, title, cfg.get("legend_column"), manager=cfg.get("__manager__"))
+    return pbi_add_bar_chart_tool(
+        extract, page, cat, value, x, y, w, h, title, cfg.get("legend_column"), manager=cfg.get("__manager__")
+    )
 
 
 def _dispatch_line(extract, page, x, y, w, h, title, cfg):
@@ -145,7 +147,9 @@ def _dispatch_slicer(extract, page, x, y, w, h, title, cfg):
     column = cfg.get("column")
     if not column:
         raise PowerBIValidationError("slicer requires config.column", details={"visual_type": "slicer"})
-    return pbi_add_slicer_tool(extract, page, column, x, y, w, h, cfg.get("slicer_type", "dropdown"), manager=cfg.get("__manager__"))
+    return pbi_add_slicer_tool(
+        extract, page, column, x, y, w, h, cfg.get("slicer_type", "dropdown"), manager=cfg.get("__manager__")
+    )
 
 
 def _dispatch_gauge(extract, page, x, y, w, h, title, cfg):
@@ -226,18 +230,20 @@ def _dispatch_text_box(extract, page, x, y, w, h, title, cfg):
     )
 
 
-_VISUAL_TYPE_DISPATCH.update({
-    "card": _dispatch_card,
-    "labelled_card": _dispatch_labelled_card,
-    "labeled_card": _dispatch_labelled_card,
-    "bar_chart": _dispatch_bar,
-    "line_chart": _dispatch_line,
-    "donut": _dispatch_donut,
-    "table": _dispatch_table,
-    "waterfall": _dispatch_waterfall,
-    "slicer": _dispatch_slicer,
-    "gauge": _dispatch_gauge,
-    "map": _dispatch_map,
-    "text_box": _dispatch_text_box,
-    "textbox": _dispatch_text_box,
-})
+_VISUAL_TYPE_DISPATCH.update(
+    {
+        "card": _dispatch_card,
+        "labelled_card": _dispatch_labelled_card,
+        "labeled_card": _dispatch_labelled_card,
+        "bar_chart": _dispatch_bar,
+        "line_chart": _dispatch_line,
+        "donut": _dispatch_donut,
+        "table": _dispatch_table,
+        "waterfall": _dispatch_waterfall,
+        "slicer": _dispatch_slicer,
+        "gauge": _dispatch_gauge,
+        "map": _dispatch_map,
+        "text_box": _dispatch_text_box,
+        "textbox": _dispatch_text_box,
+    }
+)

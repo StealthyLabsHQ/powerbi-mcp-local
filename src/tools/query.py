@@ -25,7 +25,6 @@ from security import (
     validate_query_text,
 )
 
-
 # ── DAX safety ───────────────────────────────────────────────────────
 
 # DMV queries that expose server internals — blocked by default
@@ -36,6 +35,7 @@ _DMV_BLOCKED_PATTERNS = [
     re.compile(r"MDSCHEMA_", re.IGNORECASE),
 ]
 
+
 def _validate_dax_query(query: str) -> None:
     """Block dangerous DMV/system queries unless explicitly allowed."""
     validate_query_text(query, max_length=SECURITY.policy().max_query_length)
@@ -45,9 +45,7 @@ def _validate_dax_query(query: str) -> None:
     for pattern in _DMV_BLOCKED_PATTERNS:
         if pattern.search(stripped):
             raise PowerBIValidationError(
-                f"DMV/system query blocked for security. "
-                f"Set PBI_MCP_ALLOW_DMV=1 to allow. "
-                f"Matched: {pattern.pattern}",
+                f"DMV/system query blocked for security. Set PBI_MCP_ALLOW_DMV=1 to allow. Matched: {pattern.pattern}",
                 details={"pattern": pattern.pattern},
             )
 
@@ -138,7 +136,9 @@ def _probe_se_calls(manager: Any) -> int | None:
         pass
 
     try:
-        fallback = manager.run_adomd_query("SELECT * FROM $System.Discover_Storage_Table_Relationships", max_rows=SECURITY.policy().max_rows_for_dax)
+        fallback = manager.run_adomd_query(
+            "SELECT * FROM $System.Discover_Storage_Table_Relationships", max_rows=SECURITY.policy().max_rows_for_dax
+        )
         return _to_optional_int(fallback.get("row_count"))
     except Exception:
         return None
@@ -204,7 +204,9 @@ def pbi_execute_dax_as_role_tool(
         except Exception as exc:
             message = flatten_exception_message(exc)
             lowered = message.casefold()
-            if "role" in lowered and any(token in lowered for token in ("not found", "does not exist", "cannot find", "unknown")):
+            if "role" in lowered and any(
+                token in lowered for token in ("not found", "does not exist", "cannot find", "unknown")
+            ):
                 raise RoleNotFoundError(
                     f"Role '{role}' was not found in the current model.",
                     details={"role": role, "reason": message},
@@ -308,9 +310,7 @@ def pbi_validate_dax_tool(
     validate_query_text(expression, max_length=policy.max_query_length)
     normalized_kind = kind.strip().casefold()
     if normalized_kind not in {"scalar", "table"}:
-        raise PowerBIValidationError(
-            "kind must be 'scalar' or 'table'.", details={"kind": kind}
-        )
+        raise PowerBIValidationError("kind must be 'scalar' or 'table'.", details={"kind": kind})
 
     if normalized_kind == "scalar":
         probe = f'EVALUATE ROW("__probe", {expression})'
@@ -395,9 +395,10 @@ def pbi_validate_dax_semantic_tool(
     # Lazy import to avoid circulars: the field-index helper lives in tools.visuals.
     try:
         from .visuals import _live_model_field_index
+
         index, status = _live_model_field_index(manager, include_hidden=include_hidden)
     except Exception as exc:  # pragma: no cover
-        index, status = None, {"status": "unavailable", "error": flatten_exception_message(exc)}
+        index, _status = None, {"status": "unavailable", "error": flatten_exception_message(exc)}
     if index is not None:
         semantic_status = "checked"
         for table, column in sorted(columns_seen):
@@ -423,22 +424,25 @@ def pbi_validate_dax_semantic_tool(
         looks_percent = "%" in format_string and ("0%" in format_string or "0.0" in format_string)
         # Very rough scalar-money heuristic: SUM/SUMX over a non-percent column.
         looks_money = bool(
-            re.search(r"\b(SUM|SUMX|TOTAL|REVENUE|SALES)\b", expression, re.IGNORECASE)
-            and "%" not in expression
+            re.search(r"\b(SUM|SUMX|TOTAL|REVENUE|SALES)\b", expression, re.IGNORECASE) and "%" not in expression
         )
         if looks_percent and looks_money:
-            suspicious_format.append({
-                "format_string": format_string,
-                "reason": "percent format on a likely scalar-money expression",
-            })
+            suspicious_format.append(
+                {
+                    "format_string": format_string,
+                    "reason": "percent format on a likely scalar-money expression",
+                }
+            )
         # Currency-shape heuristic: percent expression but currency format.
         if not looks_percent and ("€" in format_string or "$" in format_string):
             if "DIVIDE" in expression.upper() and "%" not in fmt_lower:
                 # DIVIDE often produces ratios — currency on a ratio is suspicious.
-                suspicious_format.append({
-                    "format_string": format_string,
-                    "reason": "currency format on a DIVIDE expression that often returns a ratio",
-                })
+                suspicious_format.append(
+                    {
+                        "format_string": format_string,
+                        "reason": "currency format on a DIVIDE expression that often returns a ratio",
+                    }
+                )
 
     # --- Layer 3: runtime probe (delegates to existing tool) ---
     runtime = pbi_validate_dax_tool(manager, expression=expression, kind=kind)
@@ -446,9 +450,7 @@ def pbi_validate_dax_semantic_tool(
 
     valid = bool(runtime.get("valid")) and not unknown_references
     return ok(
-        "DAX semantic validation completed."
-        if valid
-        else "DAX semantic validation found at least one issue.",
+        "DAX semantic validation completed." if valid else "DAX semantic validation found at least one issue.",
         valid=valid,
         kind=runtime.get("kind", kind),
         syntax=syntax,
@@ -480,6 +482,7 @@ def pbi_measure_dependencies_tool(
 
     rows = result.get("rows", [])
     if measure is not None or table is not None:
+
         def _match(row: dict[str, Any]) -> bool:
             name_match = True
             table_match = True

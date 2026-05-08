@@ -9,12 +9,20 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from pbi_connection import PowerBIValidationError
-from security import SECURITY, SecurityManager, SecurityPolicyError, inspect_excel_archive, resolve_local_path, validate_measure_name
+from security import (
+    SECURITY,
+    SecurityManager,
+    SecurityPolicyError,
+    inspect_excel_archive,
+    resolve_local_path,
+    validate_measure_name,
+)
 from tools.model import pbi_export_model_tool
 from tools.power_query import _validate_m_expression
 from tools.query import _validate_dax_query
@@ -82,7 +90,7 @@ class SecurityTests(unittest.TestCase):
                 _validate_m_expression('let Source = Web.Contents("https://example.com") in Source')
 
     def test_measure_name_injection_rejected(self) -> None:
-        for name in ('Bad[Measure]', 'Bad"Measure', "Bad'Measure", "Bad\nMeasure"):
+        for name in ("Bad[Measure]", 'Bad"Measure', "Bad'Measure", "Bad\nMeasure"):
             with self.subTest(name=name):
                 with self.assertRaises(SecurityPolicyError):
                     validate_measure_name(name)
@@ -105,7 +113,7 @@ class SecurityTests(unittest.TestCase):
                     "columns": [
                         {
                             "name": "Conn",
-                            "expression": 'Provider=SQLNCLI11;Server=demo;Password=hunter2;User Id=sa',
+                            "expression": "Provider=SQLNCLI11;Server=demo;Password=hunter2;User Id=sa",
                         }
                     ],
                 }
@@ -247,6 +255,7 @@ class OperationHistoryTests(unittest.TestCase):
 
     def test_ring_buffer_records_read_and_write(self) -> None:
         from pbi_connection import PowerBIConnectionManager
+
         m = PowerBIConnectionManager()
         # Direct record (no live PBI needed) — the helper is the only thing under test.
         m._record_operation(op="read_one", kind="read", started=0.0, ok_=True)
@@ -262,6 +271,7 @@ class OperationHistoryTests(unittest.TestCase):
 
     def test_ring_buffer_capacity_50(self) -> None:
         from pbi_connection import PowerBIConnectionManager
+
         m = PowerBIConnectionManager()
         for i in range(60):
             m._record_operation(op=f"op_{i}", kind="read", started=0.0, ok_=True)
@@ -279,11 +289,14 @@ class SystemHealthTests(unittest.TestCase):
     def test_snapshot_when_disconnected(self) -> None:
         from pbi_connection import PowerBIConnectionManager
         from tools.model import pbi_system_health_tool
+
         m = PowerBIConnectionManager()
         result = pbi_system_health_tool(m)
         self.assertTrue(result["ok"], result)
         self.assertFalse(result["connected"])
-        self.assertIsNone(result["model_loaded"]) if result.get("model_loaded") is None else self.assertFalse(result["model_loaded"])
+        self.assertIsNone(result["model_loaded"]) if result.get("model_loaded") is None else self.assertFalse(
+            result["model_loaded"]
+        )
         self.assertIn("dependencies", result)
         # mcp dependency at minimum should be available since this is an MCP server repo.
         self.assertIn("mcp", result["dependencies"])
@@ -294,6 +307,7 @@ class TimeIntelligenceTemplateTests(unittest.TestCase):
 
     def test_dependency_expansion(self) -> None:
         from tools.measures import _resolve_ti_patterns
+
         # Requesting YOY% pulls YOY and SPY in front of it.
         resolved = _resolve_ti_patterns(["YOY%"])
         self.assertEqual(resolved, ["SPY", "YOY", "YOY%"])
@@ -301,13 +315,16 @@ class TimeIntelligenceTemplateTests(unittest.TestCase):
     def test_unknown_pattern_raises(self) -> None:
         from pbi_connection import PowerBIValidationError
         from tools.measures import _resolve_ti_patterns
+
         with self.assertRaises(PowerBIValidationError):
             _resolve_ti_patterns(["fOO"])
 
     def test_template_renders(self) -> None:
         from tools.measures import _TIME_INTELLIGENCE_TEMPLATES
+
         rendered = _TIME_INTELLIGENCE_TEMPLATES["YTD"]["template"].format(
-            base="Sales", date_ref="'Date'[Date]",
+            base="Sales",
+            date_ref="'Date'[Date]",
         )
         # Table name now quoted so reserved-word collisions (Date, Time…) work.
         self.assertEqual(rendered, "CALCULATE([Sales], DATESYTD('Date'[Date]))")
@@ -317,8 +334,9 @@ class DAXSemanticReferenceParserTests(unittest.TestCase):
     """Reference scanner inside pbi_validate_dax_semantic_tool finds the right tokens."""
 
     def test_extracts_columns_and_measures(self) -> None:
-        from tools.query import _DAX_TABLE_COLUMN_RE, _DAX_MEASURE_REF_RE
-        expr = 'CALCULATE([Sales], Date[Year] = 2024) - [Sales SPY]'
+        from tools.query import _DAX_MEASURE_REF_RE, _DAX_TABLE_COLUMN_RE
+
+        expr = "CALCULATE([Sales], Date[Year] = 2024) - [Sales SPY]"
         cols = {(m.group("table"), m.group("column")) for m in _DAX_TABLE_COLUMN_RE.finditer(expr)}
         self.assertEqual(cols, {("Date", "Year")})
         # Strip column refs first to isolate bare measures.
@@ -333,9 +351,9 @@ class V010MatskiBugfixTests(unittest.TestCase):
     # --- Bug 1: pbi_extract_report falls back to ZIP when pbi-tools.core lacks 'extract' ---
     def test_extract_report_falls_back_to_zip_when_cli_unavailable(self) -> None:
         from tools.visuals import (
+            LAYOUT_RELATIVE_PATH,
             VisualToolError,
             pbi_extract_report_tool,
-            LAYOUT_RELATIVE_PATH,
         )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -396,6 +414,7 @@ class V010MatskiBugfixTests(unittest.TestCase):
     # --- Bug 4: visuals carry the right home table when manager is supplied ---
     def test_resolve_measure_home_map_pulls_live_model(self) -> None:
         from types import SimpleNamespace
+
         from tools.visuals import _augment_measure_home_map_with_live
 
         with patch(
@@ -430,7 +449,9 @@ class V010MatskiBugfixTests(unittest.TestCase):
         non_blank_zero = [0, 0.0]
         non_blank_mixed = [0, "0 K €"]
 
-        all_numeric = lambda values: all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values)
+        def all_numeric(values):
+            return all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values)
+
         # The triggering condition (post-fix):
         def should_flag(values):
             return all_numeric(values) and all(float(v) == 0 for v in values)
@@ -485,12 +506,26 @@ class V010MatskiBugfixTests(unittest.TestCase):
                             "height": 720,
                             "visualContainers": [
                                 {
-                                    "x": 10, "y": 10, "z": 0, "width": 50, "height": 30,
-                                    "config": json.dumps({
-                                        "name": "v1",
-                                        "singleVisual": {"visualType": "card", "objects": {}, "projections": {"Values": [{"queryRef": "X"}]}, "prototypeQuery": {"Version": 2, "From": [], "Select": []}},
-                                        "layouts": [{"id": 0, "position": {"x": 10, "y": 10, "width": 50, "height": 30}}],
-                                    }, ensure_ascii=False),
+                                    "x": 10,
+                                    "y": 10,
+                                    "z": 0,
+                                    "width": 50,
+                                    "height": 30,
+                                    "config": json.dumps(
+                                        {
+                                            "name": "v1",
+                                            "singleVisual": {
+                                                "visualType": "card",
+                                                "objects": {},
+                                                "projections": {"Values": [{"queryRef": "X"}]},
+                                                "prototypeQuery": {"Version": 2, "From": [], "Select": []},
+                                            },
+                                            "layouts": [
+                                                {"id": 0, "position": {"x": 10, "y": 10, "width": 50, "height": 30}}
+                                            ],
+                                        },
+                                        ensure_ascii=False,
+                                    ),
                                     "filters": "[]",
                                     "query": "{}",
                                     "dataTransforms": "{}",
@@ -512,7 +547,8 @@ class V010MatskiBugfixTests(unittest.TestCase):
                 extract = root / "extract"
                 (extract / "Report").mkdir(parents=True)
                 (extract / "Report" / "Layout").write_text(
-                    json.dumps(layout, ensure_ascii=False, indent=2), encoding="utf-16-le",
+                    json.dumps(layout, ensure_ascii=False, indent=2),
+                    encoding="utf-16-le",
                 )
 
                 # Without filters → both warnings present on the Crowded page.
@@ -561,7 +597,12 @@ class V0102TestReportFollowupTests(unittest.TestCase):
         # the runtime probe; we mock both the live index and the probe so the
         # tool runs end-to-end against a virtual model.
         fake_manager = SimpleNamespace()
-        fake_manager.run_adomd_query = lambda query, **kw: {"rows": [{"__probe": 1}], "columns": [], "row_count": 1, "truncated": False}
+        fake_manager.run_adomd_query = lambda query, **kw: {
+            "rows": [{"__probe": 1}],
+            "columns": [],
+            "row_count": 1,
+            "truncated": False,
+        }
         with patch("tools.visuals._live_model_field_index", return_value=(fake_index, {"status": "available"})):
             result = pbi_validate_dax_semantic_tool(
                 fake_manager,
@@ -581,7 +622,8 @@ class V0102TestReportFollowupTests(unittest.TestCase):
         date_ref = _dax_column_ref("Date", "Date")
         self.assertEqual(date_ref, "'Date'[Date]")
         rendered = _TIME_INTELLIGENCE_TEMPLATES["SPY"]["template"].format(
-            base="Sales", date_ref=date_ref,
+            base="Sales",
+            date_ref=date_ref,
         )
         # Quoted form means DAX won't confuse the table with the DATE() function.
         self.assertEqual(rendered, "CALCULATE([Sales], SAMEPERIODLASTYEAR('Date'[Date]))")
@@ -651,10 +693,15 @@ class V0102TestReportFollowupTests(unittest.TestCase):
                     extract = root / "extract"
                     (extract / "Report").mkdir(parents=True)
                     (extract / "Report" / "Layout").write_text(
-                        '{"sections":[]}', encoding="utf-16-le",
+                        '{"sections":[]}',
+                        encoding="utf-16-le",
                     )
                     pbi_add_visual_tool(
-                        str(extract), "page", "__test_dispatch__", 0, 0,
+                        str(extract),
+                        "page",
+                        "__test_dispatch__",
+                        0,
+                        0,
                         manager=sentinel,
                     )
                 finally:

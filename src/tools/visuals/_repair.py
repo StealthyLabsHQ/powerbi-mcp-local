@@ -13,6 +13,7 @@ from ._layout import _load_layout, _save_layout
 
 def _run(callback):
     from pbi_connection import error_payload
+
     try:
         return callback()
     except Exception as exc:
@@ -60,15 +61,32 @@ def pbi_repair_report_fields_tool(
         measure_home_map = _scan_measure_home_tables(folder)
         model_fields, model_validation = _live_model_field_index(manager, include_hidden=include_hidden)
         issues, repairs = _scan_visual_bindings(layout, measure_home_map, model_fields, page=page, repair=apply)
-        planned_repairs = repairs if apply else sum(
-            1
-            for item in issues
-            if item.get("issue") in {"query_ref_mismatch", "measure_home_table_needs_repair"}
-            or (item.get("issue") == "unexpected_projection_role" and item.get("visual_type") == "gauge" and item.get("role") == "Value")
+        planned_repairs = (
+            repairs
+            if apply
+            else sum(
+                1
+                for item in issues
+                if item.get("issue") in {"query_ref_mismatch", "measure_home_table_needs_repair"}
+                or (
+                    item.get("issue") == "unexpected_projection_role"
+                    and item.get("visual_type") == "gauge"
+                    and item.get("role") == "Value"
+                )
+            )
         )
         unresolved = [
-            item for item in issues
-            if item.get("issue") in {"query_ref_not_found", "unexpected_projection_role", "measure_home_table_unknown", "column_not_found", "measure_not_found", "measure_table_mismatch"}
+            item
+            for item in issues
+            if item.get("issue")
+            in {
+                "query_ref_not_found",
+                "unexpected_projection_role",
+                "measure_home_table_unknown",
+                "column_not_found",
+                "measure_not_found",
+                "measure_table_mismatch",
+            }
             and not (item.get("visual_type") == "gauge" and item.get("role") == "Value")
         ]
         persistence_risks = _persistence_risks(issues)

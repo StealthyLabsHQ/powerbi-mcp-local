@@ -494,6 +494,7 @@ def pbi_create_measures_tool(
 # Time intelligence templates
 # ---------------------------------------------------------------------------
 
+
 def _dax_table_ref(table: str) -> str:
     """Quote a DAX table reference with single quotes.
 
@@ -549,11 +550,7 @@ _TIME_INTELLIGENCE_TEMPLATES: dict[str, dict[str, str]] = {
     },
     "MA3": {
         "suffix": "MA3",
-        "template": (
-            "AVERAGEX("
-            "DATESINPERIOD({date_ref}, LASTDATE({date_ref}), -3, MONTH),"
-            " [{base}])"
-        ),
+        "template": ("AVERAGEX(DATESINPERIOD({date_ref}, LASTDATE({date_ref}), -3, MONTH), [{base}])"),
         "description": "Trailing 3-month moving average of [{base}].",
     },
 }
@@ -583,6 +580,7 @@ def _resolve_ti_patterns(patterns: list[str] | None) -> list[str]:
     # when missing so a single "create YOY%" call still works.
     expanded: list[str] = []
     expanded_set: set[str] = set()
+
     def _visit(token: str) -> None:
         if token in expanded_set:
             return
@@ -590,6 +588,7 @@ def _resolve_ti_patterns(patterns: list[str] | None) -> list[str]:
             _visit(dep)
         expanded.append(token)
         expanded_set.add(token)
+
     for token in resolved:
         _visit(token)
     return expanded
@@ -642,6 +641,7 @@ def pbi_create_time_intelligence_pack_tool(
             if existing is None:
                 return None
             return str(getattr(existing, "FormatString", "") or "") or None
+
         try:
             inherited_format = manager.run_read("ti_pack_inherit_format", _reader)
         except Exception:
@@ -657,11 +657,7 @@ def pbi_create_time_intelligence_pack_tool(
             base=base_measure,
             date_ref=_dax_column_ref(date_table, date_column),
         )
-        chosen_format = (
-            format_string
-            or tmpl.get("format_hint")
-            or (inherited_format or "")
-        )
+        chosen_format = format_string or tmpl.get("format_hint") or (inherited_format or "")
         spec = {
             "name": new_name,
             "expression": expression,
@@ -732,9 +728,14 @@ def pbi_create_ytd_measure_tool(
 ) -> dict[str, Any]:
     """Create just the YTD companion of ``base_measure``."""
     return _create_ti_single(
-        manager, pattern="YTD", table=table, base_measure=base_measure,
-        date_table=date_table, date_column=date_column,
-        format_string=format_string, overwrite=overwrite,
+        manager,
+        pattern="YTD",
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        format_string=format_string,
+        overwrite=overwrite,
     )
 
 
@@ -750,9 +751,14 @@ def pbi_create_mtd_measure_tool(
 ) -> dict[str, Any]:
     """Create just the MTD companion of ``base_measure``."""
     return _create_ti_single(
-        manager, pattern="MTD", table=table, base_measure=base_measure,
-        date_table=date_table, date_column=date_column,
-        format_string=format_string, overwrite=overwrite,
+        manager,
+        pattern="MTD",
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        format_string=format_string,
+        overwrite=overwrite,
     )
 
 
@@ -768,9 +774,14 @@ def pbi_create_spy_measure_tool(
 ) -> dict[str, Any]:
     """Create the Same-Period-Last-Year companion of ``base_measure``."""
     return _create_ti_single(
-        manager, pattern="SPY", table=table, base_measure=base_measure,
-        date_table=date_table, date_column=date_column,
-        format_string=format_string, overwrite=overwrite,
+        manager,
+        pattern="SPY",
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        format_string=format_string,
+        overwrite=overwrite,
     )
 
 
@@ -790,9 +801,14 @@ def pbi_create_yoy_measure_tool(
     ``overwrite=True``).
     """
     return _create_ti_single(
-        manager, pattern="YOY", table=table, base_measure=base_measure,
-        date_table=date_table, date_column=date_column,
-        format_string=format_string, overwrite=overwrite,
+        manager,
+        pattern="YOY",
+        table=table,
+        base_measure=base_measure,
+        date_table=date_table,
+        date_column=date_column,
+        format_string=format_string,
+        overwrite=overwrite,
     )
 
 

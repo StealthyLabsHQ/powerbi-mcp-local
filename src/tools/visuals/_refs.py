@@ -7,7 +7,6 @@ import re
 
 from pbi_connection import PowerBIValidationError
 
-
 # Match the standard Power BI bracket forms: Table[Column] or 'Table With Spaces'[Column].
 _BRACKET_REF_RE = re.compile(r"^\s*'?(?P<table>[^'\[\]]+?)'?\s*\[\s*(?P<column>[^\[\]]+?)\s*\]\s*$")
 

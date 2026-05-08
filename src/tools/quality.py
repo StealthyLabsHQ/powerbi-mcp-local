@@ -13,7 +13,6 @@ from typing import Any
 from pbi_connection import PowerBIValidationError, dax_quote_table_name, ok
 from security import resolve_local_path
 
-
 LAYOUT_RELATIVE_PATH = Path("Report") / "Layout"
 MIN_VISUAL_WIDTH = 120
 MIN_VISUAL_HEIGHT = 80
@@ -56,7 +55,7 @@ def _visual_type(container: dict[str, Any]) -> str:
 
 
 def _visual_has_title(container: dict[str, Any]) -> bool:
-    single = (_visual_config(container).get("singleVisual") or {})
+    single = _visual_config(container).get("singleVisual") or {}
     objects = single.get("objects") or {}
     title = objects.get("title") or []
     return bool(title)
@@ -231,7 +230,9 @@ def _duplicate_relationship_key_issues(manager: Any, relationships: list[dict[st
         try:
             result = manager.run_adomd_query(query, max_rows=1)
         except Exception as exc:
-            issues.append({"type": "relationship_key_check_failed", "table": table, "column": column, "error": str(exc)})
+            issues.append(
+                {"type": "relationship_key_check_failed", "table": table, "column": column, "error": str(exc)}
+            )
             continue
         rows = result.get("rows", [])
         if not rows:
@@ -271,7 +272,9 @@ def pbi_audit_model_tool(manager: Any, *, include_hidden: bool = False) -> dict[
     )
 
 
-def pbi_lint_dax_tool(manager: Any, *, include_hidden: bool = False, validate_expressions: bool = True) -> dict[str, Any]:
+def pbi_lint_dax_tool(
+    manager: Any, *, include_hidden: bool = False, validate_expressions: bool = True
+) -> dict[str, Any]:
     """Validate measures, formats, and measure/column name collisions."""
     from .query import pbi_validate_dax_tool
 
@@ -296,7 +299,9 @@ def pbi_lint_dax_tool(manager: Any, *, include_hidden: bool = False, validate_ex
         if validate_expressions and expression:
             result = pbi_validate_dax_tool(manager, expression=f"[{name}]", kind="scalar")
             if not result.get("valid"):
-                issues.append({"type": "invalid_measure_dax", "table": table, "measure": name, "error": result.get("error")})
+                issues.append(
+                    {"type": "invalid_measure_dax", "table": table, "measure": name, "error": result.get("error")}
+                )
 
     return ok(
         f"DAX lint found {len(issues)} issue(s), {len(warnings)} warning(s).",
@@ -327,9 +332,11 @@ def pbi_detect_name_collisions_tool(manager: Any, *, include_hidden: bool = Fals
             column_name = str(column.get("name", ""))
             local_columns.setdefault(column_name.casefold(), []).append(column_name)
             global_columns.setdefault(column_name.casefold(), []).append({"table": table_name, "column": column_name})
-        for key, names in local_columns.items():
+        for _key, names in local_columns.items():
             if len(names) > 1:
-                issues.append({"type": "duplicate_column_name", "table": table_name, "name": names[0], "count": len(names)})
+                issues.append(
+                    {"type": "duplicate_column_name", "table": table_name, "name": names[0], "count": len(names)}
+                )
 
     for measure in snapshot.get("measures", []):
         table = str(measure.get("table", ""))
@@ -344,15 +351,23 @@ def pbi_detect_name_collisions_tool(manager: Any, *, include_hidden: bool = Fals
             warnings.append({"type": "duplicate_measure_name", "name": measures[0]["measure"], "measures": measures})
         for measure in measures:
             same_table_columns = [
-                item for item in global_columns.get(name, [])
-                if item["table"].casefold() == measure["table"].casefold()
+                item for item in global_columns.get(name, []) if item["table"].casefold() == measure["table"].casefold()
             ]
             if same_table_columns:
-                issues.append({"type": "measure_column_name_collision", "table": measure["table"], "measure": measure["measure"], "columns": same_table_columns})
+                issues.append(
+                    {
+                        "type": "measure_column_name_collision",
+                        "table": measure["table"],
+                        "measure": measure["measure"],
+                        "columns": same_table_columns,
+                    }
+                )
     for name, columns in global_columns.items():
         tables = {item["table"].casefold() for item in columns}
         if len(tables) > 1:
-            warnings.append({"type": "same_column_name_across_tables", "name": columns[0]["column"], "columns": columns})
+            warnings.append(
+                {"type": "same_column_name_across_tables", "name": columns[0]["column"], "columns": columns}
+            )
 
     return ok(
         f"Name collision scan found {len(issues)} issue(s), {len(warnings)} warning(s).",
@@ -378,7 +393,10 @@ def pbi_detect_dirty_dates_tool(
     if max_samples < 1 or max_samples > 1000:
         raise PowerBIValidationError("max_samples must be between 1 and 1000.", details={"max_samples": max_samples})
     if not 0 <= min_parse_success_rate <= 1:
-        raise PowerBIValidationError("min_parse_success_rate must be between 0 and 1.", details={"min_parse_success_rate": min_parse_success_rate})
+        raise PowerBIValidationError(
+            "min_parse_success_rate must be between 0 and 1.",
+            details={"min_parse_success_rate": min_parse_success_rate},
+        )
 
     tables = snapshot.get("tables", [])
     if table:
@@ -413,7 +431,9 @@ def pbi_detect_dirty_dates_tool(
             try:
                 result = manager.run_adomd_query(query, max_rows=max_samples)
             except Exception as exc:
-                issues.append({"type": "dirty_date_scan_failed", "table": table_name, "column": column_name, "error": str(exc)})
+                issues.append(
+                    {"type": "dirty_date_scan_failed", "table": table_name, "column": column_name, "error": str(exc)}
+                )
                 continue
             values = [str(_row_value(row, "__Value") or "").strip() for row in result.get("rows", [])]
             non_blank = [value for value in values if value]
@@ -530,7 +550,9 @@ def pbi_validate_relationship_plan_tool(
     if normalized_cardinality in {"onetomany", "manytoone"} and not (from_unique or to_unique):
         issues.append({"type": "no_unique_relationship_side", "from_profile": from_profile, "to_profile": to_profile})
     if normalized_cardinality == "onetoone" and not (from_unique and to_unique):
-        issues.append({"type": "one_to_one_requires_both_unique", "from_profile": from_profile, "to_profile": to_profile})
+        issues.append(
+            {"type": "one_to_one_requires_both_unique", "from_profile": from_profile, "to_profile": to_profile}
+        )
 
     if is_active:
         graph: dict[str, set[str]] = {}
@@ -618,23 +640,43 @@ def pbi_lint_report_layout_tool(
         height = float(section.get("height", 720) or 720)
         containers = [item for item in section.get("visualContainers", []) if isinstance(item, dict)]
         if len(containers) > visual_threshold:
-            _add_warning({"type": "too_many_visuals", "page": page_name, "count": len(containers), "limit": visual_threshold})
+            _add_warning(
+                {"type": "too_many_visuals", "page": page_name, "count": len(containers), "limit": visual_threshold}
+            )
         used_area = 0.0
         for index, container in enumerate(containers):
             x, y, visual_width, visual_height = _bounds(container)
             name = _visual_name(container) or f"visual_{index}"
             visual_type = _visual_type(container)
             used_area += visual_width * visual_height
-            if visual_type not in {"textbox", "slicer"} and (visual_width < MIN_VISUAL_WIDTH or visual_height < MIN_VISUAL_HEIGHT):
-                _add_warning({"type": "visual_too_small", "page": page_name, "visual": name, "width": visual_width, "height": visual_height})
+            if visual_type not in {"textbox", "slicer"} and (
+                visual_width < MIN_VISUAL_WIDTH or visual_height < MIN_VISUAL_HEIGHT
+            ):
+                _add_warning(
+                    {
+                        "type": "visual_too_small",
+                        "page": page_name,
+                        "visual": name,
+                        "width": visual_width,
+                        "height": visual_height,
+                    }
+                )
             if visual_type not in {"textbox", "slicer"} and not _visual_has_title(container):
                 _add_warning({"type": "missing_title", "page": page_name, "visual": name, "visual_type": visual_type})
             if x < 0 or y < 0 or x + visual_width > width or y + visual_height > height:
                 issues.append({"type": "visual_outside_canvas", "page": page_name, "visual": name})
-            for other in containers[index + 1:]:
+            for other in containers[index + 1 :]:
                 area = _overlap_area(container, other)
                 if area > 1:
-                    issues.append({"type": "visual_overlap", "page": page_name, "visual_a": name, "visual_b": _visual_name(other), "area": round(area, 2)})
+                    issues.append(
+                        {
+                            "type": "visual_overlap",
+                            "page": page_name,
+                            "visual_a": name,
+                            "visual_b": _visual_name(other),
+                            "area": round(area, 2),
+                        }
+                    )
         density = used_area / max(width * height, 1)
         if density < 0.35 and containers:
             _add_warning({"type": "excessive_whitespace", "page": page_name, "density": round(density, 3)})
@@ -687,7 +729,7 @@ def pbi_validate_filter_expression_tool(manager: Any, *, filter_expression: str)
     expression = str(filter_expression or "").strip()
     if not expression:
         raise PowerBIValidationError("filter_expression is required.")
-    query = f"EVALUATE CALCULATETABLE(ROW(\"__probe\", 1), {expression})"
+    query = f'EVALUATE CALCULATETABLE(ROW("__probe", 1), {expression})'
     try:
         manager.run_adomd_query(query, max_rows=1)
     except Exception as exc:
@@ -783,7 +825,14 @@ def pbi_detect_empty_visuals_tool(
             visual_name = _visual_name(container) or f"visual_{index}"
             columns, measures = _visual_query_parts(container)
             if not columns and not measures:
-                warnings.append({"type": "visual_has_no_bindings", "page": page_name, "visual": visual_name, "visual_type": visual_type})
+                warnings.append(
+                    {
+                        "type": "visual_has_no_bindings",
+                        "page": page_name,
+                        "visual": visual_name,
+                        "visual_type": visual_type,
+                    }
+                )
                 continue
             if measures:
                 aliases = _measure_aliases(measures)
@@ -801,33 +850,58 @@ def pbi_detect_empty_visuals_tool(
             try:
                 result = manager.run_adomd_query(query, max_rows=max_rows)
             except Exception as exc:
-                issues.append({"type": "visual_query_failed", "page": page_name, "visual": visual_name, "visual_type": visual_type, "error": str(exc)})
+                issues.append(
+                    {
+                        "type": "visual_query_failed",
+                        "page": page_name,
+                        "visual": visual_name,
+                        "visual_type": visual_type,
+                        "error": str(exc),
+                    }
+                )
                 continue
             rows = result.get("rows", [])
-            checked.append({"page": page_name, "visual": visual_name, "visual_type": visual_type, "row_count": len(rows)})
+            checked.append(
+                {"page": page_name, "visual": visual_name, "visual_type": visual_type, "row_count": len(rows)}
+            )
             if not rows:
-                issues.append({"type": "empty_visual", "page": page_name, "visual": visual_name, "visual_type": visual_type})
+                issues.append(
+                    {"type": "empty_visual", "page": page_name, "visual": visual_name, "visual_type": visual_type}
+                )
                 continue
             if measures:
                 measure_values = [
-                    value
-                    for row in rows
-                    for key, value in row.items()
-                    if str(key).strip("[]").startswith("__M")
+                    value for row in rows for key, value in row.items() if str(key).strip("[]").startswith("__M")
                 ]
                 if measure_values:
                     non_blank = [value for value in measure_values if value is not None]
                     if not non_blank:
-                        warnings.append({"type": "visual_measures_all_blank", "page": page_name, "visual": visual_name, "visual_type": visual_type})
+                        warnings.append(
+                            {
+                                "type": "visual_measures_all_blank",
+                                "page": page_name,
+                                "visual": visual_name,
+                                "visual_type": visual_type,
+                            }
+                        )
                     else:
                         # FIX: don't flag text-returning measures (e.g. FORMAT()) as
                         # "numeric zero". Only emit the warning when ALL non-blank
                         # values are numeric AND all evaluate to 0. Otherwise the
                         # measure returns a non-numeric value (text, date, …) which
                         # is a legitimate non-zero result.
-                        all_numeric = all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in non_blank)
+                        all_numeric = all(
+                            isinstance(value, (int, float)) and not isinstance(value, bool) for value in non_blank
+                        )
                         if all_numeric and all(float(value) == 0 for value in non_blank):
-                            warnings.append({"type": "visual_numeric_measures_all_zero", "page": page_name, "visual": visual_name, "visual_type": visual_type})
+                            warnings.append(
+                                {
+                                    "type": "visual_numeric_measures_all_zero",
+                                    "page": page_name,
+                                    "visual": visual_name,
+                                    "visual_type": visual_type,
+                                }
+                            )
 
     return ok(
         f"Empty visual scan found {len(issues)} issue(s), {len(warnings)} warning(s).",
@@ -863,7 +937,22 @@ def _measure_expected_format(name: str) -> str | None:
         return "number"
     if "%" in name or "rate" in lowered or "retention" in lowered or "win rate" in lowered:
         return "percent"
-    if any(token in lowered for token in ("revenue", "arr", "mrr", "margin", "ltv", "cac", "pipeline", "deal", "spend", "target", "forecast")):
+    if any(
+        token in lowered
+        for token in (
+            "revenue",
+            "arr",
+            "mrr",
+            "margin",
+            "ltv",
+            "cac",
+            "pipeline",
+            "deal",
+            "spend",
+            "target",
+            "forecast",
+        )
+    ):
         return "currency"
     return None
 
@@ -918,7 +1007,14 @@ def pbi_generate_measure_tests_tool(
         if "/" in expression and "DIVIDE(" not in expression.upper():
             warnings.append({"type": "unsafe_division_operator", "measure": name})
         if not _format_matches(format_string, expected_format):
-            warnings.append({"type": "unexpected_measure_format", "measure": name, "format_string": format_string, "expected": expected_format})
+            warnings.append(
+                {
+                    "type": "unexpected_measure_format",
+                    "measure": name,
+                    "format_string": format_string,
+                    "expected": expected_format,
+                }
+            )
         try:
             result = manager.run_adomd_query(query, max_rows=1)
         except Exception as exc:
@@ -972,17 +1068,17 @@ def pbi_export_validation_report_tool(
     }
     if extract_folder:
         report["layout"] = pbi_lint_report_layout_tool(extract_folder)
-        report["visual_bindings"] = pbi_validate_visual_bindings_tool(extract_folder, include_hidden=include_hidden, manager=manager)
+        report["visual_bindings"] = pbi_validate_visual_bindings_tool(
+            extract_folder, include_hidden=include_hidden, manager=manager
+        )
         if include_empty_visual_scan:
-            report["empty_visuals"] = pbi_detect_empty_visuals_tool(manager, extract_folder=extract_folder, filter_expression=empty_visual_filter_expression)
+            report["empty_visuals"] = pbi_detect_empty_visuals_tool(
+                manager, extract_folder=extract_folder, filter_expression=empty_visual_filter_expression
+            )
     if include_measure_tests:
         report["measure_tests"] = pbi_generate_measure_tests_tool(manager, include_hidden=include_hidden)
     report["score"] = pbi_score_dashboard_tool(manager, extract_folder=extract_folder, include_hidden=include_hidden)
-    validation_sections = [
-        item
-        for item in report.values()
-        if isinstance(item, dict) and "valid" in item
-    ]
+    validation_sections = [item for item in report.values() if isinstance(item, dict) and "valid" in item]
     report["summary"] = {
         "overall_valid": all(item.get("valid") for item in validation_sections),
         "score_total": report["score"].get("score_total"),
@@ -1002,13 +1098,19 @@ def pbi_export_validation_report_tool(
     )
 
 
-def _score_parts(model: dict[str, Any], dax: dict[str, Any], layout: dict[str, Any], bindings: dict[str, Any] | None) -> dict[str, int]:
+def _score_parts(
+    model: dict[str, Any], dax: dict[str, Any], layout: dict[str, Any], bindings: dict[str, Any] | None
+) -> dict[str, int]:
     model_score = max(0, 25 - model.get("issue_count", 0) * 10 - model.get("warning_count", 0) * 2)
     dax_score = max(0, 25 - dax.get("issue_count", 0) * 10 - dax.get("warning_count", 0) * 2)
     layout_score = max(0, 20 - layout.get("issue_count", 0) * 8 - layout.get("warning_count", 0) * 2)
     binding_penalty = 0 if not bindings else bindings.get("issue_count", 0) * 8
     readability_score = max(0, 20 - binding_penalty - model.get("warning_count", 0))
-    robustness_score = 10 if model.get("valid") and dax.get("valid") and layout.get("valid") and (not bindings or bindings.get("valid")) else 5
+    robustness_score = (
+        10
+        if model.get("valid") and dax.get("valid") and layout.get("valid") and (not bindings or bindings.get("valid"))
+        else 5
+    )
     return {
         "model": int(model_score),
         "dax": int(dax_score),
@@ -1089,7 +1191,13 @@ def pbi_compare_report_versions_tool(
         for section in pages:
             for container in section.get("visualContainers", []) or []:
                 if isinstance(container, dict):
-                    visuals.append({"page": section.get("displayName") or section.get("name"), "name": _visual_name(container), "type": _visual_type(container)})
+                    visuals.append(
+                        {
+                            "page": section.get("displayName") or section.get("name"),
+                            "name": _visual_name(container),
+                            "type": _visual_type(container),
+                        }
+                    )
         return {"page_count": len(pages), "visual_count": len(visuals), "visuals": visuals}
 
     summary_a = _summary(layout_a)
@@ -1289,7 +1397,10 @@ foreach ($signal in $signals) {
 
 
 def _analyze_reopen_screenshot(screenshot_path: Path) -> dict[str, Any]:
-    script = "$ScreenshotPath = " + json.dumps(str(screenshot_path)) + r"""
+    script = (
+        "$ScreenshotPath = "
+        + json.dumps(str(screenshot_path))
+        + r"""
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing | Out-Null
 $bitmap = [System.Drawing.Bitmap]::FromFile($ScreenshotPath)
@@ -1320,6 +1431,7 @@ $tealRatio = if ($samples -gt 0) { $teal / $samples } else { 0 }
     fix_this_like = ($darkRatio -ge 0.32 -and $tealRatio -ge 0.0005)
 } | ConvertTo-Json -Depth 3
 """
+    )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
         capture_output=True,
@@ -1337,7 +1449,10 @@ $tealRatio = if ($samples -gt 0) { $teal / $samples } else { 0 }
 
 
 def _ocr_reopen_screenshot(screenshot_path: Path) -> dict[str, Any]:
-    script = "$ScreenshotPath = " + json.dumps(str(screenshot_path)) + r"""
+    script = (
+        "$ScreenshotPath = "
+        + json.dumps(str(screenshot_path))
+        + r"""
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Runtime.WindowsRuntime | Out-Null
 $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
@@ -1378,6 +1493,7 @@ foreach ($signal in $signals) {
     matches = $matches
 } | ConvertTo-Json -Depth 3
 """
+    )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
         capture_output=True,
@@ -1405,15 +1521,21 @@ def pbi_validate_pbix_reopen_tool(
 ) -> dict[str, Any]:
     """Open a PBIX in Power BI Desktop and scan for visible repair-error signals."""
     if timeout_seconds < 10 or timeout_seconds > 300:
-        raise PowerBIValidationError("timeout_seconds must be between 10 and 300.", details={"timeout_seconds": timeout_seconds})
+        raise PowerBIValidationError(
+            "timeout_seconds must be between 10 and 300.", details={"timeout_seconds": timeout_seconds}
+        )
     if os.name != "nt":
         raise PowerBIValidationError("PBIX reopen validation is only supported on Windows.")
     pbix = resolve_local_path(pbix_path, must_exist=True, allowed_extensions={".pbix"})
-    screenshot = resolve_local_path(screenshot_path, must_exist=False, allowed_extensions={".png"}) if screenshot_path else None
+    screenshot = (
+        resolve_local_path(screenshot_path, must_exist=False, allowed_extensions={".png"}) if screenshot_path else None
+    )
     if screenshot:
         screenshot.parent.mkdir(parents=True, exist_ok=True)
     persistence = pbi_validate_pbix_persistence_tool(pbix_path=str(pbix), require_security_bindings_removed=False)
-    probe = _run_reopen_probe(pbix_path=pbix, timeout_seconds=timeout_seconds, screenshot_path=screenshot, close_after=close_after)
+    probe = _run_reopen_probe(
+        pbix_path=pbix, timeout_seconds=timeout_seconds, screenshot_path=screenshot, close_after=close_after
+    )
     issues: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
     screenshot_analysis: dict[str, Any] | None = None
@@ -1564,10 +1686,7 @@ def pbi_detect_circular_dependencies_tool(
     snapshot = _model_snapshot(manager, include_hidden=include_hidden)
     measures = snapshot.get("measures", []) or []
     measure_names = {str(m.get("name", "")).casefold(): str(m.get("name", "")) for m in measures}
-    expressions: dict[str, str] = {
-        str(m.get("name", "")): str(m.get("expression", "") or "")
-        for m in measures
-    }
+    expressions: dict[str, str] = {str(m.get("name", "")): str(m.get("expression", "") or "") for m in measures}
 
     ref_pattern = re.compile(r"(?<!')\[([^\[\]]+)\]")
     graph: dict[str, set[str]] = {name: set() for name in expressions}
@@ -1635,6 +1754,7 @@ def pbi_validate_power_query_steps_tool(
     filtered out.
     """
     import re
+
     from .power_query import pbi_get_power_query_tool
 
     if not expected_steps:
@@ -1687,9 +1807,7 @@ def pbi_detect_missing_visuals_tool(
     folder, layout = _load_layout(extract_folder)
     section = None
     for sec in layout.get("sections", []) or []:
-        if isinstance(sec, dict) and (
-            sec.get("displayName") == page or sec.get("name") == page
-        ):
+        if isinstance(sec, dict) and (sec.get("displayName") == page or sec.get("name") == page):
             section = sec
             break
     if section is None:
@@ -1728,9 +1846,9 @@ def pbi_detect_missing_visuals_tool(
         contains = str(req.get("contains_field", "") or "").casefold()
         contains_short = contains.rsplit(".", 1)[-1] if contains else ""
         matches = [
-            v for v in parsed
-            if v["visual_type"] == wanted_type
-            and (not contains_short or contains_short in v["fields"])
+            v
+            for v in parsed
+            if v["visual_type"] == wanted_type and (not contains_short or contains_short in v["fields"])
         ]
         entry = {
             "requirement": req,
@@ -1781,10 +1899,7 @@ def pbi_score_rubric_tool(
         nonlocal measure_names
         if measure_names is None:
             snapshot = _model_snapshot(manager, include_hidden=True)
-            measure_names = {
-                str(m.get("name", "")).casefold()
-                for m in snapshot.get("measures", []) or []
-            }
+            measure_names = {str(m.get("name", "")).casefold() for m in snapshot.get("measures", []) or []}
         return measure_names
 
     results: list[dict[str, Any]] = []
@@ -1828,25 +1943,45 @@ def pbi_score_rubric_tool(
                 passed = target in _ensure_measure_names()
                 details = {"name": params.get("name")}
             else:
-                results.append({"id": cid, "label": label, "passed": False, "reason": "unknown_check", "check": check, "weight": weight})
+                results.append(
+                    {
+                        "id": cid,
+                        "label": label,
+                        "passed": False,
+                        "reason": "unknown_check",
+                        "check": check,
+                        "weight": weight,
+                    }
+                )
                 total_weight += weight
                 continue
         except Exception as exc:
-            results.append({"id": cid, "label": label, "passed": False, "reason": "check_failed", "error": str(exc), "weight": weight})
+            results.append(
+                {
+                    "id": cid,
+                    "label": label,
+                    "passed": False,
+                    "reason": "check_failed",
+                    "error": str(exc),
+                    "weight": weight,
+                }
+            )
             total_weight += weight
             continue
 
         if passed:
             earned += weight
         total_weight += weight
-        results.append({
-            "id": cid,
-            "label": label,
-            "check": check,
-            "weight": weight,
-            "passed": passed,
-            "details": details,
-        })
+        results.append(
+            {
+                "id": cid,
+                "label": label,
+                "check": check,
+                "weight": weight,
+                "passed": passed,
+                "details": details,
+            }
+        )
 
     score = (earned / total_weight) if total_weight else 0.0
     passed_count = sum(1 for r in results if r.get("passed"))

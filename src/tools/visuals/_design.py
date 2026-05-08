@@ -37,6 +37,7 @@ from ._refs import _query_ref
 
 def _run(callback):
     from pbi_connection import error_payload
+
     try:
         return callback()
     except Exception as exc:
@@ -74,16 +75,45 @@ DESIGN_PRESETS: dict[str, dict[str, Any]] = {
                     "background": [{"show": True, "color": {"solid": {"color": "#FFFFFF"}}, "transparency": 0}],
                     "border": [{"show": True, "color": {"solid": {"color": "#DBEAFE"}}, "radius": 8}],
                     "shadow": [{"show": True}],
-                    "title": [{"show": True, "fontColor": {"solid": {"color": "#1E40AF"}}, "background": {"solid": {"color": "#FFFFFF"}}, "fontSize": 12, "fontFamily": "Segoe UI Semibold"}],
+                    "title": [
+                        {
+                            "show": True,
+                            "fontColor": {"solid": {"color": "#1E40AF"}},
+                            "background": {"solid": {"color": "#FFFFFF"}},
+                            "fontSize": 12,
+                            "fontFamily": "Segoe UI Semibold",
+                        }
+                    ],
                     "lineStyles": [{"strokeWidth": 3}],
-                    "categoryAxis": [{"showAxisTitle": False, "gridlineStyle": "dotted", "gridlineColor": {"solid": {"color": "#E2E8F0"}}}],
-                    "valueAxis": [{"showAxisTitle": False, "gridlineStyle": "dotted", "gridlineColor": {"solid": {"color": "#E2E8F0"}}}],
+                    "categoryAxis": [
+                        {
+                            "showAxisTitle": False,
+                            "gridlineStyle": "dotted",
+                            "gridlineColor": {"solid": {"color": "#E2E8F0"}},
+                        }
+                    ],
+                    "valueAxis": [
+                        {
+                            "showAxisTitle": False,
+                            "gridlineStyle": "dotted",
+                            "gridlineColor": {"solid": {"color": "#E2E8F0"}},
+                        }
+                    ],
                 }
             },
             "card": {
                 "*": {
-                    "labels": [{"color": {"solid": {"color": "#1E293B"}}, "fontSize": 22, "fontBold": True, "fontFamily": "Segoe UI Semibold"}],
-                    "categoryLabels": [{"color": {"solid": {"color": "#475569"}}, "fontSize": 11, "fontFamily": "Segoe UI"}],
+                    "labels": [
+                        {
+                            "color": {"solid": {"color": "#1E293B"}},
+                            "fontSize": 22,
+                            "fontBold": True,
+                            "fontFamily": "Segoe UI Semibold",
+                        }
+                    ],
+                    "categoryLabels": [
+                        {"color": {"solid": {"color": "#475569"}}, "fontSize": 11, "fontFamily": "Segoe UI"}
+                    ],
                     "outline": [{"show": True, "color": {"solid": {"color": "#BFDBFE"}}, "weight": 2}],
                     "background": [{"show": True, "color": {"solid": {"color": "#FFFFFF"}}, "transparency": 0}],
                     "border": [{"show": True, "color": {"solid": {"color": "#BFDBFE"}}, "radius": 8}],
@@ -111,8 +141,22 @@ DESIGN_PRESETS: dict[str, dict[str, Any]] = {
                     "background": [{"show": True, "color": {"solid": {"color": "#FFFFFF"}}, "transparency": 0}],
                     "border": [{"show": True, "color": {"solid": {"color": "#DBEAFE"}}, "radius": 8}],
                     "shadow": [{"show": True}],
-                    "columnHeaders": [{"fontColor": {"solid": {"color": "#1E40AF"}}, "backColor": {"solid": {"color": "#EFF6FF"}}, "fontSize": 11, "fontBold": True}],
-                    "values": [{"fontColor": {"solid": {"color": "#1E293B"}}, "backColor": {"solid": {"color": "#FFFFFF"}}, "altBackColor": {"solid": {"color": "#F8FAFC"}}, "fontSize": 10}],
+                    "columnHeaders": [
+                        {
+                            "fontColor": {"solid": {"color": "#1E40AF"}},
+                            "backColor": {"solid": {"color": "#EFF6FF"}},
+                            "fontSize": 11,
+                            "fontBold": True,
+                        }
+                    ],
+                    "values": [
+                        {
+                            "fontColor": {"solid": {"color": "#1E293B"}},
+                            "backColor": {"solid": {"color": "#FFFFFF"}},
+                            "altBackColor": {"solid": {"color": "#F8FAFC"}},
+                            "fontSize": 10,
+                        }
+                    ],
                 }
             },
         },
@@ -171,7 +215,9 @@ def pbi_apply_theme_tool(extract_folder: str, theme_json_path: str) -> dict[str,
         try:
             theme_payload = json.loads(theme_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            raise PowerBIValidationError("Theme JSON is invalid.", details={"path": str(theme_path), "line": exc.lineno}) from exc
+            raise PowerBIValidationError(
+                "Theme JSON is invalid.", details={"path": str(theme_path), "line": exc.lineno}
+            ) from exc
         target = folder / THEMES_RELATIVE_DIR / theme_path.name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(theme_payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -279,41 +325,185 @@ def _create_visual_from_spec(
     height = int(spec.get("height", DEFAULT_VISUAL_SIZES.get(visual_type, (400, 300))[1]))
     title = spec.get("title")
     if visual_type == "card":
-        return _create_chart_container(section, visual_type="card", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["measure"]], measure_home_map=measure_home_map)
+        return _create_chart_container(
+            section,
+            visual_type="card",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title,
+            projections={"Values": [{"queryRef": _query_ref(spec["measure"])}]},
+            references=[spec["measure"]],
+            measure_home_map=measure_home_map,
+        )
     if visual_type in {"bar_chart", "bar"}:
-        projections = {"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}
+        projections = {
+            "Category": [{"queryRef": _query_ref(spec["category"])}],
+            "Y": [{"queryRef": _query_ref(spec["measure"])}],
+        }
         references = [spec["category"], spec["measure"]]
         if spec.get("legend"):
             projections["Series"] = [{"queryRef": _query_ref(spec["legend"])}]
             references.append(spec["legend"])
-        return _create_chart_container(section, visual_type="clusteredBarChart", x=x, y=y, width=width, height=height, title=title, projections=projections, references=references, measure_home_map=measure_home_map)
+        return _create_chart_container(
+            section,
+            visual_type="clusteredBarChart",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title,
+            projections=projections,
+            references=references,
+            measure_home_map=measure_home_map,
+        )
     if visual_type in {"line_chart", "line"}:
         measures = list(spec.get("measures") or [spec.get("measure")])
-        return _create_chart_container(section, visual_type="lineChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["axis"])}], "Y": [{"queryRef": _query_ref(item)} for item in measures]}, references=[spec["axis"], *measures], measure_home_map=measure_home_map)
+        return _create_chart_container(
+            section,
+            visual_type="lineChart",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title,
+            projections={
+                "Category": [{"queryRef": _query_ref(spec["axis"])}],
+                "Y": [{"queryRef": _query_ref(item)} for item in measures],
+            },
+            references=[spec["axis"], *measures],
+            measure_home_map=measure_home_map,
+        )
     if visual_type in {"donut", "donut_chart", "pie", "pie_chart"}:
-        return _create_chart_container(section, visual_type="donutChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["category"], spec["measure"]], measure_home_map=measure_home_map)
+        return _create_chart_container(
+            section,
+            visual_type="donutChart",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title,
+            projections={
+                "Category": [{"queryRef": _query_ref(spec["category"])}],
+                "Y": [{"queryRef": _query_ref(spec["measure"])}],
+            },
+            references=[spec["category"], spec["measure"]],
+            measure_home_map=measure_home_map,
+        )
     if visual_type in {"table", "table_visual"}:
-        return _create_chart_container(section, visual_type="tableEx", x=x, y=y, width=width, height=height, title=title, projections={"Values": [{"queryRef": _query_ref(item)} for item in spec["columns"]]}, references=list(spec["columns"]), measure_home_map=measure_home_map)
+        return _create_chart_container(
+            section,
+            visual_type="tableEx",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title,
+            projections={"Values": [{"queryRef": _query_ref(item)} for item in spec["columns"]]},
+            references=list(spec["columns"]),
+            measure_home_map=measure_home_map,
+        )
     if visual_type == "waterfall":
-        return _create_chart_container(section, visual_type="waterfallChart", x=x, y=y, width=width, height=height, title=title, projections={"Category": [{"queryRef": _query_ref(spec["category"])}], "Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["category"], spec["measure"]], measure_home_map=measure_home_map)
+        return _create_chart_container(
+            section,
+            visual_type="waterfallChart",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title,
+            projections={
+                "Category": [{"queryRef": _query_ref(spec["category"])}],
+                "Y": [{"queryRef": _query_ref(spec["measure"])}],
+            },
+            references=[spec["category"], spec["measure"]],
+            measure_home_map=measure_home_map,
+        )
     if visual_type == "slicer":
-        return _make_visual_container(section=section, visual_type="slicer", x=x, y=y, width=width, height=height, projections={"Values": [{"queryRef": _query_ref(spec["column"])}]}, references=[spec["column"]], measure_home_map=measure_home_map, extra_single_visual={"slicerType": str(spec.get("slicer_type", "dropdown")).casefold()})
+        return _make_visual_container(
+            section=section,
+            visual_type="slicer",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            projections={"Values": [{"queryRef": _query_ref(spec["column"])}]},
+            references=[spec["column"]],
+            measure_home_map=measure_home_map,
+            extra_single_visual={"slicerType": str(spec.get("slicer_type", "dropdown")).casefold()},
+        )
     if visual_type in {"text", "text_box"}:
-        return _make_visual_container(section=section, visual_type="textbox", x=x, y=y, width=width, height=height, measure_home_map=measure_home_map, extra_single_visual={"textContent": spec["text"], "textStyle": {"fontSize": int(spec.get("font_size", 16)), "bold": bool(spec.get("bold", False)), "color": str(spec.get("color", "#222222"))}, "prototypeQuery": {"Version": 2, "From": [], "Select": []}})
+        return _make_visual_container(
+            section=section,
+            visual_type="textbox",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            measure_home_map=measure_home_map,
+            extra_single_visual={
+                "textContent": spec["text"],
+                "textStyle": {
+                    "fontSize": int(spec.get("font_size", 16)),
+                    "bold": bool(spec.get("bold", False)),
+                    "color": str(spec.get("color", "#222222")),
+                },
+                "prototypeQuery": {"Version": 2, "From": [], "Select": []},
+            },
+        )
     if visual_type == "gauge":
-        return _create_chart_container(section, visual_type="gauge", x=x, y=y, width=width, height=height, title=title, projections={"Y": [{"queryRef": _query_ref(spec["measure"])}]}, references=[spec["measure"]], measure_home_map=measure_home_map)
+        return _create_chart_container(
+            section,
+            visual_type="gauge",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title,
+            projections={"Y": [{"queryRef": _query_ref(spec["measure"])}]},
+            references=[spec["measure"]],
+            measure_home_map=measure_home_map,
+        )
     if visual_type == "kpi":
         measures = [spec["measure"]]
         if spec.get("target_measure"):
             measures.append(spec["target_measure"])
-        return _create_chart_container(section, visual_type="kpi", x=x, y=y, width=width, height=height, title=title, projections={"Value": [{"queryRef": _query_ref(spec["measure"])}], "Goal": [{"queryRef": _query_ref(spec["target_measure"])}]} if spec.get("target_measure") else {"Value": [{"queryRef": _query_ref(spec["measure"])}]}, references=measures, measure_home_map=measure_home_map)
+        return _create_chart_container(
+            section,
+            visual_type="kpi",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title,
+            projections={
+                "Value": [{"queryRef": _query_ref(spec["measure"])}],
+                "Goal": [{"queryRef": _query_ref(spec["target_measure"])}],
+            }
+            if spec.get("target_measure")
+            else {"Value": [{"queryRef": _query_ref(spec["measure"])}]},
+            references=measures,
+            measure_home_map=measure_home_map,
+        )
     if visual_type == "map":
         refs = [spec["location"]]
         projections = {"Category": [{"queryRef": _query_ref(spec["location"])}]}
         if spec.get("measure"):
             refs.append(spec["measure"])
             projections["Y"] = [{"queryRef": _query_ref(spec["measure"])}]
-        return _create_chart_container(section, visual_type="map", x=x, y=y, width=width, height=height, title=title, projections=projections, references=refs, measure_home_map=measure_home_map)
+        return _create_chart_container(
+            section,
+            visual_type="map",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title,
+            projections=projections,
+            references=refs,
+            measure_home_map=measure_home_map,
+        )
     raise PowerBIValidationError("Unsupported dashboard visual type.", details={"type": visual_type})
 
 

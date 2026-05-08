@@ -19,7 +19,6 @@ from security import (
     validate_model_object_name,
 )
 
-
 _PERMISSION_ALIASES = {
     "none": "None",
     "read": "Read",

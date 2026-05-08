@@ -23,6 +23,7 @@ from ._paths import _resolve_extract_folder
 
 def _run(callback):
     from pbi_connection import error_payload
+
     try:
         return callback()
     except Exception as exc:
@@ -33,7 +34,11 @@ def pbi_list_pages_tool(extract_folder: str) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         _, layout = _load_layout(extract_folder)
         pages = [_page_summary(section) for section in layout.get("sections", [])]
-        return ok("Pages listed successfully.", extract_folder=str(_resolve_extract_folder(extract_folder, must_exist=True)), pages=pages)
+        return ok(
+            "Pages listed successfully.",
+            extract_folder=str(_resolve_extract_folder(extract_folder, must_exist=True)),
+            pages=pages,
+        )
 
     return _run(_impl)
 
@@ -45,7 +50,11 @@ def pbi_get_page_tool(extract_folder: str, page: str) -> dict[str, Any]:
         visuals = [_visual_payload(container) for container in section.get("visualContainers", []) or []]
         payload = _page_summary(section)
         payload["visuals"] = visuals
-        return ok("Page retrieved successfully.", extract_folder=str(_resolve_extract_folder(extract_folder, must_exist=True)), page=payload)
+        return ok(
+            "Page retrieved successfully.",
+            extract_folder=str(_resolve_extract_folder(extract_folder, must_exist=True)),
+            page=payload,
+        )
 
     return _run(_impl)
 
@@ -63,11 +72,14 @@ def pbi_describe_page_tool(
     ``binding_health`` rollup (``ok`` | ``missing_field`` | ``wrong_role``)
     based on live-model validation when ``manager`` is supplied.
     """
+
     def _impl() -> dict[str, Any]:
         folder, layout = _load_layout(extract_folder)
         section = _find_page(layout, page)
         measure_home_map = _scan_measure_home_tables(folder)
-        model_fields, _ = _live_model_field_index(manager, include_hidden=False) if manager else (None, {"status": "unavailable"})
+        model_fields, _ = (
+            _live_model_field_index(manager, include_hidden=False) if manager else (None, {"status": "unavailable"})
+        )
 
         visuals: list[dict[str, Any]] = []
         for container in section.get("visualContainers", []) or []:
@@ -104,20 +116,30 @@ def pbi_describe_page_tool(
             title_text = _extract_literal_text("title", "text")
             if title_text is not None:
                 formatting["title"] = title_text
-            x_axis_title = _extract_literal_text("categoryAxis", "titleText") or _extract_literal_text("categoryAxis", "axisTitle")
+            x_axis_title = _extract_literal_text("categoryAxis", "titleText") or _extract_literal_text(
+                "categoryAxis", "axisTitle"
+            )
             if x_axis_title is not None:
                 formatting["x_axis_title"] = x_axis_title
-            y_axis_title = _extract_literal_text("valueAxis", "titleText") or _extract_literal_text("valueAxis", "axisTitle")
+            y_axis_title = _extract_literal_text("valueAxis", "titleText") or _extract_literal_text(
+                "valueAxis", "axisTitle"
+            )
             if y_axis_title is not None:
                 formatting["y_axis_title"] = y_axis_title
             labels = objects.get("labels")
             if isinstance(labels, list) and labels:
-                lu_value = labels[0].get("properties", {}).get("labelDisplayUnits", {}) if isinstance(labels[0], dict) else {}
-                lu_literal = lu_value.get("expr", {}).get("Literal", {}).get("Value") if isinstance(lu_value, dict) else None
+                lu_value = (
+                    labels[0].get("properties", {}).get("labelDisplayUnits", {}) if isinstance(labels[0], dict) else {}
+                )
+                lu_literal = (
+                    lu_value.get("expr", {}).get("Literal", {}).get("Value") if isinstance(lu_value, dict) else None
+                )
                 if lu_literal is not None:
                     formatting["label_display_units"] = lu_literal
 
-            issues, _ = _visual_binding_issues(container, str(section.get("displayName") or section.get("name", "")), measure_home_map, model_fields)
+            issues, _ = _visual_binding_issues(
+                container, str(section.get("displayName") or section.get("name", "")), measure_home_map, model_fields
+            )
             if not issues:
                 health = "ok"
             else:
@@ -129,20 +151,22 @@ def pbi_describe_page_tool(
                 else:
                     health = "issues"
 
-            visuals.append({
-                "id": str(cfg.get("name", "")),
-                "type": visual_type,
-                "position": {
-                    "x": int(container.get("x", 0)),
-                    "y": int(container.get("y", 0)),
-                    "width": int(container.get("width", 0)),
-                    "height": int(container.get("height", 0)),
-                },
-                "bindings": bindings,
-                "formatting": formatting,
-                "binding_health": health,
-                "issues": issues,
-            })
+            visuals.append(
+                {
+                    "id": str(cfg.get("name", "")),
+                    "type": visual_type,
+                    "position": {
+                        "x": int(container.get("x", 0)),
+                        "y": int(container.get("y", 0)),
+                        "width": int(container.get("width", 0)),
+                        "height": int(container.get("height", 0)),
+                    },
+                    "bindings": bindings,
+                    "formatting": formatting,
+                    "binding_health": health,
+                    "issues": issues,
+                }
+            )
 
         return ok(
             f"Page '{section.get('displayName')}' described — {len(visuals)} visual(s).",
@@ -160,7 +184,9 @@ def pbi_describe_page_tool(
     return _run(_impl)
 
 
-def pbi_create_page_tool(extract_folder: str, display_name: str, width: int = DEFAULT_PAGE_WIDTH, height: int = DEFAULT_PAGE_HEIGHT) -> dict[str, Any]:
+def pbi_create_page_tool(
+    extract_folder: str, display_name: str, width: int = DEFAULT_PAGE_WIDTH, height: int = DEFAULT_PAGE_HEIGHT
+) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         _validate_dimensions(0, 0, width, height)
         folder, layout = _load_layout(extract_folder)
@@ -191,7 +217,11 @@ def pbi_delete_page_tool(extract_folder: str, page: str) -> dict[str, Any]:
         section = _find_page(layout, page)
         layout["sections"] = [item for item in sections if item is not section]
         _save_layout(folder, layout)
-        return ok("Page deleted successfully.", extract_folder=str(folder), deleted_page=str(section.get("displayName") or section.get("name")))
+        return ok(
+            "Page deleted successfully.",
+            extract_folder=str(folder),
+            deleted_page=str(section.get("displayName") or section.get("name")),
+        )
 
     return _run(_impl)
 

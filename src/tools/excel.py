@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import difflib
+from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import copy
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 try:
     from openpyxl import Workbook, load_workbook
@@ -23,27 +24,48 @@ except ImportError:  # pragma: no cover - dependency is optional until installed
     get_column_letter = range_boundaries = None  # type: ignore[assignment]
 
 from pbi_connection import PowerBIError, error_payload, normalize_token, ok, serialize_value
-from security import ALLOWED_BASE_DIRS, SECURITY, configure_allowed_dirs, inspect_excel_archive, resolve_local_path
+from security import SECURITY, inspect_excel_archive, resolve_local_path
 
 LARGE_FILE_BYTES = 10 * 1024 * 1024
 DEFAULT_READ_LIMIT = 500
 MAX_SEARCH_RESULTS = 500
 
-class ExcelToolError(PowerBIError): code = "excel_error"
-class ExcelDependencyError(ExcelToolError): code = "excel_dependency_error"
-class ExcelFileNotFoundError(ExcelToolError): code = "excel_file_not_found"
-class ExcelSheetNotFoundError(ExcelToolError): code = "excel_sheet_not_found"
-class ExcelFileLockedError(ExcelToolError): code = "excel_file_locked"
-class ExcelValidationError(ExcelToolError): code = "excel_validation_error"
+
+class ExcelToolError(PowerBIError):
+    code = "excel_error"
+
+
+class ExcelDependencyError(ExcelToolError):
+    code = "excel_dependency_error"
+
+
+class ExcelFileNotFoundError(ExcelToolError):
+    code = "excel_file_not_found"
+
+
+class ExcelSheetNotFoundError(ExcelToolError):
+    code = "excel_sheet_not_found"
+
+
+class ExcelFileLockedError(ExcelToolError):
+    code = "excel_file_locked"
+
+
+class ExcelValidationError(ExcelToolError):
+    code = "excel_validation_error"
+
+
 def _run(callback: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
     try:
         return callback(*args, **kwargs)
     except Exception as exc:
         return error_payload(exc)
 
+
 def _ensure_openpyxl() -> None:
     if not OPENPYXL_AVAILABLE:
         raise ExcelDependencyError("openpyxl is not installed. Install it with 'pip install openpyxl'.")
+
 
 def _resolve_path(file_path: str, *, must_exist: bool = False) -> Path:
     try:
@@ -57,10 +79,15 @@ def _resolve_path(file_path: str, *, must_exist: bool = False) -> Path:
             raise ExcelValidationError(exc.message, details=exc.details) from exc
         raise
 
-def _require_file(path: Path) -> None:
-    if not path.exists(): raise ExcelFileNotFoundError(f"Workbook not found: {path}", details={"path": str(path)})
 
-def _streaming(path: Path) -> bool: return path.exists() and path.stat().st_size > LARGE_FILE_BYTES
+def _require_file(path: Path) -> None:
+    if not path.exists():
+        raise ExcelFileNotFoundError(f"Workbook not found: {path}", details={"path": str(path)})
+
+
+def _streaming(path: Path) -> bool:
+    return path.exists() and path.stat().st_size > LARGE_FILE_BYTES
+
 
 @contextmanager
 def _open_workbook(
@@ -98,11 +125,13 @@ def _open_workbook(
         if callable(close):
             close()
 
+
 def _save_workbook(workbook: Any, path: Path) -> None:
     try:
         workbook.save(path)
     except PermissionError as exc:
         raise ExcelFileLockedError("File locked by Excel, close it first.", details={"path": str(path)}) from exc
+
 
 def _sheet(workbook: Any, name: str) -> Any:
     if name not in workbook.sheetnames:
@@ -111,6 +140,7 @@ def _sheet(workbook: Any, name: str) -> Any:
             details={"sheet": name, "available_sheets": list(workbook.sheetnames)},
         )
     return workbook[name]
+
 
 def _value_type(value: Any) -> str:
     if value is None:
@@ -123,9 +153,11 @@ def _value_type(value: Any) -> str:
         return "datetime"
     return "string"
 
+
 def _header_name(value: Any, index: int) -> str:
     text = "" if value is None else str(serialize_value(value)).strip()
     return text or f"Column{index}"
+
 
 def _normalize_color(value: str) -> str:
     token = value.strip().lstrip("#")
@@ -134,6 +166,7 @@ def _normalize_color(value: str) -> str:
     if len(token) == 8:
         return token.upper()
     raise ExcelValidationError("Color values must be 6 or 8 hex characters.", details={"value": value})
+
 
 def _sheet_summary(sheet: Any) -> dict[str, Any]:
     row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), ())
@@ -150,11 +183,13 @@ def _sheet_summary(sheet: Any) -> dict[str, Any]:
         "dimensions": dimensions,
     }
 
+
 def _infer_excel_type(rows: list[list[Any]], index: int) -> str:
     for row in rows:
         if index < len(row) and row[index] is not None:
             return _value_type(row[index])
     return "unknown"
+
 
 def _type_issue(excel_type: str, pbi_type: str) -> bool:
     token = pbi_type.casefold()
@@ -170,6 +205,7 @@ def _type_issue(excel_type: str, pbi_type: str) -> bool:
         return "bool" not in token
     return False
 
+
 def excel_list_sheets_tool(file_path: str) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         with _open_workbook(file_path, data_only=True) as (workbook, path, read_only):
@@ -179,7 +215,9 @@ def excel_list_sheets_tool(file_path: str) -> dict[str, Any]:
                 read_only=read_only,
                 sheets=[_sheet_summary(sheet) for sheet in workbook.worksheets],
             )
+
     return _run(_impl)
+
 
 def excel_read_sheet_tool(
     file_path: str,
@@ -240,13 +278,19 @@ def excel_read_sheet_tool(
                 truncated=total_rows > len(rows) or scan_limit_hit,
                 scan_limit_hit=scan_limit_hit,
             )
+
     return _run(_impl)
+
 
 def excel_read_cell_tool(file_path: str, sheet: str, cell: str) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         with _open_workbook(file_path, data_only=False) as (formula_wb, path, read_only):
             formula_cell = _sheet(formula_wb, sheet)[cell]
-            formula = formula_cell.value if isinstance(formula_cell.value, str) and formula_cell.value.startswith("=") else None
+            formula = (
+                formula_cell.value
+                if isinstance(formula_cell.value, str) and formula_cell.value.startswith("=")
+                else None
+            )
             number_format = formula_cell.number_format
         with _open_workbook(str(path), read_only=read_only, data_only=True) as (value_wb, _, _):
             value = _sheet(value_wb, sheet)[cell].value
@@ -260,7 +304,9 @@ def excel_read_cell_tool(file_path: str, sheet: str, cell: str) -> dict[str, Any
             format=number_format,
             formula=formula,
         )
+
     return _run(_impl)
+
 
 def excel_search_tool(file_path: str, query: str, sheet: str | None = None) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -283,7 +329,9 @@ def excel_search_tool(file_path: str, query: str, sheet: str | None = None) -> d
                             if len(results) >= MAX_SEARCH_RESULTS:
                                 truncated = True
                                 break
-                            results.append({"sheet": sheet_name, "cell": cell.coordinate, "value": serialize_value(value)})
+                            results.append(
+                                {"sheet": sheet_name, "cell": cell.coordinate, "value": serialize_value(value)}
+                            )
                     if truncated:
                         break
                 if truncated:
@@ -298,7 +346,9 @@ def excel_search_tool(file_path: str, query: str, sheet: str | None = None) -> d
                 truncated=truncated,
                 scan_limit_hit=scanned_cells > scan_limit,
             )
+
     return _run(_impl)
+
 
 def excel_write_cell_tool(file_path: str, sheet: str, cell: str, value: Any, format: str = "") -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -308,8 +358,17 @@ def excel_write_cell_tool(file_path: str, sheet: str, cell: str, value: Any, for
             if format:
                 target.number_format = format
             _save_workbook(workbook, path)
-            return ok("Cell written successfully.", file_path=str(path), sheet=sheet, cell=cell, value=serialize_value(value), format=format or None)
+            return ok(
+                "Cell written successfully.",
+                file_path=str(path),
+                sheet=sheet,
+                cell=cell,
+                value=serialize_value(value),
+                format=format or None,
+            )
+
     return _run(_impl)
+
 
 def excel_write_range_tool(file_path: str, sheet: str, start_cell: str, data: list[list[Any]]) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -332,7 +391,9 @@ def excel_write_range_tool(file_path: str, sheet: str, start_cell: str, data: li
                 rows_written=len(data),
                 columns_written=width,
             )
+
     return _run(_impl)
+
 
 def excel_create_sheet_tool(file_path: str, name: str, position: int | None = None) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -342,7 +403,9 @@ def excel_create_sheet_tool(file_path: str, name: str, position: int | None = No
             workbook.create_sheet(title=name, index=position if position is not None else len(workbook.sheetnames))
             _save_workbook(workbook, path)
             return ok("Sheet created successfully.", file_path=str(path), sheet=name, position=position)
+
     return _run(_impl)
+
 
 def excel_delete_sheet_tool(file_path: str, name: str) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -353,7 +416,9 @@ def excel_delete_sheet_tool(file_path: str, name: str) -> dict[str, Any]:
             workbook.remove(worksheet)
             _save_workbook(workbook, path)
             return ok("Sheet deleted successfully.", file_path=str(path), sheet=name)
+
     return _run(_impl)
+
 
 def excel_format_range_tool(file_path: str, sheet: str, range: str, format: dict[str, Any]) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -387,7 +452,9 @@ def excel_format_range_tool(file_path: str, sheet: str, range: str, format: dict
                         cell.border = Border(left=side, right=side, top=side, bottom=side)
             _save_workbook(workbook, path)
             return ok("Range formatted successfully.", file_path=str(path), sheet=sheet, range=range, format=format)
+
     return _run(_impl)
+
 
 def excel_auto_width_tool(file_path: str, sheet: str) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -401,7 +468,9 @@ def excel_auto_width_tool(file_path: str, sheet: str) -> dict[str, Any]:
                 updated.append(letter)
             _save_workbook(workbook, path)
             return ok("Column widths updated successfully.", file_path=str(path), sheet=sheet, columns=updated)
+
     return _run(_impl)
+
 
 def excel_create_workbook_tool(file_path: str, sheets: list[str] | None = None) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -422,7 +491,9 @@ def excel_create_workbook_tool(file_path: str, sheets: list[str] | None = None) 
         _save_workbook(workbook, path)
         workbook.close()
         return ok("Workbook created successfully.", file_path=str(path), sheets=created_sheets)
+
     return _run(_impl)
+
 
 def excel_workbook_info_tool(file_path: str) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -445,7 +516,9 @@ def excel_workbook_info_tool(file_path: str) -> dict[str, Any]:
                     "last_modified_by": serialize_value(properties.lastModifiedBy),
                 },
             )
+
     return _run(_impl)
+
 
 def excel_to_pbi_check_tool(file_path: str, manager: Any) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
@@ -490,13 +563,17 @@ def excel_to_pbi_check_tool(file_path: str, manager: Any) -> dict[str, Any]:
                         continue
                     excel_type = _infer_excel_type([list(row) for row in rows[1:]], index)
                     if _type_issue(excel_type, str(model_column["data_type"])):
-                        type_issues.append({"column": header, "excel_type": excel_type, "pbi_type": model_column["data_type"]})
+                        type_issues.append(
+                            {"column": header, "excel_type": excel_type, "pbi_type": model_column["data_type"]}
+                        )
                 matches.append(
                     {
                         "sheet": worksheet.title,
                         "table": table["name"],
                         "matched_columns": [model_lookup[key]["name"] for key in model_lookup if key in excel_lookup],
-                        "missing_in_excel": [item["name"] for key, item in model_lookup.items() if key not in excel_lookup],
+                        "missing_in_excel": [
+                            item["name"] for key, item in model_lookup.items() if key not in excel_lookup
+                        ],
                         "extra_in_excel": [name for key, name in excel_lookup.items() if key not in model_lookup],
                         "type_issues": type_issues,
                     }
@@ -510,11 +587,22 @@ def excel_to_pbi_check_tool(file_path: str, manager: Any) -> dict[str, Any]:
                 mismatches=mismatches,
                 suggestions=suggestions,
             )
+
     return _run(_impl)
 
+
 __all__ = [
-    "excel_auto_width_tool", "excel_create_sheet_tool", "excel_create_workbook_tool", "excel_delete_sheet_tool",
-    "excel_format_range_tool", "excel_list_sheets_tool", "excel_read_cell_tool", "excel_read_sheet_tool",
-    "excel_search_tool", "excel_to_pbi_check_tool", "excel_workbook_info_tool", "excel_write_cell_tool",
+    "excel_auto_width_tool",
+    "excel_create_sheet_tool",
+    "excel_create_workbook_tool",
+    "excel_delete_sheet_tool",
+    "excel_format_range_tool",
+    "excel_list_sheets_tool",
+    "excel_read_cell_tool",
+    "excel_read_sheet_tool",
+    "excel_search_tool",
+    "excel_to_pbi_check_tool",
+    "excel_workbook_info_tool",
+    "excel_write_cell_tool",
     "excel_write_range_tool",
 ]

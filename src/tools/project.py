@@ -8,7 +8,6 @@ from typing import Any
 from pbi_connection import PowerBINotFoundError, PowerBIValidationError, ok
 from security import resolve_local_path
 
-
 PROJECT_FILE_EXTENSIONS = {".pbip"}
 TMDL_FILE_EXTENSIONS = {".tmdl"}
 

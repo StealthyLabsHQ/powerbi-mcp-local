@@ -15,8 +15,8 @@ from pbi_connection import PowerBIValidationError, ok
 from ._base import (
     DEFAULT_PAGE_HEIGHT,
     DEFAULT_PAGE_WIDTH,
-    ReportLayoutError,
     VISUAL_FIELD_ROLES,
+    ReportLayoutError,
 )
 from ._bindings import (
     _live_model_field_index,
@@ -38,6 +38,7 @@ from ._paths import _layout_path, _resolve_extract_folder, _resolve_pbix_path
 
 def _run(callback):
     from pbi_connection import error_payload
+
     try:
         return callback()
     except Exception as exc:
@@ -57,7 +58,9 @@ def pbi_patch_layout_tool(
         pbix = _resolve_pbix_path(pbix_path, must_exist=True)
         layout_path = _layout_path(folder)
         if not layout_path.exists():
-            raise ReportLayoutError("Report/Layout file was not found in the extract folder.", details={"path": str(layout_path)})
+            raise ReportLayoutError(
+                "Report/Layout file was not found in the extract folder.", details={"path": str(layout_path)}
+            )
 
         if fail_on_persistence_risk:
             _, layout = _load_layout(folder)
@@ -286,9 +289,7 @@ def pbi_auto_grid_layout_tool(
 
         cursor_row, cursor_col = _next_free_cell(cursor_row, cursor_col)
         while cursor_col + col_span > cols or any(
-            (cursor_row + r, cursor_col + c) in occupied
-            for r in range(row_span)
-            for c in range(col_span)
+            (cursor_row + r, cursor_col + c) in occupied for r in range(row_span) for c in range(col_span)
         ):
             cursor_col += 1
             if cursor_col + col_span > cols:
@@ -336,12 +337,19 @@ def pbi_remove_visual_tool(extract_folder: str, page: str, visual_id: str) -> di
         index, _, _ = _find_visual(section, visual_id)
         removed = section["visualContainers"].pop(index)
         _save_layout(folder, layout)
-        return ok("Visual removed successfully.", extract_folder=str(folder), page=str(section.get("displayName") or section.get("name")), visual=_visual_payload(removed))
+        return ok(
+            "Visual removed successfully.",
+            extract_folder=str(folder),
+            page=str(section.get("displayName") or section.get("name")),
+            visual=_visual_payload(removed),
+        )
 
     return _run(_impl)
 
 
-def pbi_move_visual_tool(extract_folder: str, page: str, visual_id: str, x: int, y: int, width: int | None = None, height: int | None = None) -> dict[str, Any]:
+def pbi_move_visual_tool(
+    extract_folder: str, page: str, visual_id: str, x: int, y: int, width: int | None = None, height: int | None = None
+) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         folder, layout = _load_layout(extract_folder)
         section = _find_page(layout, page)
@@ -356,7 +364,12 @@ def pbi_move_visual_tool(extract_folder: str, page: str, visual_id: str, x: int,
             layouts[0]["position"].update({"x": x, "y": y, "width": new_width, "height": new_height})
         container["config"] = _dump_embedded_json(config)
         _save_layout(folder, layout)
-        return ok("Visual moved successfully.", extract_folder=str(folder), page=str(section.get("displayName") or section.get("name")), visual=_visual_payload(container))
+        return ok(
+            "Visual moved successfully.",
+            extract_folder=str(folder),
+            page=str(section.get("displayName") or section.get("name")),
+            visual=_visual_payload(container),
+        )
 
     return _run(_impl)
 
@@ -373,6 +386,7 @@ def pbi_set_visual_format_property_tool(
     ``singleVisual.objects[<object_name>][0].properties``. Encodes Python
     values as proper Power BI literals via :func:`_encode_visual_format_value`.
     """
+
     def _impl() -> dict[str, Any]:
         if not object_name or not str(object_name).strip():
             raise PowerBIValidationError("object_name must be non-empty.")
@@ -428,6 +442,7 @@ def pbi_disable_card_autoscale_tool(
     """Disable the auto K/M/B unit-scaling on card visuals (sets
     ``labelDisplayUnits=1`` plus an explicit ``labelPrecision``).
     """
+
     def _impl() -> dict[str, Any]:
         if visual_ids is not None and not isinstance(visual_ids, list):
             raise PowerBIValidationError("visual_ids must be a list of visual ids or None.")
@@ -463,10 +478,12 @@ def pbi_disable_card_autoscale_tool(
                 labels[0]["properties"] = props
                 objects["labels"] = labels
                 container["config"] = _dump_embedded_json(cfg)
-                patched.append({
-                    "visual_id": visual_id,
-                    "page": str(section.get("displayName") or section.get("name", "")),
-                })
+                patched.append(
+                    {
+                        "visual_id": visual_id,
+                        "page": str(section.get("displayName") or section.get("name", "")),
+                    }
+                )
         _save_layout(folder, layout)
         return ok(
             f"Disabled autoscale on {len(patched)} card visual(s).",

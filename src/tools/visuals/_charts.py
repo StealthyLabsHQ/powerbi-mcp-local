@@ -27,7 +27,10 @@ def pbi_add_bar_chart_tool(
     manager: Any | None = None,
 ) -> dict[str, Any]:
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
-    projections = {"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]}
+    projections = {
+        "Category": [{"queryRef": _query_ref(category_column)}],
+        "Y": [{"queryRef": _query_ref(value_measure)}],
+    }
     references = [category_column, value_measure]
     expected_kinds = {category_column: "column", value_measure: "measure"}
     if legend_column:
@@ -100,8 +103,22 @@ def pbi_add_line_chart_tool(
     return result
 
 
-def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 320, height: int = 280, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
-    _validate_field_references_live(manager, [category_column, value_measure], expected_kinds={category_column: "column", value_measure: "measure"})
+def pbi_add_donut_chart_tool(
+    extract_folder: str,
+    page: str,
+    category_column: str,
+    value_measure: str,
+    x: int,
+    y: int,
+    width: int = 320,
+    height: int = 280,
+    title: str = "",
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    _validate_field_references_live(
+        manager, [category_column, value_measure], expected_kinds={category_column: "column", value_measure: "measure"}
+    )
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
@@ -114,7 +131,10 @@ def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: st
             width=width,
             height=height,
             title=title or None,
-            projections={"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]},
+            projections={
+                "Category": [{"queryRef": _query_ref(category_column)}],
+                "Y": [{"queryRef": _query_ref(value_measure)}],
+            },
             references=[category_column, value_measure],
             measure_home_map=home_map,
         ),
@@ -122,8 +142,22 @@ def pbi_add_donut_chart_tool(extract_folder: str, page: str, category_column: st
     )
 
 
-def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str, value_measure: str, x: int, y: int, width: int = 420, height: int = 300, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
-    _validate_field_references_live(manager, [category_column, value_measure], expected_kinds={category_column: "column", value_measure: "measure"})
+def pbi_add_waterfall_tool(
+    extract_folder: str,
+    page: str,
+    category_column: str,
+    value_measure: str,
+    x: int,
+    y: int,
+    width: int = 420,
+    height: int = 300,
+    title: str = "",
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
+    _validate_field_references_live(
+        manager, [category_column, value_measure], expected_kinds={category_column: "column", value_measure: "measure"}
+    )
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     return _append_visual(
         extract_folder,
@@ -136,7 +170,10 @@ def pbi_add_waterfall_tool(extract_folder: str, page: str, category_column: str,
             width=width,
             height=height,
             title=title or None,
-            projections={"Category": [{"queryRef": _query_ref(category_column)}], "Y": [{"queryRef": _query_ref(value_measure)}]},
+            projections={
+                "Category": [{"queryRef": _query_ref(category_column)}],
+                "Y": [{"queryRef": _query_ref(value_measure)}],
+            },
             references=[category_column, value_measure],
             measure_home_map=home_map,
         ),

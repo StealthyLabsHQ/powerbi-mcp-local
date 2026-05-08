@@ -7,14 +7,19 @@ on:
     branches: [main]
 
 jobs:
-  offline-tests:
-    name: Offline tests (${{ matrix.os }} / py${{ matrix.python-version }})
+  test:
+    name: tests (${{ matrix.os }} / py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
         python-version: ["3.11", "3.12"]
+    env:
+      # Strict registry audit on every CI run: every public pbi_*_tool must
+      # have an @mcp.tool() wrapper. Fails fast on registration drift.
+      PBI_MCP_AUDIT: "1"
+      PBI_MCP_STRICT_REGISTRY: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -24,19 +29,19 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install dependencies (without Windows-only backends)
+      - name: Install dependencies
         shell: bash
         run: |
           python -m pip install --upgrade pip
           # Linux: skip pythonnet + pbi-pyadomd (require .NET, Windows-only PBI Desktop)
           if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
-            pip install "mcp[cli]~=1.27.0" openpyxl~=3.1.5 psutil~=7.2.2 pytest~=8.3
+            pip install "mcp[cli]~=1.27.0" openpyxl~=3.1.5 psutil~=7.2.2
+            pip install pytest~=8.3 pytest-cov~=5.0
           else
-            pip install -r requirements.txt
-            pip install pytest~=8.3
+            pip install -e ".[dev]"
           fi
 
-      - name: Syntax + import smoke test
+      - name: Syntax + import smoke
         shell: bash
         run: |
           python -c "
@@ -46,6 +51,36 @@ jobs:
           print('syntax OK')
           "
 
-      - name: Run offline tests
+      - name: Run tests (Windows — full)
+        if: matrix.os == 'windows-latest'
         shell: bash
-        run: pytest tests/test_security.py tests/test_security_regressions_local.py -v
+        run: pytest -q --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=55
+
+      - name: Run tests (Linux — offline subset)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: pytest tests/test_security.py tests/test_security_regressions_local.py tests/test_v0_10_4_analysis.py tests/test_v0_10_5_safety.py -q
+
+      - name: Upload coverage XML
+        if: matrix.os == 'windows-latest' && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  lint:
+    name: ruff (lint + format check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install ruff
+        run: pip install "ruff~=0.6"
+      - name: ruff check
+        run: ruff check src tests
+      - name: ruff format --check
+        run: ruff format --check src tests

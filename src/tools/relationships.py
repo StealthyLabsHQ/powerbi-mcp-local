@@ -138,7 +138,11 @@ def pbi_create_relationship_tool(
         relationship.ToCardinality = to_cardinality
         # 1:1 relationships must use BothDirections (SSAS hard requirement).
         effective_direction = direction
-        if cardinality.strip().casefold() == "onetoone" and direction.strip().casefold() in {"onedirection", "single", "singledirection"}:
+        if cardinality.strip().casefold() == "onetoone" and direction.strip().casefold() in {
+            "onedirection",
+            "single",
+            "singledirection",
+        }:
             effective_direction = "bothDirections"
         relationship.CrossFilteringBehavior = _map_direction(tom, effective_direction)
 
@@ -169,7 +173,15 @@ def pbi_create_relationship_tool(
     )
 
 
-def _find_relationship(model: Any, *, name: str | None, from_table: str | None, from_column: str | None, to_table: str | None, to_column: str | None) -> Any:
+def _find_relationship(
+    model: Any,
+    *,
+    name: str | None,
+    from_table: str | None,
+    from_column: str | None,
+    to_table: str | None,
+    to_column: str | None,
+) -> Any:
     for relationship in model.Relationships:
         if name and str(relationship.Name).casefold() == name.casefold():
             return relationship
@@ -317,7 +329,7 @@ def _map_cardinality(tom: Any, cardinality: str) -> tuple[Any, Any]:
     if token == "onetoone":
         return enum_cls.One, enum_cls.One
     if token == "manytomany":
-        many = getattr(enum_cls, "Many")
+        many = enum_cls.Many
         return many, many
     raise PowerBIValidationError(
         "cardinality must be one of: oneToMany, manyToOne, oneToOne, manyToMany.",

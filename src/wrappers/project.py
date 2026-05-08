@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp_core import CONNECTION_MANAGER, _run, mcp
+from mcp_core import _run, mcp
 from tools import (
     pbi_create_persistent_report_tool,
 )

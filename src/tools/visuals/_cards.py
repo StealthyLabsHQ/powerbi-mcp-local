@@ -183,9 +183,7 @@ def pbi_add_kpi_tool(
             "indicator": [
                 {
                     "properties": {
-                        "directionType": _text_literal(
-                            "Increasing" if direction == "high_is_good" else "Decreasing"
-                        )
+                        "directionType": _text_literal("Increasing" if direction == "high_is_good" else "Decreasing")
                     }
                 }
             ]

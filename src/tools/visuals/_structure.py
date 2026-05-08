@@ -13,7 +13,18 @@ from ._home_tables import _resolve_measure_home_map
 from ._refs import _query_ref
 
 
-def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str], x: int, y: int, width: int = 520, height: int = 320, title: str = "", *, manager: Any | None = None) -> dict[str, Any]:
+def pbi_add_table_visual_tool(
+    extract_folder: str,
+    page: str,
+    columns: list[str],
+    x: int,
+    y: int,
+    width: int = 520,
+    height: int = 320,
+    title: str = "",
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
     if not columns:
         raise PowerBIValidationError("columns must contain at least one field or measure.")
     _validate_field_references_live(manager, list(columns))
@@ -37,21 +48,30 @@ def pbi_add_table_visual_tool(extract_folder: str, page: str, columns: list[str]
     )
 
 
-def pbi_add_slicer_tool(extract_folder: str, page: str, column: str, x: int, y: int, width: int = 220, height: int = 120, slicer_type: str = "dropdown", *, manager: Any | None = None) -> dict[str, Any]:
+def pbi_add_slicer_tool(
+    extract_folder: str,
+    page: str,
+    column: str,
+    x: int,
+    y: int,
+    width: int = 220,
+    height: int = 120,
+    slicer_type: str = "dropdown",
+    *,
+    manager: Any | None = None,
+) -> dict[str, Any]:
     slicer_kind = slicer_type.strip().casefold()
     if slicer_kind not in {"dropdown", "list", "range", "tile"}:
-        raise PowerBIValidationError("slicer_type must be one of: dropdown, list, range, tile.", details={"slicer_type": slicer_type})
+        raise PowerBIValidationError(
+            "slicer_type must be one of: dropdown, list, range, tile.", details={"slicer_type": slicer_type}
+        )
     _validate_field_references_live(manager, [column], expected_kinds={column: "column"})
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     if slicer_kind == "tile":
         emitted_kind = "list"
         extra: dict[str, Any] = {
             "slicerType": emitted_kind,
-            "objects": {
-                "general": [
-                    {"properties": {"orientation": _int_literal(1)}}
-                ]
-            },
+            "objects": {"general": [{"properties": {"orientation": _int_literal(1)}}]},
         }
     else:
         extra = {"slicerType": slicer_kind}
@@ -122,9 +142,7 @@ def pbi_add_matrix_tool(
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     extra_single_visual = {
         "objects": {
-            "subTotals": [
-                {"properties": {"rowSubtotals": _literal_value(bool(subtotals))}}
-            ],
+            "subTotals": [{"properties": {"rowSubtotals": _literal_value(bool(subtotals))}}],
             "general": [
                 {"properties": {"layout": _text_literal("Stepped" if layout_token == "stepped" else "Tabular")}}
             ],
@@ -170,9 +188,7 @@ def pbi_add_map_tool(
     Roles: ``Category`` (location column — country, city, Lat/Long…) and
     optional ``Y`` (measure that drives bubble size).
     """
-    projections: dict[str, list[dict[str, str]]] = {
-        "Category": [{"queryRef": _query_ref(location_column)}]
-    }
+    projections: dict[str, list[dict[str, str]]] = {"Category": [{"queryRef": _query_ref(location_column)}]}
     references = [location_column]
     expected_kinds = {location_column: "column"}
     if value_measure:

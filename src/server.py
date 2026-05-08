@@ -46,29 +46,29 @@ def find_pbi_port(preferred_port: int | None = None) -> int:
     raise ValueError(f"No Power BI instance found on port {preferred_port}.")
 
 
-
-
 # Side-effect imports: each wrappers module registers its @mcp.tool()
 # wrappers as it loads, populating the FastMCP tool registry.
+from wrappers import calc_groups as _wrappers_calc_groups  # noqa: F401
 from wrappers import connection as _wrappers_connection  # noqa: F401
-from wrappers import model as _wrappers_model  # noqa: F401
-from wrappers import measures as _wrappers_measures  # noqa: F401
-from wrappers import relationships as _wrappers_relationships  # noqa: F401
-from wrappers import query as _wrappers_query  # noqa: F401
-from wrappers import quality as _wrappers_quality  # noqa: F401
 from wrappers import excel as _wrappers_excel  # noqa: F401
+from wrappers import measures as _wrappers_measures  # noqa: F401
+from wrappers import model as _wrappers_model  # noqa: F401
 from wrappers import power_query as _wrappers_power_query  # noqa: F401
+from wrappers import project as _wrappers_project  # noqa: F401
+from wrappers import quality as _wrappers_quality  # noqa: F401
+from wrappers import query as _wrappers_query  # noqa: F401
+from wrappers import relationships as _wrappers_relationships  # noqa: F401
+from wrappers import rls as _wrappers_rls  # noqa: F401
 from wrappers import tmdl as _wrappers_tmdl  # noqa: F401
 from wrappers import visuals as _wrappers_visuals  # noqa: F401
-from wrappers import project as _wrappers_project  # noqa: F401
-from wrappers import rls as _wrappers_rls  # noqa: F401
-from wrappers import calc_groups as _wrappers_calc_groups  # noqa: F401
 from wrappers import workflows as _wrappers_workflows  # noqa: F401
+
 
 @mcp.resource("powerbi://model/schema")
 def resource_model_schema() -> str:
     """Full model snapshot: tables, columns, measures, relationships."""
     import json
+
     result = _run("pbi_model_info", pbi_model_info_tool, CONNECTION_MANAGER)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -77,6 +77,7 @@ def resource_model_schema() -> str:
 def resource_model_measures() -> str:
     """All DAX measures in the active model."""
     import json
+
     result = _run("pbi_list_measures", pbi_list_measures_tool, CONNECTION_MANAGER)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -85,6 +86,7 @@ def resource_model_measures() -> str:
 def resource_model_relationships() -> str:
     """All relationships in the active model."""
     import json
+
     result = _run("pbi_list_relationships", pbi_list_relationships_tool, CONNECTION_MANAGER)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -204,7 +206,7 @@ def model_snapshot_export(output_path: str = "./docs/model.json") -> str:
 
 def _bearer_auth_middleware(app: Any, token: str) -> Any:
     """ASGI middleware that requires Authorization: Bearer <token> on HTTP requests."""
-    expected = f"Bearer {token}".encode("utf-8")
+    expected = f"Bearer {token}".encode()
 
     async def wrapped(scope: dict, receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
@@ -213,11 +215,13 @@ def _bearer_auth_middleware(app: Any, token: str) -> Any:
         headers = dict(scope.get("headers") or [])
         provided = headers.get(b"authorization", b"")
         if provided != expected:
-            await send({
-                "type": "http.response.start",
-                "status": 401,
-                "headers": [(b"content-type", b"text/plain"), (b"www-authenticate", b"Bearer")],
-            })
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [(b"content-type", b"text/plain"), (b"www-authenticate", b"Bearer")],
+                }
+            )
             await send({"type": "http.response.body", "body": b"Unauthorized"})
             return
         await app(scope, receive, send)
@@ -303,7 +307,8 @@ def main() -> None:
     if args.transport == "sse":
         logger.info(
             "SSE server starting on %s:%d (localhost-only by default)",
-            args.host, args.port,
+            args.host,
+            args.port,
         )
         if args.host != "127.0.0.1":
             logger.warning(
@@ -312,6 +317,7 @@ def main() -> None:
                 args.host,
             )
         import anyio
+
         anyio.run(_run_sse_with_auth, args.host, args.port)
     else:
         _acquire_single_instance_lock()

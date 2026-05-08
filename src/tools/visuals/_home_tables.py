@@ -15,7 +15,6 @@ from typing import Any
 from ._base import MODEL_TABLES_RELATIVE_DIR
 from ._paths import _resolve_extract_folder
 
-
 logger = logging.getLogger("tools.visuals._home_tables")
 
 
@@ -139,35 +138,35 @@ def _inspect_value_measures(
 
     for measure in value_measures:
         if measure not in measure_home_map:
-            warnings.append({
-                "measure": measure,
-                "issue": "measure_home_unresolved",
-                "hint": (
-                    "Home table not found on disk or live. Binding will fall "
-                    "back to '$Measures' which PBI refuses to render. Save the "
-                    ".pbix (Ctrl+S) to persist the measure before adding it to "
-                    "a cartesian chart."
-                ),
-            })
+            warnings.append(
+                {
+                    "measure": measure,
+                    "issue": "measure_home_unresolved",
+                    "hint": (
+                        "Home table not found on disk or live. Binding will fall "
+                        "back to '$Measures' which PBI refuses to render. Save the "
+                        ".pbix (Ctrl+S) to persist the measure before adding it to "
+                        "a cartesian chart."
+                    ),
+                }
+            )
         expr = expressions.get(measure, "")
         if expr and "[" not in expr:
-            warnings.append({
-                "measure": measure,
-                "issue": "constant_measure",
-                "hint": (
-                    "DAX expression has no column or measure reference (looks "
-                    "like a scalar constant). Line/combo charts may error out "
-                    "on render — wrap the value via CALCULATE/VAR with a "
-                    "harmless filter, or use a card visual instead."
-                ),
-                "expression_preview": expr[:120],
-            })
+            warnings.append(
+                {
+                    "measure": measure,
+                    "issue": "constant_measure",
+                    "hint": (
+                        "DAX expression has no column or measure reference (looks "
+                        "like a scalar constant). Line/combo charts may error out "
+                        "on render — wrap the value via CALCULATE/VAR with a "
+                        "harmless filter, or use a card visual instead."
+                    ),
+                    "expression_preview": expr[:120],
+                }
+            )
     return warnings
 
 
 def _persistence_risks(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        item for item in issues
-        if item.get("source") == "live_model"
-        and item.get("extract_metadata") == "missing"
-    ]
+    return [item for item in issues if item.get("source") == "live_model" and item.get("extract_metadata") == "missing"]

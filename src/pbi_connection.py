@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import collections
 import importlib
-import json
 import logging
 import math
 import os
@@ -16,12 +15,13 @@ import socket
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 
 try:
     import psutil
@@ -229,10 +229,12 @@ def _exception_chain_summary(exc: BaseException) -> list[dict[str, str]]:
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         message = str(current).strip()
-        out.append({
-            "type": type(current).__name__,
-            "message": message,
-        })
+        out.append(
+            {
+                "type": type(current).__name__,
+                "message": message,
+            }
+        )
         nxt = getattr(current, "InnerException", None)
         if nxt is None:
             nxt = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
@@ -362,8 +364,7 @@ def ensure_windows() -> None:
     """Raise when the module is used on a non-Windows host."""
     if os.name != "nt":
         raise UnsupportedPlatformError(
-            "This MCP server is Windows-only because Power BI Desktop and ADOMD/TOM "
-            "automation are Windows-only."
+            "This MCP server is Windows-only because Power BI Desktop and ADOMD/TOM automation are Windows-only."
         )
 
 
@@ -393,7 +394,9 @@ class PowerBIConnectionManager:
         # every tool call that needs a connection.
         self._instance_cache: tuple[float, list[DiscoveredInstance]] | None = None
 
-    def _record_operation(self, *, op: str, kind: str, started: float, ok_: bool, error: BaseException | None = None) -> None:
+    def _record_operation(
+        self, *, op: str, kind: str, started: float, ok_: bool, error: BaseException | None = None
+    ) -> None:
         """Append an entry to the operation history ring buffer."""
         entry: dict[str, Any] = {
             "ts": datetime.utcnow().isoformat() + "Z",
@@ -506,9 +509,7 @@ class PowerBIConnectionManager:
     def tom(self) -> Any:
         """Expose the TOM namespace to tool modules."""
         if self._tom is None:
-            raise PowerBIConfigurationError(
-                "TOM assemblies are not loaded. Call pbi_connect first."
-            )
+            raise PowerBIConfigurationError("TOM assemblies are not loaded. Call pbi_connect first.")
         return self._tom
 
     @contextmanager
@@ -652,9 +653,7 @@ class PowerBIConnectionManager:
                 return self._query_with_pyadomd(
                     state.adomd_connection, query, max_rows, timeout_seconds=timeout_seconds
                 )
-            return self._query_with_pythonnet(
-                state.adomd_connection, query, max_rows, timeout_seconds=timeout_seconds
-            )
+            return self._query_with_pythonnet(state.adomd_connection, query, max_rows, timeout_seconds=timeout_seconds)
 
         return self.run_read("execute_dax", _execute)
 
@@ -761,12 +760,7 @@ class PowerBIConnectionManager:
         candidates: list[Path] = []
 
         if localappdata:
-            candidates.append(
-                Path(localappdata)
-                / "Microsoft"
-                / "Power BI Desktop"
-                / "AnalysisServicesWorkspaces"
-            )
+            candidates.append(Path(localappdata) / "Microsoft" / "Power BI Desktop" / "AnalysisServicesWorkspaces")
             packages_root = Path(localappdata) / "Packages"
             if packages_root.exists():
                 for package_dir in packages_root.glob("Microsoft.MicrosoftPowerBIDesktop*"):
@@ -781,10 +775,7 @@ class PowerBIConnectionManager:
 
         if userprofile:
             candidates.append(
-                Path(userprofile)
-                / "Microsoft"
-                / "Power BI Desktop Store App"
-                / "AnalysisServicesWorkspaces"
+                Path(userprofile) / "Microsoft" / "Power BI Desktop Store App" / "AnalysisServicesWorkspaces"
             )
 
         extra_roots = os.getenv("PBI_WORKSPACE_ROOTS")
@@ -832,7 +823,9 @@ class PowerBIConnectionManager:
                 except (OSError, ValueError):
                     continue
 
-                workspace_path = port_file.parent.parent if port_file.parent.name.lower() == "data" else port_file.parent
+                workspace_path = (
+                    port_file.parent.parent if port_file.parent.name.lower() == "data" else port_file.parent
+                )
                 stat = port_file.stat()
                 instances.append(
                     DiscoveredInstance(
@@ -910,10 +903,7 @@ class PowerBIConnectionManager:
     ) -> tuple[Any | None, str | None, list[str]]:
         warnings: list[str] = []
         conn_str = (
-            "Provider=MSOLAP;"
-            f"Data Source=localhost:{port};"
-            f"Initial Catalog={database_name};"
-            "Integrated Security=SSPI;"
+            f"Provider=MSOLAP;Data Source=localhost:{port};Initial Catalog={database_name};Integrated Security=SSPI;"
         )
 
         for module_name in ("pyadomd", "pbi_pyadomd"):
@@ -934,9 +924,7 @@ class PowerBIConnectionManager:
             conn.Open()
             return conn, "pythonnet", warnings
         except Exception as exc:  # pragma: no cover - exercised on Windows
-            warnings.append(
-                "pythonnet ADOMD unavailable: " + flatten_exception_message(exc)
-            )
+            warnings.append("pythonnet ADOMD unavailable: " + flatten_exception_message(exc))
             self._logger.warning(
                 "ADOMD query backend unavailable for port %s: %s",
                 instance.port,
@@ -944,9 +932,7 @@ class PowerBIConnectionManager:
             )
             return None, None, warnings
 
-    def _load_analysis_services_assemblies_locked(
-        self, instance: DiscoveredInstance
-    ) -> str | None:
+    def _load_analysis_services_assemblies_locked(self, instance: DiscoveredInstance) -> str | None:
         if self._tom is not None and self._clr is not None:
             return next(iter(self._dll_search_paths), None)
 
@@ -1008,6 +994,7 @@ class PowerBIConnectionManager:
                 import Microsoft.AnalysisServices.Tabular as Tabular  # type: ignore
             except ImportError:
                 import Microsoft.AnalysisServices as _as_mod  # type: ignore
+
                 Tabular = getattr(_as_mod, "Tabular", _as_mod)
 
         try:
@@ -1048,6 +1035,7 @@ class PowerBIConnectionManager:
 
         # PATH lookup (covers user installs exposing pbidesktop.exe via PATH)
         import shutil
+
         for exe_name in ("PBIDesktop.exe", "pbidesktoprs.exe"):
             located = shutil.which(exe_name)
             if located:
@@ -1112,10 +1100,18 @@ class PowerBIConnectionManager:
         found: list[str] = []
         probes = [
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Microsoft Power BI Desktop", "InstallLocation"),
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Microsoft Power BI Desktop", "InstallLocation"),
+            (
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\WOW6432Node\Microsoft\Microsoft Power BI Desktop",
+                "InstallLocation",
+            ),
             (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Microsoft Power BI Desktop", "InstallLocation"),
             (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\PBIDesktop.exe", None),
-            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\PBIDesktop.exe", None),
+            (
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\PBIDesktop.exe",
+                None,
+            ),
         ]
         for hive, subkey, value_name in probes:
             try:
@@ -1205,22 +1201,12 @@ class PowerBIConnectionManager:
                     if len(rows) >= max_rows:
                         truncated = True
                         break
-                    rows.append(
-                        {
-                            columns[index]: serialize_value(value)
-                            for index, value in enumerate(row)
-                        }
-                    )
+                    rows.append({columns[index]: serialize_value(value) for index, value in enumerate(row)})
             else:
                 raw_rows = cursor.fetchall()
                 truncated = len(raw_rows) > max_rows
                 for row in raw_rows[:max_rows]:
-                    rows.append(
-                        {
-                            columns[index]: serialize_value(value)
-                            for index, value in enumerate(row)
-                        }
-                    )
+                    rows.append({columns[index]: serialize_value(value) for index, value in enumerate(row)})
             return {
                 "columns": columns,
                 "rows": rows,
@@ -1258,10 +1244,7 @@ class PowerBIConnectionManager:
                 if len(rows) >= max_rows:
                     truncated = True
                     break
-                row = {
-                    columns[index]: serialize_value(reader.GetValue(index))
-                    for index in range(reader.FieldCount)
-                }
+                row = {columns[index]: serialize_value(reader.GetValue(index)) for index in range(reader.FieldCount)}
                 rows.append(row)
             return {
                 "columns": columns,

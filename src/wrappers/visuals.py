@@ -96,7 +96,9 @@ def pbi_list_pages(extract_folder: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def pbi_validate_report_fields(extract_folder: str, page: str | None = None, include_hidden: bool = False) -> dict[str, Any]:
+def pbi_validate_report_fields(
+    extract_folder: str, page: str | None = None, include_hidden: bool = False
+) -> dict[str, Any]:
     """Validate report visual field bindings for broken Power BI visuals."""
     return _run(
         "pbi_validate_report_fields",

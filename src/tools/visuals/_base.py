@@ -8,18 +8,14 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
 
 from pbi_connection import PowerBIError
-
 
 DEFAULT_PAGE_WIDTH = 1280
 DEFAULT_PAGE_HEIGHT = 720
 LAYOUT_RELATIVE_PATH = Path("Report") / "Layout"
 THEMES_RELATIVE_DIR = Path("Report") / "StaticResources" / "Themes"
-DESIGN_THEME_RELATIVE_PATH = (
-    Path("Report") / "StaticResources" / "SharedResources" / "BaseThemes" / "CY26SU02.json"
-)
+DESIGN_THEME_RELATIVE_PATH = Path("Report") / "StaticResources" / "SharedResources" / "BaseThemes" / "CY26SU02.json"
 MODEL_TABLES_RELATIVE_DIR = Path("Model") / "tables"
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 

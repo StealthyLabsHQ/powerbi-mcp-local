@@ -25,12 +25,12 @@ from ._base import (
 from ._layout import _load_layout, _page_summary
 from ._paths import _resolve_extract_folder, _resolve_pbix_path
 
-
 logger = logging.getLogger("tools.visuals._io")
 
 
 def _run(callback):  # pragma: no cover — thin error-payload wrapper, mirrored by package
     from pbi_connection import error_payload
+
     try:
         return callback()
     except Exception as exc:
@@ -125,7 +125,9 @@ def _extract_pbix_zip_natively(pbix: Path, target: Path) -> dict[str, Any]:
 def pbi_extract_report_tool(pbix_path: str, extract_folder: str | None = None) -> dict[str, Any]:
     def _impl() -> dict[str, Any]:
         pbix = _resolve_pbix_path(pbix_path, must_exist=True)
-        target = _resolve_extract_folder(str(extract_folder or pbix.with_name(f"{pbix.stem}_extracted")), must_exist=False)
+        target = _resolve_extract_folder(
+            str(extract_folder or pbix.with_name(f"{pbix.stem}_extracted")), must_exist=False
+        )
         target.mkdir(parents=True, exist_ok=True)
         method = "pbi_tools_extract"
         try:
@@ -140,9 +142,7 @@ def pbi_extract_report_tool(pbix_path: str, extract_folder: str | None = None) -
             )
             if not cli_lacks_extract:
                 raise
-            logger.info(
-                "pbi-tools CLI cannot extract (likely the .core build); falling back to ZIP-native extraction."
-            )
+            logger.info("pbi-tools CLI cannot extract (likely the .core build); falling back to ZIP-native extraction.")
             fallback = _extract_pbix_zip_natively(pbix, target)
             method = fallback["method"]
         layout_path = target / LAYOUT_RELATIVE_PATH
@@ -176,7 +176,10 @@ def _run_powershell(script: str, *, timeout: float = 20.0) -> subprocess.Complet
 
 def _save_and_close_powerbi_gracefully(pbix_path: Path | None = None) -> bool:
     target_path = str(pbix_path) if pbix_path is not None else ""
-    script = "$TargetPath = " + json.dumps(target_path) + r"""
+    script = (
+        "$TargetPath = "
+        + json.dumps(target_path)
+        + r"""
 $ErrorActionPreference = 'SilentlyContinue'
 $ws = New-Object -ComObject WScript.Shell
 $names = @('PBIDesktop', 'pbidesktoprs')
@@ -213,6 +216,7 @@ do {
 if ($open -gt 0) { exit 1 }
 exit 0
 """
+    )
     try:
         return _run_powershell(script, timeout=45.0).returncode == 0
     except Exception:
@@ -242,8 +246,9 @@ def _maybe_force_close_powerbi(force: bool, pbix_path: Path | None = None) -> No
     # Resolve through the package re-export so test patches against
     # ``tools.visuals._save_and_close_powerbi_gracefully`` /
     # ``tools.visuals._force_kill_powerbi`` keep working.
-    from . import _save_and_close_powerbi_gracefully as _graceful
     from . import _force_kill_powerbi as _kill
+    from . import _save_and_close_powerbi_gracefully as _graceful
+
     if not _graceful(pbix_path):
         _kill()
     time.sleep(1.5)

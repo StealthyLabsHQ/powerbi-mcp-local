@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.10.13] — 2026-05-08 — Hardening: CI, ruff, coverage, public tests, strict audit
+
+Hotfix release on the items flagged as high-ROI in the v0.10.12 retrospective. No tool surface changes; pure infrastructure + style.
+
+### Added
+
+1. **GitHub Actions CI** (`.github/workflows/ci.yml`). Two jobs:
+   - `test` — runs `pytest -q --cov=src --cov-fail-under=55` on Windows (full deps) + a reduced offline subset on Ubuntu, with `PBI_MCP_AUDIT=1` and `PBI_MCP_STRICT_REGISTRY=1` so registry drift fails the build.
+   - `lint` — `ruff check` + `ruff format --check` on Linux.
+   - Matrix: Python 3.11 + 3.12.
+
+2. **Ruff configured in `pyproject.toml`** — line-length 120, target py311, rule sets `E F W I UP B` with pragmatic ignores for E501/B008/B904/B007/B017/B023 plus per-file ignores for the re-export façade modules.
+
+3. **Coverage configured** — `pytest-cov` in dev deps, `[tool.coverage.*]` settings in `pyproject.toml`. Baseline coverage is 55% (enforced floor in CI). Excluded from coverage: `src/tools/visuals/_io.py` (PowerShell + subprocess paths needing live env) and `src/wrappers/*.py` (thin wrappers exercised via integration).
+
+4. **Tests directory committed** — `tests/` is no longer gitignored at the project level. The 17 offline test files (~167 test cases) are now part of the repo. Three pattern-based exclusions stay gitignored for live-only scripts: `tests/demo_*.py`, `tests/smoke_e2e.py`, and `tests/test_*_local.py`.
+
+### Changed
+
+5. **Codebase formatted with `ruff format`** — 41 files reformatted to a consistent 120-column style. No semantic changes; `ruff check` passes with zero errors.
+
+6. **Imports re-organised by `ruff check --fix`** — every module now has stdlib / third-party / local imports separated and alphabetised (isort rule).
+
+### Internals
+
+- 17 wrapper-style modules (`src/wrappers/`, `src/tools/__init__.py`, `src/tools/visuals/__init__.py`) carry F401/E402 per-file ignores since their re-exports are the public surface.
+- `_audit_tool_registry(strict=True)` runs by default in CI via `PBI_MCP_STRICT_REGISTRY=1`. Locally still opt-in via env var.
+- New dev deps: `pytest-cov~=5.0`, `ruff~=0.6`.
+
+### Tests
+
+- 167 passing, 2 platform skips. Coverage 55% on Windows full-deps run.
+
 ## [0.10.12] — 2026-05-08 — Refactor phase 7 (final): server.py wrapper split
 
 The full structural refactor is **complete**. `src/server.py` shrunk from 3215 → 323 lines; the 144 `@mcp.tool()` wrappers are now distributed across 14 focused domain modules under `src/wrappers/`. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.

@@ -35,12 +35,13 @@ import subprocess
 import tempfile
 import time
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from pbi_connection import error_payload
-from ..model import pbi_model_info_tool
 
+from ..model import pbi_model_info_tool
 from ._base import (
     DEFAULT_PAGE_HEIGHT,
     DEFAULT_PAGE_WIDTH,
@@ -49,12 +50,12 @@ from ._base import (
     HEX_COLOR_RE,
     LAYOUT_RELATIVE_PATH,
     MODEL_TABLES_RELATIVE_DIR,
-    PBIToolsNotInstalledError,
-    PageNotFoundError,
-    ReportLayoutError,
     THEMES_RELATIVE_DIR,
     VISUAL_FIELD_ROLES,
     VISUAL_ROLE_KINDS,
+    PageNotFoundError,
+    PBIToolsNotInstalledError,
+    ReportLayoutError,
     VisualNotFoundError,
     VisualToolError,
 )
@@ -95,16 +96,20 @@ def _run(callback: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> 
         return error_payload(exc)
 
 
-from ._pages import (
-    pbi_create_page_tool,
-    pbi_delete_page_tool,
-    pbi_describe_page_tool,
-    pbi_get_page_tool,
-    pbi_list_pages_tool,
-    pbi_set_page_size_tool,
+from ._bindings import (
+    _assert_container_bindings,
+    _build_prototype_query,
+    _build_select_entry,
+    _from_entity_by_alias,
+    _live_model_field_index,
+    _next_alias,
+    _scan_visual_bindings,
+    _select_name_map,
+    _sync_container_query,
+    _validate_field_references_live,
+    _validate_projection_roles,
+    _visual_binding_issues,
 )
-
-
 from ._cards import (
     pbi_add_card_tool,
     pbi_add_gauge_tool,
@@ -120,55 +125,6 @@ from ._charts import (
     pbi_add_scatter_chart_tool,
     pbi_add_waterfall_tool,
 )
-from ._structure import (
-    pbi_add_map_tool,
-    pbi_add_matrix_tool,
-    pbi_add_slicer_tool,
-    pbi_add_table_visual_tool,
-)
-
-
-from ._dispatcher import (
-    _VISUAL_TYPE_DISPATCH,
-    pbi_add_visual_tool,
-)
-from ._ops import (
-    pbi_auto_grid_layout_tool,
-    pbi_convert_visual_type_tool,
-    pbi_disable_card_autoscale_tool,
-    pbi_move_visual_tool,
-    pbi_patch_layout_tool,
-    pbi_remove_visual_tool,
-    pbi_set_visual_format_property_tool,
-)
-
-
-from ._design import (
-    DESIGN_PRESETS,
-    pbi_apply_design_tool,
-    pbi_apply_theme_tool,
-    pbi_build_dashboard_tool,
-)
-from ._repair import (
-    pbi_repair_report_fields_tool,
-    pbi_validate_report_fields_tool,
-)
-
-
-from ._io import (
-    _extract_pbix_zip_natively,
-    _find_pbi_tools,
-    _force_kill_powerbi,
-    _maybe_force_close_powerbi,
-    _page_names_from_layout_bytes,
-    _run_pbi_tools,
-    _run_powershell,
-    _save_and_close_powerbi_gracefully,
-    pbi_compile_report_tool,
-    pbi_extract_report_tool,
-)
-
-
 from ._containers import (
     _append_visual,
     _base_visual_config,
@@ -180,33 +136,16 @@ from ._containers import (
     _validate_dimensions,
     _visual_payload,
 )
-
-
-from ._home_tables import (
-    _augment_measure_home_map_with_live,
-    _inspect_value_measures,
-    _persistence_risks,
-    _resolve_measure_home_map,
-    _scan_measure_home_tables,
+from ._design import (
+    DESIGN_PRESETS,
+    pbi_apply_design_tool,
+    pbi_apply_theme_tool,
+    pbi_build_dashboard_tool,
 )
-
-
-from ._bindings import (
-    _assert_container_bindings,
-    _build_prototype_query,
-    _build_select_entry,
-    _from_entity_by_alias,
-    _live_model_field_index,
-    _next_alias,
-    _scan_visual_bindings,
-    _select_name_map,
-    _sync_container_query,
-    _validate_field_references_live,
-    _validate_projection_roles,
-    _visual_binding_issues,
+from ._dispatcher import (
+    _VISUAL_TYPE_DISPATCH,
+    pbi_add_visual_tool,
 )
-
-
 from ._formatting import (
     _VISUAL_FORMAT_TYPES,
     _datapoint_fill_objects,
@@ -219,7 +158,52 @@ from ._formatting import (
     _text_literal,
     _title_objects,
 )
-
+from ._home_tables import (
+    _augment_measure_home_map_with_live,
+    _inspect_value_measures,
+    _persistence_risks,
+    _resolve_measure_home_map,
+    _scan_measure_home_tables,
+)
+from ._io import (
+    _extract_pbix_zip_natively,
+    _find_pbi_tools,
+    _force_kill_powerbi,
+    _maybe_force_close_powerbi,
+    _page_names_from_layout_bytes,
+    _run_pbi_tools,
+    _run_powershell,
+    _save_and_close_powerbi_gracefully,
+    pbi_compile_report_tool,
+    pbi_extract_report_tool,
+)
+from ._ops import (
+    pbi_auto_grid_layout_tool,
+    pbi_convert_visual_type_tool,
+    pbi_disable_card_autoscale_tool,
+    pbi_move_visual_tool,
+    pbi_patch_layout_tool,
+    pbi_remove_visual_tool,
+    pbi_set_visual_format_property_tool,
+)
+from ._pages import (
+    pbi_create_page_tool,
+    pbi_delete_page_tool,
+    pbi_describe_page_tool,
+    pbi_get_page_tool,
+    pbi_list_pages_tool,
+    pbi_set_page_size_tool,
+)
+from ._repair import (
+    pbi_repair_report_fields_tool,
+    pbi_validate_report_fields_tool,
+)
+from ._structure import (
+    pbi_add_map_tool,
+    pbi_add_matrix_tool,
+    pbi_add_slicer_tool,
+    pbi_add_table_visual_tool,
+)
 
 __all__ = [
     "pbi_add_visual_tool",

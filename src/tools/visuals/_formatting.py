@@ -14,7 +14,6 @@ from pbi_connection import PowerBIValidationError
 
 from ._base import HEX_COLOR_RE
 
-
 _VISUAL_FORMAT_TYPES = frozenset({"auto", "text", "bool", "int", "decimal", "color", "raw"})
 
 
@@ -51,7 +50,9 @@ def _solid_color(color: str) -> dict[str, Any]:
     return {"solid": {"color": {"expr": {"Literal": {"Value": f"'{color}'"}}}}}
 
 
-def _gauge_axis_objects(min_value: float | None, max_value: float | None, target_value: float | None) -> list[dict[str, Any]]:
+def _gauge_axis_objects(
+    min_value: float | None, max_value: float | None, target_value: float | None
+) -> list[dict[str, Any]]:
     properties: dict[str, Any] = {}
     if min_value is not None:
         properties["min"] = _decimal_literal(min_value)

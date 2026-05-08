@@ -6,7 +6,6 @@ import re
 
 from pbi_connection import PowerBIValidationError
 
-
 _M_BLOCKED_FUNCTION_PATTERNS = (
     r"\bWeb\.Contents\b",
     r"\bWeb\.Page\b",
@@ -41,9 +40,27 @@ M_ALLOWED_FUNCTIONS = {
 # enforcement so M idioms like `each (x)` or `if (cond) then ...` don't trip the
 # external-call gate.
 M_RESERVED_KEYWORDS = {
-    "and", "as", "each", "else", "error", "false", "if", "in", "is", "let",
-    "meta", "not", "null", "or", "otherwise", "section", "shared", "then",
-    "true", "try", "type",
+    "and",
+    "as",
+    "each",
+    "else",
+    "error",
+    "false",
+    "if",
+    "in",
+    "is",
+    "let",
+    "meta",
+    "not",
+    "null",
+    "or",
+    "otherwise",
+    "section",
+    "shared",
+    "then",
+    "true",
+    "try",
+    "type",
 }
 M_ALLOWED_PREFIXES = (
     "Binary.",

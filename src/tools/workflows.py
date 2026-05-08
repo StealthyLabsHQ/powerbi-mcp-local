@@ -61,13 +61,20 @@ def pbi_model_audit_workflow_tool(
     if validation.get("warning_count", 0):
         recommendations.append({"priority": "medium", "message": "Fix model warnings before adding new measures."})
     if dependencies.get("ok") and dependencies.get("truncated"):
-        recommendations.append({"priority": "medium", "message": "Dependency graph was truncated; narrow follow-up scans by table."})
+        recommendations.append(
+            {"priority": "medium", "message": "Dependency graph was truncated; narrow follow-up scans by table."}
+        )
     if not recommendations:
         recommendations.append({"priority": "low", "message": "Model audit found no immediate workflow blockers."})
 
     return ok(
         "Model audit workflow completed.",
-        plan=["Collect model snapshot", "Validate model", "Inspect measure dependencies", "Inspect Power Query partitions"],
+        plan=[
+            "Collect model snapshot",
+            "Validate model",
+            "Inspect measure dependencies",
+            "Inspect Power Query partitions",
+        ],
         summary={
             "table_count": len(tables),
             "measure_count": len(measures),
@@ -133,7 +140,13 @@ def pbi_excel_import_workflow_tool(
     if not apply:
         return ok(
             "Excel import workflow planned.",
-            plan=["Inspect workbook", "Map sheets to model tables", "Import workbook", "Refresh model", "Validate row counts"],
+            plan=[
+                "Inspect workbook",
+                "Map sheets to model tables",
+                "Import workbook",
+                "Refresh model",
+                "Validate row counts",
+            ],
             workbook=workbook,
             sheet_table_map=mapping,
             findings=findings,
@@ -143,7 +156,9 @@ def pbi_excel_import_workflow_tool(
         )
 
     if any(item["type"].endswith("_not_found") for item in findings):
-        raise PowerBIValidationError("Excel import workflow has blocking mapping issues.", details={"findings": findings})
+        raise PowerBIValidationError(
+            "Excel import workflow has blocking mapping issues.", details={"findings": findings}
+        )
 
     import_result = pbi_import_excel_workbook_tool(
         manager,
@@ -158,7 +173,13 @@ def pbi_excel_import_workflow_tool(
     validation = pbi_list_tables_tool(manager, include_hidden=False, include_row_counts=True)
     return ok(
         "Excel import workflow applied.",
-        plan=["Inspect workbook", "Map sheets to model tables", "Import workbook", "Refresh model", "Validate row counts"],
+        plan=[
+            "Inspect workbook",
+            "Map sheets to model tables",
+            "Import workbook",
+            "Refresh model",
+            "Validate row counts",
+        ],
         workbook=workbook,
         sheet_table_map=mapping,
         findings=findings,
@@ -210,9 +231,15 @@ def pbi_measure_workflow_tool(
 
     for result in validations:
         if result.get("valid") is False:
-            findings.append({"type": "invalid_dax", "error": result.get("error"), "error_code": result.get("error_code")})
+            findings.append(
+                {"type": "invalid_dax", "error": result.get("error"), "error_code": result.get("error_code")}
+            )
 
-    blocking = [item for item in findings if item["type"] in {"table_not_found", "invalid_measure", "measure_exists", "invalid_dax"}]
+    blocking = [
+        item
+        for item in findings
+        if item["type"] in {"table_not_found", "invalid_measure", "measure_exists", "invalid_dax"}
+    ]
     actions = [{"tool": "pbi_create_measures", "table": table, "count": len(measures), "overwrite": overwrite}]
     if not apply:
         return ok(
@@ -226,7 +253,9 @@ def pbi_measure_workflow_tool(
 
     if blocking:
         raise PowerBIValidationError("Measure workflow has blocking validation issues.", details={"findings": findings})
-    create_result = pbi_create_measures_tool(manager, table=table, measures=measures, overwrite=overwrite, stop_on_error=True)
+    create_result = pbi_create_measures_tool(
+        manager, table=table, measures=measures, overwrite=overwrite, stop_on_error=True
+    )
     return ok(
         "Measure workflow applied.",
         plan=["Inspect target table", "Check measure conflicts", "Validate DAX", "Create measures in one batch"],

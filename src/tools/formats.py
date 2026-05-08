@@ -9,6 +9,7 @@ Tools exposed:
 - ``pbi_apply_format_preset_tool`` — apply a preset to one or more measures /
   columns by delegating to ``pbi_set_format_tool``
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -16,7 +17,6 @@ from typing import Any
 from pbi_connection import PowerBIValidationError, ok
 
 from .measures import pbi_set_format_tool
-
 
 # Each preset entry: format string + a short description.
 # Format strings follow the Power BI / Excel custom number format grammar.

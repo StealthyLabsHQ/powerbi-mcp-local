@@ -8,7 +8,8 @@ from a page section and to atomically append a new one.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from pbi_connection import PowerBIValidationError, ok
 
@@ -41,7 +42,9 @@ def _validate_dimensions(x: int, y: int, width: int, height: int) -> None:
 
 
 def _page_next_z(section: dict[str, Any]) -> int:
-    z_values = [int(container.get("z", 0)) for container in section.get("visualContainers", []) if isinstance(container, dict)]
+    z_values = [
+        int(container.get("z", 0)) for container in section.get("visualContainers", []) if isinstance(container, dict)
+    ]
     return (max(z_values) + 1) if z_values else 0
 
 
@@ -144,14 +147,7 @@ def _visual_payload(container: dict[str, Any]) -> dict[str, Any]:
     objects = single_visual.get("objects", {}) if isinstance(single_visual, dict) else {}
     title_entries = objects.get("title", [])
     if title_entries:
-        title = (
-            title_entries[0]
-            .get("properties", {})
-            .get("text", {})
-            .get("expr", {})
-            .get("Literal", {})
-            .get("Value")
-        )
+        title = title_entries[0].get("properties", {}).get("text", {}).get("expr", {}).get("Literal", {}).get("Value")
     if isinstance(single_visual, dict) and "textContent" in single_visual:
         text = single_visual.get("textContent")
     return {

@@ -23,7 +23,6 @@ from mcp.server.fastmcp import FastMCP
 from pbi_connection import PowerBIConnectionManager, error_payload, logger
 from security import SECURITY
 
-
 mcp = FastMCP(
     "powerbi-desktop",
     instructions=(
@@ -82,6 +81,7 @@ def _release_pid_lock() -> None:
 def _pid_alive(pid: int) -> bool:
     try:
         import psutil
+
         return psutil.pid_exists(pid) and psutil.Process(pid).is_running()
     except Exception:
         try:
@@ -103,6 +103,7 @@ def _acquire_single_instance_lock() -> None:
                 logger.info("Single-instance: killing prior server PID %d", old_pid)
                 try:
                     import psutil
+
                     psutil.Process(old_pid).kill()
                 except Exception as exc:
                     logger.warning("Single-instance: could not kill PID %d: %s", old_pid, exc)
@@ -214,7 +215,7 @@ def _apply_profile(profile: str) -> None:
     """Prune FastMCP's registered tools based on the selected profile."""
     if profile == "all":
         return
-    from security import READ_TOOLS, WRITE_TOOLS, DESTRUCTIVE_TOOLS, GRADING_TOOLS
+    from security import GRADING_TOOLS, READ_TOOLS, WRITE_TOOLS
 
     if profile == "readonly":
         allowed = set(READ_TOOLS)

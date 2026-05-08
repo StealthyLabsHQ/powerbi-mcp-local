@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "powerbi-mcp-local"
-version = "0.10.12"
+version = "0.10.13"
 description = "FastMCP server for Power BI Desktop model, Excel, and Power Query automation."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -33,6 +33,8 @@ classifiers = [
 [project.optional-dependencies]
 dev = [
   "pytest~=8.3",
+  "pytest-cov~=5.0",
+  "ruff~=0.6",
 ]
 
 [project.urls]
@@ -53,3 +55,50 @@ include = ["src*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-ra"
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+  "src/tools/visuals/_io.py",          # subprocess + powershell — needs live env
+  "src/wrappers/*.py",                  # thin _run wrappers, exercised via integration
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [".venv", "build", "dist", "tools-bin"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "W",    # pycodestyle warnings
+  "I",    # isort
+  "UP",   # pyupgrade
+  "B",    # flake8-bugbear
+]
+ignore = [
+  "E501",  # line length — long DAX/JSON literals are intentional
+  "B008",  # mutable default in function arg — common in MCP tool signatures
+  "B904",  # raise from — many translated exceptions intentionally drop the chain
+  "E701",  # multiple statements on one line — used for terse guards
+  "E702",  # multiple statements on one line (semicolon) — same
+  "B007",  # unused loop control variable
+  "B017",  # blind assertRaises in tests
+  "B023",  # closure captures loop variable — false-positives in our nested helpers
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401", "F841"]                          # unused imports/vars in tests are fine
+"src/tools/visuals/__init__.py" = ["F401", "E402"]    # re-export façade — imports are public surface
+"src/tools/__init__.py" = ["F401"]                    # re-export façade
+"src/wrappers/__init__.py" = ["F401"]                 # re-export façade
+"src/server.py" = ["E402"]                            # wrappers loaded after find_pbi_port + fn defs (side-effect registration)

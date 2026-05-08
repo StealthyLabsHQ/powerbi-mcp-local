@@ -10,13 +10,13 @@ import threading
 import time
 import zipfile
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from pbi_connection import PowerBIValidationError, serialize_value
-
 
 READ_TOOLS = {
     "pbi_connect",
@@ -287,12 +287,14 @@ class SecurityPolicy:
     allowed_base_dirs: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_mapping(cls, mapping: dict[str, Any] | None) -> "SecurityPolicy":
+    def from_mapping(cls, mapping: dict[str, Any] | None) -> SecurityPolicy:
         data = dict(mapping or {})
         enabled = data.get("enabled_tools")
         disabled = data.get("disabled_tools", [])
         allowed_extensions = data.get("allowed_file_extensions") or data.get("allowed_excel_extensions")
-        allow_categories = {str(item).casefold() for item in data.get("allow_categories", ["read", "write", "destructive"])}
+        allow_categories = {
+            str(item).casefold() for item in data.get("allow_categories", ["read", "write", "destructive"])
+        }
         deny_categories = {str(item).casefold() for item in data.get("deny_categories", [])}
         return cls(
             allow_read="read" in allow_categories and "read" not in deny_categories,
@@ -313,7 +315,9 @@ class SecurityPolicy:
             max_excel_zip_compression_ratio=float(data.get("max_excel_zip_compression_ratio", 250.0)),
             max_excel_cells_scanned=int(data.get("max_excel_cells_scanned", 200000)),
             warn_after_calls_per_minute=int(data.get("warn_after_calls_per_minute", 120)),
-            rate_limit_calls_per_minute=int(data["rate_limit_calls_per_minute"]) if data.get("rate_limit_calls_per_minute") is not None else None,
+            rate_limit_calls_per_minute=int(data["rate_limit_calls_per_minute"])
+            if data.get("rate_limit_calls_per_minute") is not None
+            else None,
             allowed_base_dirs=[str(item) for item in data.get("allowed_base_dirs", [])],
         )
 
@@ -367,9 +371,7 @@ class SecurityManager:
     def configure_allowed_dirs(self, dirs: list[str]) -> None:
         with self._lock:
             self._allowed_dirs_override.clear()
-            self._allowed_dirs_override.extend(
-                Path(item).expanduser().resolve() for item in dirs if str(item).strip()
-            )
+            self._allowed_dirs_override.extend(Path(item).expanduser().resolve() for item in dirs if str(item).strip())
 
     def allowed_base_dirs(self, policy: SecurityPolicy | None = None) -> list[Path]:
         if self._allowed_dirs_override:
@@ -395,10 +397,7 @@ class SecurityManager:
         if isinstance(value, list):
             return [self.sanitize_for_logging(item, max_chars=max_chars) for item in value[:50]]
         if isinstance(value, dict):
-            return {
-                key: self.sanitize_for_logging(item, max_chars=max_chars)
-                for key, item in list(value.items())[:50]
-            }
+            return {key: self.sanitize_for_logging(item, max_chars=max_chars) for key, item in list(value.items())[:50]}
         return value
 
     def validate_tool_call(self, tool_name: str, params: dict[str, Any]) -> SecurityPolicy:
@@ -414,11 +413,11 @@ class SecurityManager:
                 details={"tool": tool_name, "category": category},
             )
         if category == "read" and not policy.allow_read:
-            raise SecurityPolicyError(f"Read tools are disabled by the active security policy.")
+            raise SecurityPolicyError("Read tools are disabled by the active security policy.")
         if category == "write" and not policy.allow_write:
-            raise SecurityPolicyError(f"Write tools are disabled by the active security policy.")
+            raise SecurityPolicyError("Write tools are disabled by the active security policy.")
         if category == "destructive" and not policy.allow_destructive:
-            raise SecurityPolicyError(f"Destructive tools are disabled by the active security policy.")
+            raise SecurityPolicyError("Destructive tools are disabled by the active security policy.")
         self._record_call(tool_name, policy)
         _validate_params(tool_name, params, policy)
         return policy
@@ -431,7 +430,9 @@ class SecurityManager:
             self._calls.append(now)
             count = len(self._calls)
         if policy.warn_after_calls_per_minute and count > policy.warn_after_calls_per_minute:
-            self._logger.warning("SECURITY: high MCP tool call volume detected (%d calls/minute, latest=%s)", count, tool_name)
+            self._logger.warning(
+                "SECURITY: high MCP tool call volume detected (%d calls/minute, latest=%s)", count, tool_name
+            )
         if policy.rate_limit_calls_per_minute is not None and count > policy.rate_limit_calls_per_minute:
             raise SecurityPolicyError(
                 "MCP tool call rate limit exceeded.",
@@ -559,7 +560,9 @@ def validate_expression_text(expression: str, *, max_length: int = 200000) -> No
     if not text:
         raise SecurityPolicyError("Expressions cannot be empty.")
     if len(text) > max_length:
-        raise SecurityPolicyError("Expression exceeds the maximum allowed length.", details={"length": len(text), "limit": max_length})
+        raise SecurityPolicyError(
+            "Expression exceeds the maximum allowed length.", details={"length": len(text), "limit": max_length}
+        )
 
 
 def validate_query_text(query: str, *, max_length: int = 100000) -> None:
@@ -567,7 +570,9 @@ def validate_query_text(query: str, *, max_length: int = 100000) -> None:
     if not text:
         raise SecurityPolicyError("Query cannot be empty.")
     if len(text) > max_length:
-        raise SecurityPolicyError("Query exceeds the maximum allowed length.", details={"length": len(text), "limit": max_length})
+        raise SecurityPolicyError(
+            "Query exceeds the maximum allowed length.", details={"length": len(text), "limit": max_length}
+        )
 
 
 def validate_model_expression(expression: str, *, kind: str = "expression", max_length: int = 200000) -> None:
@@ -674,7 +679,9 @@ def inspect_excel_archive(
         policy=chosen,
     )
     if not zipfile.is_zipfile(resolved):
-        raise SecurityPolicyError("Excel workbook is not a valid Open XML ZIP archive.", details={"path": str(resolved)})
+        raise SecurityPolicyError(
+            "Excel workbook is not a valid Open XML ZIP archive.", details={"path": str(resolved)}
+        )
     uncompressed_limit = max_uncompressed_bytes or chosen.max_excel_zip_uncompressed_bytes
     member_limit = max_members or chosen.max_excel_zip_members
     ratio_limit = max_ratio or chosen.max_excel_zip_compression_ratio
@@ -697,7 +704,11 @@ def inspect_excel_archive(
             if info.file_size and (info.file_size / compressed) > ratio_limit:
                 raise SecurityPolicyError(
                     "Excel workbook looks like a ZIP bomb.",
-                    details={"member": info.filename, "ratio": round(info.file_size / compressed, 2), "limit": ratio_limit},
+                    details={
+                        "member": info.filename,
+                        "ratio": round(info.file_size / compressed, 2),
+                        "limit": ratio_limit,
+                    },
                 )
     return resolved
 

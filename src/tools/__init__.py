@@ -1,5 +1,10 @@
 """Tool exports for the Power BI MCP server."""
 
+from .calc_groups import (
+    pbi_create_calc_group_tool,
+    pbi_delete_calc_group_tool,
+    pbi_list_calc_groups_tool,
+)
 from .excel import (
     excel_auto_width_tool,
     excel_create_sheet_tool,
@@ -17,6 +22,8 @@ from .excel import (
 )
 from .formats import (
     PRESETS as FORMAT_PRESETS,
+)
+from .formats import (
     pbi_apply_format_preset_tool,
     pbi_list_format_presets_tool,
 )
@@ -57,6 +64,7 @@ from .model import (
     pbi_system_health_tool,
     pbi_validate_model_tool,
 )
+from .persistent_report import pbi_create_persistent_report_tool
 from .power_query import (
     pbi_bulk_import_excel_tool,
     pbi_create_csv_import_query_tool,
@@ -74,16 +82,6 @@ from .project import (
     pbi_patch_tmdl_measure_tool,
     pbi_read_tmdl_file_tool,
     pbi_write_tmdl_file_tool,
-)
-from .persistent_report import pbi_create_persistent_report_tool
-from .query import (
-    pbi_execute_dax_as_role_tool,
-    pbi_execute_dax_tool,
-    pbi_measure_dependencies_tool,
-    pbi_refresh_tool,
-    pbi_trace_query_tool,
-    pbi_validate_dax_semantic_tool,
-    pbi_validate_dax_tool,
 )
 from .quality import (
     pbi_audit_model_tool,
@@ -109,6 +107,15 @@ from .quality import (
     pbi_validate_star_schema_tool,
     pbi_validate_visual_bindings_tool,
 )
+from .query import (
+    pbi_execute_dax_as_role_tool,
+    pbi_execute_dax_tool,
+    pbi_measure_dependencies_tool,
+    pbi_refresh_tool,
+    pbi_trace_query_tool,
+    pbi_validate_dax_semantic_tool,
+    pbi_validate_dax_tool,
+)
 from .relationships import (
     pbi_create_relationship_tool,
     pbi_delete_relationship_tool,
@@ -123,11 +130,6 @@ from .rls import (
     pbi_remove_role_member_tool,
     pbi_set_role_filter_tool,
 )
-from .calc_groups import (
-    pbi_create_calc_group_tool,
-    pbi_delete_calc_group_tool,
-    pbi_list_calc_groups_tool,
-)
 from .visuals import (
     pbi_add_bar_chart_tool,
     pbi_add_card_tool,
@@ -141,7 +143,6 @@ from .visuals import (
     pbi_add_matrix_tool,
     pbi_add_scatter_chart_tool,
     pbi_add_slicer_tool,
-    pbi_disable_card_autoscale_tool,
     pbi_add_table_visual_tool,
     pbi_add_text_box_tool,
     pbi_add_visual_tool,
@@ -153,15 +154,16 @@ from .visuals import (
     pbi_compile_report_tool,
     pbi_convert_visual_type_tool,
     pbi_create_page_tool,
-    pbi_describe_page_tool,
     pbi_delete_page_tool,
+    pbi_describe_page_tool,
+    pbi_disable_card_autoscale_tool,
     pbi_extract_report_tool,
     pbi_get_page_tool,
     pbi_list_pages_tool,
     pbi_move_visual_tool,
     pbi_patch_layout_tool,
-    pbi_repair_report_fields_tool,
     pbi_remove_visual_tool,
+    pbi_repair_report_fields_tool,
     pbi_set_page_size_tool,
     pbi_set_visual_format_property_tool,
     pbi_validate_report_fields_tool,

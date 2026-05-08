@@ -330,7 +330,9 @@ def pbi_lint_report_layout(
 
 
 @mcp.tool()
-def pbi_validate_visual_bindings(extract_folder: str, page: str | None = None, include_hidden: bool = False) -> dict[str, Any]:
+def pbi_validate_visual_bindings(
+    extract_folder: str, page: str | None = None, include_hidden: bool = False
+) -> dict[str, Any]:
     """Validate every field referenced by extracted report visuals against the active model."""
     return _run(
         "pbi_validate_visual_bindings",

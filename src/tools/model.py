@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from pbi_connection import (
@@ -109,7 +108,9 @@ def pbi_system_health_tool(manager: Any) -> dict[str, Any]:
         try:
             cached_pid = getattr(instance, "pid", None) if instance else None
             current_pid = manager._pid_for_port(snapshot["port"]) if snapshot["port"] else None
-            snapshot["pid_match"] = (cached_pid is not None and current_pid is not None and cached_pid == current_pid) or None
+            snapshot["pid_match"] = (
+                cached_pid is not None and current_pid is not None and cached_pid == current_pid
+            ) or None
         except Exception:
             snapshot["pid_match"] = None
         snapshot["tom_available"] = getattr(state, "tom_server", None) is not None
@@ -212,10 +213,7 @@ def pbi_list_tables_tool(
     if include_row_counts:
         for table_payload in payload["tables"]:
             try:
-                query = (
-                    "EVALUATE "
-                    f"ROW(\"__RowCount\", COUNTROWS({dax_quote_table_name(table_payload['name'])}))"
-                )
+                query = f'EVALUATE ROW("__RowCount", COUNTROWS({dax_quote_table_name(table_payload["name"])}))'
                 result = manager.run_adomd_query(query, max_rows=1)
                 rows = result.get("rows", [])
                 if rows:
@@ -271,9 +269,9 @@ def pbi_export_model_tool(
     )
     model_json = redact_sensitive_data(
         {
-        "tables": snapshot["tables"],
-        "measures": snapshot["measures"],
-        "relationships": snapshot["relationships"],
+            "tables": snapshot["tables"],
+            "measures": snapshot["measures"],
+            "relationships": snapshot["relationships"],
         }
     )
     written_path = None
@@ -767,35 +765,49 @@ def pbi_validate_model_tool(
                 m_hidden = bool(getattr(measure, "IsHidden", False))
 
                 if not m_expr:
-                    issues.append({
-                        "type": "empty_expression",
-                        "object": f"{table_name}[{m_name}]",
-                        "message": "Measure has an empty DAX expression.",
-                    })
+                    issues.append(
+                        {
+                            "type": "empty_expression",
+                            "object": f"{table_name}[{m_name}]",
+                            "message": "Measure has an empty DAX expression.",
+                        }
+                    )
 
                 if not m_format and not m_hidden and not is_hidden and include_warnings:
-                    warnings.append({
-                        "type": "missing_format_string",
-                        "object": f"{table_name}[{m_name}]",
-                        "message": "Visible measure has no format string set.",
-                    })
+                    warnings.append(
+                        {
+                            "type": "missing_format_string",
+                            "object": f"{table_name}[{m_name}]",
+                            "message": "Visible measure has no format string set.",
+                        }
+                    )
 
                 measure_name_index.setdefault(m_name.casefold(), []).append(table_name)
 
-            if not is_hidden and not is_calc_group and table_name not in tables_with_rels and not has_measures and include_warnings:
-                warnings.append({
-                    "type": "orphan_table",
-                    "object": table_name,
-                    "message": "Table has no relationships and no measures — may be unused.",
-                })
+            if (
+                not is_hidden
+                and not is_calc_group
+                and table_name not in tables_with_rels
+                and not has_measures
+                and include_warnings
+            ):
+                warnings.append(
+                    {
+                        "type": "orphan_table",
+                        "object": table_name,
+                        "message": "Table has no relationships and no measures — may be unused.",
+                    }
+                )
 
         for m_name_lower, tables_list in measure_name_index.items():
             if len(tables_list) > 1:
-                issues.append({
-                    "type": "duplicate_measure_name",
-                    "object": m_name_lower,
-                    "message": f"Measure name exists in multiple tables: {', '.join(tables_list)}.",
-                })
+                issues.append(
+                    {
+                        "type": "duplicate_measure_name",
+                        "object": m_name_lower,
+                        "message": f"Measure name exists in multiple tables: {', '.join(tables_list)}.",
+                    }
+                )
 
         return {
             "issues": issues,

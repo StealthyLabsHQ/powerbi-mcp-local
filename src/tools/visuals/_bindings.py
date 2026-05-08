@@ -16,7 +16,6 @@ from ._base import VISUAL_FIELD_ROLES, VISUAL_ROLE_KINDS
 from ._layout import _dump_embedded_json, _parse_embedded_json
 from ._refs import _normalize_reference, _query_ref, _split_column_ref
 
-
 logger = logging.getLogger("tools.visuals._bindings")
 
 
@@ -114,7 +113,9 @@ def _sync_container_query(container: dict[str, Any], prototype_query: dict[str, 
         )
 
 
-def _live_model_field_index(manager: Any | None, *, include_hidden: bool) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+def _live_model_field_index(
+    manager: Any | None, *, include_hidden: bool
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     if manager is None:
         return None, {"status": "unavailable", "reason": "manager_not_provided"}
     # Resolve through the visuals package re-export so test patches against
@@ -197,17 +198,19 @@ def _validate_projection_roles(
             if ref.casefold() in index["measures"]:
                 actual_kind = "measure"
             else:
-                for table_lc, col_lc in index["columns"]:
+                for _table_lc, col_lc in index["columns"]:
                     if col_lc == ref.casefold():
                         actual_kind = "column"
                         break
             if actual_kind is not None and actual_kind != expected_kind:
-                role_kind_mismatches.append({
-                    "role": role,
-                    "reference": ref,
-                    "expected_kind": expected_kind,
-                    "actual_kind": actual_kind,
-                })
+                role_kind_mismatches.append(
+                    {
+                        "role": role,
+                        "reference": ref,
+                        "expected_kind": expected_kind,
+                        "actual_kind": actual_kind,
+                    }
+                )
     if role_kind_mismatches:
         raise PowerBIValidationError(
             "Projection role/kind mismatch — at least one reference is the wrong kind for its role.",
@@ -241,6 +244,7 @@ def _validate_field_references_live(
     expected_kinds = expected_kinds or {}
 
     import difflib
+
     measure_names = sorted(index.get("measures", {}).keys())
     column_short_names = sorted({col_lc for _t, col_lc in index.get("columns", set())})
 
@@ -260,62 +264,69 @@ def _validate_field_references_live(
             table, column = normalized.split(".", 1)
             if (table.casefold(), column.casefold()) not in index["columns"]:
                 suggestions = _close_column_names(column)
-                missing.append({
-                    "reference": ref,
-                    "kind": expected_kind or "column",
-                    "inferred_kind": "column",
-                    "hint": "use 'Table.Column', 'Table[Column]', or \"'Table With Spaces'[Column]\"",
-                    "did_you_mean": suggestions,
-                })
+                missing.append(
+                    {
+                        "reference": ref,
+                        "kind": expected_kind or "column",
+                        "inferred_kind": "column",
+                        "hint": "use 'Table.Column', 'Table[Column]', or \"'Table With Spaces'[Column]\"",
+                        "did_you_mean": suggestions,
+                    }
+                )
         else:
             measure_hit = normalized.casefold() in index["measures"]
             column_short_hit = any(col_lc == normalized.casefold() for _table_lc, col_lc in index["columns"])
             if expected_kind == "column":
                 qualified_examples = sorted(
-                    {f"{tbl}.{col}" for tbl_lc, col_lc in index["columns"]
-                     for tbl, col in [(_t, _c) for (_t, _c) in [(tbl_lc, col_lc)]]
-                     if col_lc == normalized.casefold()}
+                    {
+                        f"{tbl}.{col}"
+                        for tbl_lc, col_lc in index["columns"]
+                        for tbl, col in [(_t, _c) for (_t, _c) in [(tbl_lc, col_lc)]]
+                        if col_lc == normalized.casefold()
+                    }
                 )
-                hint = (
-                    "axis/category/rows expect a column — qualify with the table "
-                    "(e.g. 'Date.Year' or 'Date[Year]')."
-                )
+                hint = "axis/category/rows expect a column — qualify with the table (e.g. 'Date.Year' or 'Date[Year]')."
                 if qualified_examples:
                     hint += f" Try one of: {', '.join(qualified_examples)}."
-                missing.append({
-                    "reference": ref,
-                    "kind": "column",
-                    "inferred_kind": "measure" if measure_hit else ("column" if column_short_hit else "unknown"),
-                    "hint": hint,
-                    "did_you_mean": _close_column_names(normalized),
-                })
+                missing.append(
+                    {
+                        "reference": ref,
+                        "kind": "column",
+                        "inferred_kind": "measure" if measure_hit else ("column" if column_short_hit else "unknown"),
+                        "hint": hint,
+                        "did_you_mean": _close_column_names(normalized),
+                    }
+                )
             elif expected_kind == "measure":
                 if not measure_hit:
-                    missing.append({
-                        "reference": ref,
-                        "kind": "measure",
-                        "inferred_kind": "column" if column_short_hit else "unknown",
-                        "hint": "values/Y/indicator expect a measure — check spelling against the live model's measure list.",
-                        "did_you_mean": _close_measure_names(normalized),
-                    })
+                    missing.append(
+                        {
+                            "reference": ref,
+                            "kind": "measure",
+                            "inferred_kind": "column" if column_short_hit else "unknown",
+                            "hint": "values/Y/indicator expect a measure — check spelling against the live model's measure list.",
+                            "did_you_mean": _close_measure_names(normalized),
+                        }
+                    )
             else:
                 if not measure_hit:
                     suggestions = _close_measure_names(normalized) or _close_column_names(normalized)
-                    missing.append({
-                        "reference": ref,
-                        "kind": "measure",
-                        "inferred_kind": "column" if column_short_hit else "unknown",
-                        "hint": (
-                            "no measure with that exact name in the live model — "
-                            "check spelling, or pass a 'Table.Column' / 'Table[Column]' "
-                            "form if you meant a column."
-                        ),
-                        "did_you_mean": suggestions,
-                    })
+                    missing.append(
+                        {
+                            "reference": ref,
+                            "kind": "measure",
+                            "inferred_kind": "column" if column_short_hit else "unknown",
+                            "hint": (
+                                "no measure with that exact name in the live model — "
+                                "check spelling, or pass a 'Table.Column' / 'Table[Column]' "
+                                "form if you meant a column."
+                            ),
+                            "did_you_mean": suggestions,
+                        }
+                    )
     if missing:
         raise PowerBIValidationError(
-            f"Field reference(s) not found in the live model: "
-            f"{', '.join(item['reference'] for item in missing)}",
+            f"Field reference(s) not found in the live model: {', '.join(item['reference'] for item in missing)}",
             details={
                 "missing": missing,
                 "checked": list(references),
@@ -356,11 +367,29 @@ def _visual_binding_issues(
     if isinstance(projections, dict):
         if repair and visual_type == "gauge" and "Value" in projections and "Y" not in projections:
             projections["Y"] = projections.pop("Value")
-            issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "projection_role_repaired", "from": "Value", "to": "Y"})
+            issues.append(
+                {
+                    "page": page_name,
+                    "visual_id": visual_id,
+                    "visual_type": visual_type,
+                    "issue": "projection_role_repaired",
+                    "from": "Value",
+                    "to": "Y",
+                }
+            )
             repairs += 1
         for role, items in list(projections.items()):
             if allowed_roles is not None and role not in allowed_roles:
-                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "unexpected_projection_role", "role": role, "allowed_roles": sorted(allowed_roles)})
+                issues.append(
+                    {
+                        "page": page_name,
+                        "visual_id": visual_id,
+                        "visual_type": visual_type,
+                        "issue": "unexpected_projection_role",
+                        "role": role,
+                        "allowed_roles": sorted(allowed_roles),
+                    }
+                )
             if not isinstance(items, list):
                 continue
             for item in items:
@@ -372,10 +401,27 @@ def _visual_binding_issues(
                     short = _query_ref(query_ref)
                     expected = select_names.get(short.casefold())
                 if expected is None:
-                    issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "query_ref_not_found", "queryRef": query_ref})
+                    issues.append(
+                        {
+                            "page": page_name,
+                            "visual_id": visual_id,
+                            "visual_type": visual_type,
+                            "issue": "query_ref_not_found",
+                            "queryRef": query_ref,
+                        }
+                    )
                     continue
                 if query_ref != expected:
-                    issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "query_ref_mismatch", "queryRef": query_ref, "expected": expected})
+                    issues.append(
+                        {
+                            "page": page_name,
+                            "visual_id": visual_id,
+                            "visual_type": visual_type,
+                            "issue": "query_ref_mismatch",
+                            "queryRef": query_ref,
+                            "expected": expected,
+                        }
+                    )
                     if repair:
                         item["queryRef"] = expected
                         repairs += 1
@@ -389,11 +435,27 @@ def _visual_binding_issues(
             column = entry.get("Column", {})
             if isinstance(column, dict):
                 column_name = str(column.get("Property", ""))
-                source_ref = column.get("Expression", {}).get("SourceRef", {}) if isinstance(column.get("Expression"), dict) else {}
+                source_ref = (
+                    column.get("Expression", {}).get("SourceRef", {})
+                    if isinstance(column.get("Expression"), dict)
+                    else {}
+                )
                 alias = str(source_ref.get("Source", "")) if isinstance(source_ref, dict) else ""
                 table_name = from_entities.get(alias, "")
-                if model_fields is not None and (table_name.casefold(), column_name.casefold()) not in model_fields["columns"]:
-                    issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "column_not_found", "table": table_name, "column": column_name})
+                if (
+                    model_fields is not None
+                    and (table_name.casefold(), column_name.casefold()) not in model_fields["columns"]
+                ):
+                    issues.append(
+                        {
+                            "page": page_name,
+                            "visual_id": visual_id,
+                            "visual_type": visual_type,
+                            "issue": "column_not_found",
+                            "table": table_name,
+                            "column": column_name,
+                        }
+                    )
             continue
         if "Measure" not in entry:
             continue
@@ -401,7 +463,9 @@ def _visual_binding_issues(
         if not isinstance(measure, dict):
             continue
         measure_name = str(measure.get("Property", ""))
-        source_ref = measure.get("Expression", {}).get("SourceRef", {}) if isinstance(measure.get("Expression"), dict) else {}
+        source_ref = (
+            measure.get("Expression", {}).get("SourceRef", {}) if isinstance(measure.get("Expression"), dict) else {}
+        )
         alias = str(source_ref.get("Source", "")) if isinstance(source_ref, dict) else ""
         entity = from_entities.get(alias, "")
         home_table = measure_home_map.get(measure_name)
@@ -414,15 +478,48 @@ def _visual_binding_issues(
         if model_fields is not None:
             measure_tables = model_fields["measures"].get(measure_name.casefold(), set())
             if not measure_tables:
-                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_not_found", "measure": measure_name})
+                issues.append(
+                    {
+                        "page": page_name,
+                        "visual_id": visual_id,
+                        "visual_type": visual_type,
+                        "issue": "measure_not_found",
+                        "measure": measure_name,
+                    }
+                )
             elif entity and entity != "$Measures" and entity.casefold() not in measure_tables:
-                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_table_mismatch", "measure": measure_name, "table": entity, "expected_tables": sorted(measure_tables)})
+                issues.append(
+                    {
+                        "page": page_name,
+                        "visual_id": visual_id,
+                        "visual_type": visual_type,
+                        "issue": "measure_table_mismatch",
+                        "measure": measure_name,
+                        "table": entity,
+                        "expected_tables": sorted(measure_tables),
+                    }
+                )
         if entity == "$Measures":
             if not home_table:
-                issues.append({"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_unknown", "measure": measure_name})
+                issues.append(
+                    {
+                        "page": page_name,
+                        "visual_id": visual_id,
+                        "visual_type": visual_type,
+                        "issue": "measure_home_table_unknown",
+                        "measure": measure_name,
+                    }
+                )
                 continue
             if not repair:
-                item = {"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_needs_repair", "measure": measure_name, "home_table": home_table}
+                item = {
+                    "page": page_name,
+                    "visual_id": visual_id,
+                    "visual_type": visual_type,
+                    "issue": "measure_home_table_needs_repair",
+                    "measure": measure_name,
+                    "home_table": home_table,
+                }
                 if home_table_source == "live_model":
                     item.update({"source": "live_model", "extract_metadata": "missing"})
                 issues.append(item)
@@ -453,7 +550,14 @@ def _visual_binding_issues(
                 new_alias = _next_alias(aliases)
                 from_entries.append({"Name": new_alias, "Entity": home_table})
                 measure.setdefault("Expression", {}).setdefault("SourceRef", {})["Source"] = new_alias
-            item = {"page": page_name, "visual_id": visual_id, "visual_type": visual_type, "issue": "measure_home_table_repaired", "measure": measure_name, "home_table": home_table}
+            item = {
+                "page": page_name,
+                "visual_id": visual_id,
+                "visual_type": visual_type,
+                "issue": "measure_home_table_repaired",
+                "measure": measure_name,
+                "home_table": home_table,
+            }
             if home_table_source == "live_model":
                 item.update({"source": "live_model", "extract_metadata": "missing"})
             issues.append(item)
@@ -481,12 +585,17 @@ def _scan_visual_bindings(
         if not isinstance(section, dict):
             continue
         section_name = str(section.get("displayName") or section.get("name") or "")
-        if page and page.casefold() not in {str(section.get("name", "")).casefold(), str(section.get("displayName", "")).casefold()}:
+        if page and page.casefold() not in {
+            str(section.get("name", "")).casefold(),
+            str(section.get("displayName", "")).casefold(),
+        }:
             continue
         for container in section.get("visualContainers", []) or []:
             if not isinstance(container, dict):
                 continue
-            found, fixed = _visual_binding_issues(container, section_name, measure_home_map, model_fields, repair=repair)
+            found, fixed = _visual_binding_issues(
+                container, section_name, measure_home_map, model_fields, repair=repair
+            )
             issues.extend(found)
             repairs += fixed
     return issues, repairs
@@ -494,6 +603,10 @@ def _scan_visual_bindings(
 
 def _assert_container_bindings(container: dict[str, Any], measure_home_map: dict[str, str]) -> None:
     issues, _ = _visual_binding_issues(container, "", measure_home_map, repair=False)
-    blocking = [item for item in issues if item.get("issue") in {"unexpected_projection_role", "query_ref_not_found", "query_ref_mismatch"}]
+    blocking = [
+        item
+        for item in issues
+        if item.get("issue") in {"unexpected_projection_role", "query_ref_not_found", "query_ref_mismatch"}
+    ]
     if blocking:
         raise PowerBIValidationError("Visual field bindings are invalid.", details={"issues": blocking})
