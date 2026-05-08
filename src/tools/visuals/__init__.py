@@ -180,6 +180,7 @@ from ._ops import (
     pbi_patch_layout_tool,
     pbi_remove_visual_tool,
     pbi_set_visual_format_property_tool,
+    pbi_update_visual_bindings_tool,
 )
 from ._pages import (
     pbi_create_page_tool,
@@ -236,5 +237,6 @@ __all__ = [
     "pbi_remove_visual_tool",
     "pbi_set_page_size_tool",
     "pbi_set_visual_format_property_tool",
+    "pbi_update_visual_bindings_tool",
     "pbi_validate_report_fields_tool",
 ]

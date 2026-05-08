@@ -3,6 +3,69 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.11.0] — 2026-05-08 — Visual binding edits without remove + recreate
+
+First feature drop after the 0.10.x stabilisation cycle. Adds
+`pbi_update_visual_bindings_tool` so callers can mutate an existing visual's
+projections + `prototypeQuery` in place. The previous workflow
+(`pbi_remove_visual` → `pbi_add_*`) regenerated the visual with a fresh
+visual id, dropping any side properties (size, format, theme, conditional
+formatting, manual tweaks) the user had already applied.
+
+### Added
+
+1. **`pbi_update_visual_bindings_tool`** in `src/tools/visuals/_ops.py`. Two
+   modes, mutually exclusive:
+   - `projections={role: [refs]}` — full replacement of every role.
+   - `add_to_role` / `remove_from_role={role: [refs]}` — incremental edits
+     against the visual's current bindings; roles that empty out are
+     dropped automatically.
+
+   References use the same forms accepted everywhere else in the visuals
+   API: `Table.Column`, `Table[Column]`, `'Table With Spaces'[Column]`, or
+   bare measure names.
+
+   Validation chain (re-uses existing pre-flight code):
+   - Roles checked against `VISUAL_FIELD_ROLES[visual_type]`.
+   - Reference kinds (column vs measure) checked against
+     `VISUAL_ROLE_KINDS[visual_type]` when a `manager` is connected.
+   - Each reference checked against the live model (with did-you-mean
+     suggestions on miss).
+   - Final binding sanity check via `_assert_container_bindings`.
+
+   `prototypeQuery` is rebuilt from the new reference set so PBI Desktop
+   renders the visual correctly. `dry_run=True` runs every check but skips
+   the layout disk write — response carries `dry_run=True` and the
+   write log.
+
+   The tool returns `old_projections`, `new_projections`, `added`, and
+   `removed` so callers can audit the change without diffing layouts.
+
+### Internals
+
+- New helper `_recover_full_refs_from_prototype()` in `_ops.py` walks the
+  visual's existing `prototypeQuery` Select+From entries to recover the
+  full `Table.Column` form from the short `queryRef` stored in
+  `projections`, so incremental edits don't need the caller to know about
+  the column-name aliasing.
+- Tool count: 131 → 132. Strict registry audit (`PBI_MCP_STRICT_REGISTRY=1`)
+  clean: 132/132.
+- Registered as `write` in `security.WRITE_TOOLS`. Not exposed in the
+  `grading` profile.
+
+### Tests
+
+- 7 new offline tests in `tests/test_visuals.py`:
+  - `test_update_visual_bindings_replace_projections`
+  - `test_update_visual_bindings_incremental_add_and_remove`
+  - `test_update_visual_bindings_rejects_mutually_exclusive_inputs`
+  - `test_update_visual_bindings_rejects_no_input`
+  - `test_update_visual_bindings_rejects_unknown_role`
+  - `test_update_visual_bindings_rejects_empty_result`
+  - `test_update_visual_bindings_dry_run_does_not_persist`
+- 174 passing locally (was 167), 2 platform skips. ruff check + format
+  check clean.
+
 ## [0.10.15] — 2026-05-08 — Docs refresh + CI Windows fixes
 
 Documentation pass + two CI Windows test fixes spotted in v0.10.14's first run.

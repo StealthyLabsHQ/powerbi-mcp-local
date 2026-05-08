@@ -160,6 +160,7 @@ WRITE_TOOLS = {
     "pbi_add_gauge",
     "pbi_add_text_box",
     "pbi_move_visual",
+    "pbi_update_visual_bindings",
     "pbi_apply_design",
     "pbi_apply_theme",
     "pbi_build_dashboard",

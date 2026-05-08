@@ -1,5 +1,5 @@
 """Visual + layout ops: remove, move, format, convert type, auto-grid,
-patch layout, disable card autoscale.
+patch layout, disable card autoscale, update bindings.
 """
 
 from __future__ import annotations
@@ -16,25 +16,32 @@ from ._base import (
     DEFAULT_PAGE_HEIGHT,
     DEFAULT_PAGE_WIDTH,
     VISUAL_FIELD_ROLES,
+    VISUAL_ROLE_KINDS,
     ReportLayoutError,
     _run,
 )
 from ._bindings import (
+    _assert_container_bindings,
+    _build_prototype_query,
     _live_model_field_index,
     _scan_visual_bindings,
+    _sync_container_query,
+    _validate_field_references_live,
     _validate_projection_roles,
 )
 from ._containers import _find_visual, _validate_dimensions, _visual_payload
 from ._formatting import _decimal_literal, _encode_visual_format_value
-from ._home_tables import _persistence_risks, _scan_measure_home_tables
+from ._home_tables import _persistence_risks, _resolve_measure_home_map, _scan_measure_home_tables
 from ._io import _maybe_force_close_powerbi, _page_names_from_layout_bytes
 from ._layout import (
     _dump_embedded_json,
     _find_page,
     _load_layout,
     _save_layout,
+    dry_run_layout_writes,
 )
 from ._paths import _layout_path, _resolve_extract_folder, _resolve_pbix_path
+from ._refs import _query_ref
 
 
 def pbi_patch_layout_tool(
@@ -422,6 +429,247 @@ def pbi_set_visual_format_property_tool(
             applied=sorted(encoded.keys()),
         )
 
+    return _run(_impl)
+
+
+def _recover_full_refs_from_prototype(
+    prototype_query: dict[str, Any],
+    projections: dict[str, Any],
+) -> dict[str, list[str]]:
+    """Recover ``{role: [full_ref, ...]}`` from a visual's existing
+    ``prototypeQuery`` + ``projections``. Columns return ``Table.Column``,
+    measures return the bare measure name.
+    """
+    select_by_name: dict[str, dict[str, Any]] = {}
+    for entry in prototype_query.get("Select", []) or []:
+        if isinstance(entry, dict) and entry.get("Name"):
+            select_by_name[str(entry["Name"])] = entry
+    from_alias_to_entity: dict[str, str] = {}
+    for entry in prototype_query.get("From", []) or []:
+        if isinstance(entry, dict):
+            from_alias_to_entity[str(entry.get("Name", ""))] = str(entry.get("Entity", ""))
+
+    full_by_role: dict[str, list[str]] = {}
+    if not isinstance(projections, dict):
+        return full_by_role
+    for role, items in projections.items():
+        refs: list[str] = []
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            qref = str(item.get("queryRef", ""))
+            entry = select_by_name.get(qref)
+            if isinstance(entry, dict) and isinstance(entry.get("Column"), dict):
+                column = entry["Column"]
+                source_ref = (
+                    column.get("Expression", {}).get("SourceRef", {})
+                    if isinstance(column.get("Expression"), dict)
+                    else {}
+                )
+                alias = str(source_ref.get("Source", "")) if isinstance(source_ref, dict) else ""
+                table = from_alias_to_entity.get(alias, "")
+                prop = str(column.get("Property", qref))
+                refs.append(f"{table}.{prop}" if table else prop)
+            elif isinstance(entry, dict) and isinstance(entry.get("Measure"), dict):
+                measure = entry["Measure"]
+                refs.append(str(measure.get("Property", qref)))
+            else:
+                refs.append(qref)
+        full_by_role[str(role)] = refs
+    return full_by_role
+
+
+def pbi_update_visual_bindings_tool(
+    extract_folder: str,
+    page: str,
+    visual_id: str,
+    projections: dict[str, list[str]] | None = None,
+    add_to_role: dict[str, list[str]] | None = None,
+    remove_from_role: dict[str, list[str]] | None = None,
+    *,
+    manager: Any | None = None,
+    include_hidden: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Update an existing visual's field bindings without removing and
+    recreating it. Modes:
+
+    - ``projections``: full replacement of all roles. dict keyed by role
+      name (e.g. ``"Category"``, ``"Y"``, ``"Values"``); each value is a
+      list of field references (``"Table.Column"`` for columns or bare
+      measure names).
+    - ``add_to_role`` / ``remove_from_role``: incremental edits to specific
+      roles. Same value shape. Roles that end up empty after a remove are
+      dropped from ``projections``.
+
+    ``projections`` is mutually exclusive with the incremental params.
+    Roles are validated against ``VISUAL_FIELD_ROLES[visual_type]``; field
+    references are validated against the live model when ``manager`` is
+    supplied. The ``prototypeQuery`` is rebuilt from the new reference set
+    so Power BI Desktop renders the visual correctly. ``dry_run=True`` runs
+    every check but skips the layout disk write.
+    """
+
+    def _impl() -> dict[str, Any]:
+        if projections is not None and (add_to_role is not None or remove_from_role is not None):
+            raise PowerBIValidationError(
+                "projections is mutually exclusive with add_to_role / remove_from_role.",
+                details={"visual_id": visual_id},
+            )
+        if projections is None and add_to_role is None and remove_from_role is None:
+            raise PowerBIValidationError(
+                "pass projections OR at least one of add_to_role / remove_from_role.",
+                details={"visual_id": visual_id},
+            )
+        for source in (projections, add_to_role, remove_from_role):
+            if source is None:
+                continue
+            if not isinstance(source, dict):
+                raise PowerBIValidationError(
+                    "projections / add_to_role / remove_from_role must be dicts of {role: [refs]}.",
+                    details={"visual_id": visual_id},
+                )
+            for role, refs in source.items():
+                if not isinstance(role, str) or not role.strip():
+                    raise PowerBIValidationError(
+                        "role names must be non-empty strings.",
+                        details={"role": repr(role)},
+                    )
+                if not isinstance(refs, list):
+                    raise PowerBIValidationError(
+                        f"role '{role}' value must be a list of field reference strings.",
+                        details={"role": role},
+                    )
+
+        folder, layout = _load_layout(extract_folder)
+        section = _find_page(layout, page)
+        _, container, config = _find_visual(section, visual_id)
+        single_visual = config.setdefault("singleVisual", {})
+        visual_type = str(single_visual.get("visualType", "") or "")
+        if not visual_type:
+            raise PowerBIValidationError(
+                f"Visual '{visual_id}' has no visualType set; cannot update bindings.",
+                details={"visual_id": visual_id},
+            )
+
+        current_projections = single_visual.get("projections", {}) or {}
+        current_prototype = single_visual.get("prototypeQuery", {}) or {}
+        old_full_refs = _recover_full_refs_from_prototype(current_prototype, current_projections)
+
+        if projections is not None:
+            new_full_refs: dict[str, list[str]] = {}
+            for role, refs in projections.items():
+                cleaned = [str(ref).strip() for ref in refs if isinstance(ref, str) and str(ref).strip()]
+                # dedupe while preserving order
+                seen: set[str] = set()
+                deduped: list[str] = []
+                for ref in cleaned:
+                    if ref not in seen:
+                        seen.add(ref)
+                        deduped.append(ref)
+                if deduped:
+                    new_full_refs[role] = deduped
+        else:
+            new_full_refs = {role: list(refs) for role, refs in old_full_refs.items()}
+            if remove_from_role:
+                for role, refs in remove_from_role.items():
+                    if role not in new_full_refs:
+                        continue
+                    short_to_drop = {_query_ref(str(ref)).casefold() for ref in refs if isinstance(ref, str)}
+                    new_full_refs[role] = [
+                        item for item in new_full_refs[role] if _query_ref(item).casefold() not in short_to_drop
+                    ]
+                    if not new_full_refs[role]:
+                        new_full_refs.pop(role, None)
+            if add_to_role:
+                for role, refs in add_to_role.items():
+                    bucket = new_full_refs.setdefault(role, [])
+                    existing_short = {_query_ref(item).casefold() for item in bucket}
+                    for ref in refs:
+                        if not isinstance(ref, str) or not ref.strip():
+                            continue
+                        cleaned = ref.strip()
+                        short = _query_ref(cleaned).casefold()
+                        if short in existing_short:
+                            continue
+                        bucket.append(cleaned)
+                        existing_short.add(short)
+
+        if not new_full_refs:
+            raise PowerBIValidationError(
+                "Update would leave the visual with no field bindings; remove the visual instead.",
+                details={"visual_id": visual_id, "visual_type": visual_type},
+            )
+
+        # Convert {role: [full_ref]} → {role: [{"queryRef": short}]}
+        new_projections: dict[str, list[dict[str, str]]] = {
+            role: [{"queryRef": _query_ref(ref)} for ref in refs] for role, refs in new_full_refs.items()
+        }
+
+        # Role allowlist + (with manager) ref-kind validation per role.
+        _validate_projection_roles(visual_type, new_projections, manager=manager, include_hidden=include_hidden)
+
+        # Live-model existence check per ref, with expected_kind from VISUAL_ROLE_KINDS.
+        all_refs: list[str] = []
+        expected_kinds: dict[str, str] = {}
+        role_kinds = VISUAL_ROLE_KINDS.get(visual_type, {})
+        for role, refs in new_full_refs.items():
+            kind = role_kinds.get(role)
+            for ref in refs:
+                if ref not in all_refs:
+                    all_refs.append(ref)
+                if kind and kind != "any":
+                    expected_kinds.setdefault(ref, kind)
+        _validate_field_references_live(manager, all_refs, expected_kinds=expected_kinds, include_hidden=include_hidden)
+
+        # Rebuild prototypeQuery from full refs so PBI Desktop renders.
+        measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
+        new_prototype = _build_prototype_query(all_refs, measure_home_map)
+
+        single_visual["projections"] = new_projections
+        single_visual["prototypeQuery"] = new_prototype
+        container["config"] = _dump_embedded_json(config)
+        _sync_container_query(container, new_prototype)
+        _assert_container_bindings(container, measure_home_map)
+        _save_layout(folder, layout)
+
+        added = [
+            {"role": role, "reference": ref}
+            for role, refs in new_full_refs.items()
+            for ref in refs
+            if ref not in old_full_refs.get(role, [])
+        ]
+        removed = [
+            {"role": role, "reference": ref}
+            for role, refs in old_full_refs.items()
+            for ref in refs
+            if ref not in new_full_refs.get(role, [])
+        ]
+
+        return ok(
+            f"Visual '{visual_id}' bindings updated.",
+            extract_folder=str(folder),
+            page=str(section.get("displayName") or section.get("name")),
+            visual_id=visual_id,
+            visual_type=visual_type,
+            old_projections=old_full_refs,
+            new_projections=new_full_refs,
+            added=added,
+            removed=removed,
+            references=all_refs,
+            changed=bool(added or removed),
+        )
+
+    if dry_run:
+        with dry_run_layout_writes() as write_log:
+            result = _run(_impl)
+        result = dict(result or {})
+        result["dry_run"] = True
+        result["write_log"] = list(write_log)
+        result["message"] = "[dry-run] " + str(result.get("message", ""))
+        return result
     return _run(_impl)
 
 

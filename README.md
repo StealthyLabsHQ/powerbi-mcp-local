@@ -11,7 +11,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 131](https://img.shields.io/badge/tools-131-orange)](#tool-catalog)
+[![Tools 132](https://img.shields.io/badge/tools-132-orange)](#tool-catalog)
 [![CI](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml/badge.svg)](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml)
 
 </div>
@@ -141,7 +141,7 @@ Setup guides:
 <a id="tool-catalog"></a>
 ## Tool Catalog
 
-131 MCP tools are grouped into these areas:
+132 MCP tools are grouped into these areas:
 
 | Area | Coverage |
 | --- | --- |
@@ -160,6 +160,13 @@ Unified visual creation is available through:
 
 ```text
 pbi_add_visual(visual_type, config)
+```
+
+In-place binding edits (no remove + recreate) via:
+
+```text
+pbi_update_visual_bindings(extract_folder, page, visual_id,
+                           projections={"Y": ["Total Sales"]})
 ```
 
 ## Automation Flow

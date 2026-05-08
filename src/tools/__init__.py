@@ -166,6 +166,7 @@ from .visuals import (
     pbi_repair_report_fields_tool,
     pbi_set_page_size_tool,
     pbi_set_visual_format_property_tool,
+    pbi_update_visual_bindings_tool,
     pbi_validate_report_fields_tool,
 )
 from .workflows import (
@@ -312,6 +313,7 @@ __all__ = [
     "pbi_describe_page_tool",
     "pbi_disable_card_autoscale_tool",
     "pbi_set_visual_format_property_tool",
+    "pbi_update_visual_bindings_tool",
     "pbi_remove_visual_tool",
     "pbi_move_visual_tool",
     "pbi_apply_theme_tool",

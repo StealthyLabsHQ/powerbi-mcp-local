@@ -31,6 +31,7 @@ from tools.visuals import (
     pbi_add_donut_chart_tool,
     pbi_add_gauge_tool,
     pbi_add_labelled_card_tool,
+    pbi_add_line_chart_tool,
     pbi_add_slicer_tool,
     pbi_apply_theme_tool,
     pbi_auto_grid_layout_tool,
@@ -48,6 +49,7 @@ from tools.visuals import (
     pbi_patch_layout_tool,
     pbi_remove_visual_tool,
     pbi_set_visual_format_property_tool,
+    pbi_update_visual_bindings_tool,
 )
 
 
@@ -833,6 +835,114 @@ class VisualToolTests(unittest.TestCase):
             self.assertIn("mismatches", ctx.exception.details)
             kinds = [m["actual_kind"] for m in ctx.exception.details["mismatches"]]
             self.assertIn("measure", kinds)
+
+    def test_update_visual_bindings_replace_projections(self) -> None:
+        added = pbi_add_line_chart_tool(str(self.extract_folder), "Overview", "Dim_Date.Year", ["CA Total"], 20, 20)
+        self.assertTrue(added["ok"], added)
+        visual_id = added["visual"]["id"]
+
+        result = pbi_update_visual_bindings_tool(
+            str(self.extract_folder),
+            "Overview",
+            visual_id,
+            projections={"Category": ["Dim_Date.Month"], "Y": ["Margin %"]},
+        )
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["visual_type"], "lineChart")
+        self.assertEqual(result["new_projections"], {"Category": ["Dim_Date.Month"], "Y": ["Margin %"]})
+        self.assertTrue(result["changed"])
+
+        layout = _read_layout(self.extract_folder)
+        cfg = json.loads(layout["sections"][0]["visualContainers"][0]["config"])
+        sv = cfg["singleVisual"]
+        self.assertEqual(sv["projections"]["Category"][0]["queryRef"], "Month")
+        self.assertEqual(sv["projections"]["Y"][0]["queryRef"], "Margin %")
+        # prototypeQuery must be rebuilt with the new entities
+        from_entities = {entry["Name"]: entry["Entity"] for entry in sv["prototypeQuery"]["From"]}
+        self.assertIn("Dim_Date", from_entities.values())
+
+    def test_update_visual_bindings_incremental_add_and_remove(self) -> None:
+        added = pbi_add_line_chart_tool(str(self.extract_folder), "Overview", "Dim_Date.Year", ["CA Total"], 20, 20)
+        visual_id = added["visual"]["id"]
+
+        added_result = pbi_update_visual_bindings_tool(
+            str(self.extract_folder),
+            "Overview",
+            visual_id,
+            add_to_role={"Y": ["Margin %"]},
+        )
+        self.assertTrue(added_result["ok"], added_result)
+        self.assertEqual(set(added_result["new_projections"]["Y"]), {"CA Total", "Margin %"})
+        self.assertEqual([item["reference"] for item in added_result["added"]], ["Margin %"])
+
+        removed_result = pbi_update_visual_bindings_tool(
+            str(self.extract_folder),
+            "Overview",
+            visual_id,
+            remove_from_role={"Y": ["CA Total"]},
+        )
+        self.assertTrue(removed_result["ok"], removed_result)
+        self.assertEqual(removed_result["new_projections"]["Y"], ["Margin %"])
+        self.assertEqual([item["reference"] for item in removed_result["removed"]], ["CA Total"])
+
+    def test_update_visual_bindings_rejects_mutually_exclusive_inputs(self) -> None:
+        added = pbi_add_card_tool(str(self.extract_folder), "Overview", "CA Total", 10, 10)
+        visual_id = added["visual"]["id"]
+        result = pbi_update_visual_bindings_tool(
+            str(self.extract_folder),
+            "Overview",
+            visual_id,
+            projections={"Values": ["Margin %"]},
+            add_to_role={"Values": ["CA Total"]},
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertIn("mutually exclusive", str(result["error"]["message"]))
+
+    def test_update_visual_bindings_rejects_no_input(self) -> None:
+        added = pbi_add_card_tool(str(self.extract_folder), "Overview", "CA Total", 10, 10)
+        visual_id = added["visual"]["id"]
+        result = pbi_update_visual_bindings_tool(str(self.extract_folder), "Overview", visual_id)
+        self.assertFalse(result["ok"], result)
+
+    def test_update_visual_bindings_rejects_unknown_role(self) -> None:
+        added = pbi_add_card_tool(str(self.extract_folder), "Overview", "CA Total", 10, 10)
+        visual_id = added["visual"]["id"]
+        result = pbi_update_visual_bindings_tool(
+            str(self.extract_folder),
+            "Overview",
+            visual_id,
+            projections={"Bogus": ["CA Total"]},
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertIn("Bogus", str(result["error"]["details"]))
+
+    def test_update_visual_bindings_rejects_empty_result(self) -> None:
+        added = pbi_add_line_chart_tool(str(self.extract_folder), "Overview", "Dim_Date.Year", ["CA Total"], 20, 20)
+        visual_id = added["visual"]["id"]
+        result = pbi_update_visual_bindings_tool(
+            str(self.extract_folder),
+            "Overview",
+            visual_id,
+            remove_from_role={"Category": ["Dim_Date.Year"], "Y": ["CA Total"]},
+        )
+        self.assertFalse(result["ok"], result)
+        self.assertIn("no field bindings", str(result["error"]["message"]))
+
+    def test_update_visual_bindings_dry_run_does_not_persist(self) -> None:
+        added = pbi_add_card_tool(str(self.extract_folder), "Overview", "CA Total", 10, 10)
+        visual_id = added["visual"]["id"]
+        before = json.dumps(_read_layout(self.extract_folder), sort_keys=True)
+        result = pbi_update_visual_bindings_tool(
+            str(self.extract_folder),
+            "Overview",
+            visual_id,
+            projections={"Values": ["Margin %"]},
+            dry_run=True,
+        )
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result.get("dry_run"))
+        after = json.dumps(_read_layout(self.extract_folder), sort_keys=True)
+        self.assertEqual(before, after, "dry_run must not persist layout changes")
 
     def test_format_presets_catalogue_and_apply(self) -> None:
         listing = pbi_list_format_presets_tool(filter_substring="percent")
