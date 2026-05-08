@@ -5,79 +5,64 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import tempfile
-import threading
 import time
 import uuid
 import zipfile
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 from pbi_connection import PowerBIError, PowerBINotFoundError, PowerBIValidationError, error_payload, ok
 from security import SECURITY, resolve_local_path
 from ..model import pbi_model_info_tool
 
-DEFAULT_PAGE_WIDTH = 1280
-DEFAULT_PAGE_HEIGHT = 720
-LAYOUT_RELATIVE_PATH = Path("Report") / "Layout"
-THEMES_RELATIVE_DIR = Path("Report") / "StaticResources" / "Themes"
-DESIGN_THEME_RELATIVE_PATH = Path("Report") / "StaticResources" / "SharedResources" / "BaseThemes" / "CY26SU02.json"
-MODEL_TABLES_RELATIVE_DIR = Path("Model") / "tables"
-HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
-DEFAULT_VISUAL_SIZES = {
-    "card": (200, 120),
-    "bar_chart": (400, 300),
-    "line_chart": (420, 300),
-    "donut": (320, 280),
-    "table": (520, 320),
-    "waterfall": (420, 300),
-    "slicer": (220, 120),
-    "text": (280, 80),
-    "gauge": (280, 220),
-    "kpi": (260, 140),
-    "map": (420, 320),
-}
-VISUAL_FIELD_ROLES = {
-    "card": {"Values"},
-    "clusteredBarChart": {"Category", "Y", "Series"},
-    "clusteredColumnChart": {"Category", "Y", "Series"},
-    "lineChart": {"Category", "Y"},
-    "donutChart": {"Category", "Y"},
-    "tableEx": {"Values"},
-    "waterfallChart": {"Category", "Y"},
-    "slicer": {"Values"},
-    "gauge": {"Y", "Goal"},
-    "kpi": {"Indicator", "TrendLine", "Goal"},
-    "map": {"Category", "Y"},
-    "scatterChart": {"Category", "X", "Y", "Size", "Series"},
-    "lineClusteredColumnComboChart": {"Category", "Y", "Y2", "Series"},
-    "pivotTable": {"Rows", "Columns", "Values"},
-}
-
-# Per-role expected reference kind ("column", "measure", or "any"). Used by the
-# pre-flight projection role validator to catch "wrong field kind in role"
-# mistakes (e.g. an LLM puts a measure into Category) at tool-call time, before
-# we ever write the layout.
-VISUAL_ROLE_KINDS: dict[str, dict[str, str]] = {
-    "card": {"Values": "measure"},
-    "clusteredBarChart": {"Category": "column", "Y": "measure", "Series": "column"},
-    "clusteredColumnChart": {"Category": "column", "Y": "measure", "Series": "column"},
-    "lineChart": {"Category": "column", "Y": "measure"},
-    "donutChart": {"Category": "column", "Y": "measure"},
-    "tableEx": {"Values": "any"},
-    "waterfallChart": {"Category": "column", "Y": "measure"},
-    "slicer": {"Values": "column"},
-    "gauge": {"Y": "measure", "Goal": "measure"},
-    "kpi": {"Indicator": "measure", "TrendLine": "column", "Goal": "measure"},
-    "map": {"Category": "column", "Y": "measure"},
-    "scatterChart": {"Category": "column", "X": "measure", "Y": "measure", "Size": "measure", "Series": "column"},
-    "lineClusteredColumnComboChart": {"Category": "column", "Y": "measure", "Y2": "measure", "Series": "column"},
-    "pivotTable": {"Rows": "column", "Columns": "column", "Values": "measure"},
-}
+# Constants, errors, and design presets live in dedicated submodules so the
+# rest of the package can import them without circular-import risk.
+from ._base import (
+    DEFAULT_PAGE_HEIGHT,
+    DEFAULT_PAGE_WIDTH,
+    DEFAULT_VISUAL_SIZES,
+    DESIGN_THEME_RELATIVE_PATH,
+    HEX_COLOR_RE,
+    LAYOUT_RELATIVE_PATH,
+    MODEL_TABLES_RELATIVE_DIR,
+    PBIToolsNotInstalledError,
+    PageNotFoundError,
+    ReportLayoutError,
+    THEMES_RELATIVE_DIR,
+    VISUAL_FIELD_ROLES,
+    VISUAL_ROLE_KINDS,
+    VisualNotFoundError,
+    VisualToolError,
+)
+from ._layout import (
+    _LAYOUT_WRITE_TL,
+    _dump_embedded_json,
+    _find_page,
+    _is_dry_run,
+    _load_layout,
+    _next_page_name,
+    _normalize_page_name,
+    _page_summary,
+    _parse_embedded_json,
+    _record_dry_run_write,
+    _save_layout,
+    dry_run_layout_writes,
+)
+from ._paths import (
+    _layout_path,
+    _resolve_extract_folder,
+    _resolve_pbix_path,
+    _resolve_theme_path,
+)
+from ._refs import (
+    _BRACKET_REF_RE,
+    _normalize_reference,
+    _query_ref,
+    _split_column_ref,
+)
 
 DESIGN_PRESETS: dict[str, dict[str, Any]] = {
     "powerbi-navy-pro": {
@@ -158,26 +143,6 @@ DESIGN_PRESETS: dict[str, dict[str, Any]] = {
 logger = logging.getLogger(__name__)
 
 
-class VisualToolError(PowerBIError):
-    code = "visual_error"
-
-
-class PBIToolsNotInstalledError(VisualToolError):
-    code = "pbi_tools_not_found"
-
-
-class ReportLayoutError(VisualToolError):
-    code = "report_layout_error"
-
-
-class PageNotFoundError(VisualToolError):
-    code = "report_page_not_found"
-
-
-class VisualNotFoundError(VisualToolError):
-    code = "report_visual_not_found"
-
-
 def _run(callback: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any) -> dict[str, Any]:
     try:
         return callback(*args, **kwargs)
@@ -244,214 +209,6 @@ def _run_pbi_tools(arguments: list[str]) -> dict[str, Any]:
     }
 
 
-def _resolve_pbix_path(pbix_path: str, *, must_exist: bool) -> Path:
-    return resolve_local_path(pbix_path, must_exist=must_exist, allowed_extensions={".pbix"})
-
-
-def _resolve_extract_folder(extract_folder: str, *, must_exist: bool) -> Path:
-    return resolve_local_path(extract_folder, must_exist=must_exist)
-
-
-def _resolve_theme_path(theme_json_path: str) -> Path:
-    return resolve_local_path(theme_json_path, must_exist=True, allowed_extensions={".json"})
-
-
-def _layout_path(extract_folder: Path) -> Path:
-    return extract_folder / LAYOUT_RELATIVE_PATH
-
-
-def _load_layout(extract_folder: str | Path) -> tuple[Path, dict[str, Any]]:
-    folder = _resolve_extract_folder(str(extract_folder), must_exist=True)
-    if not folder.is_dir():
-        raise ReportLayoutError("Extract folder does not exist or is not a directory.", details={"path": str(folder)})
-    layout_path = _layout_path(folder)
-    if not layout_path.exists():
-        raise ReportLayoutError("Report/Layout file was not found in the extract folder.", details={"path": str(layout_path)})
-    try:
-        layout = json.loads(layout_path.read_text(encoding="utf-16-le"))
-    except UnicodeDecodeError as exc:
-        raise ReportLayoutError("Report/Layout could not be decoded as UTF-16-LE.", details={"path": str(layout_path)}) from exc
-    except json.JSONDecodeError as exc:
-        raise ReportLayoutError("Report/Layout is not valid JSON.", details={"path": str(layout_path), "line": exc.lineno}) from exc
-    if not isinstance(layout, dict):
-        raise ReportLayoutError("Report/Layout root must be a JSON object.", details={"path": str(layout_path)})
-    layout.setdefault("sections", [])
-    return folder, layout
-
-
-_LAYOUT_WRITE_TL = threading.local()
-
-
-def _is_dry_run() -> bool:
-    return bool(getattr(_LAYOUT_WRITE_TL, "active", False))
-
-
-def _record_dry_run_write(folder: Path, layout: dict[str, Any]) -> None:
-    log = getattr(_LAYOUT_WRITE_TL, "log", None)
-    if log is None:
-        return
-    sections = layout.get("sections", []) or []
-    log.append({
-        "folder": str(folder),
-        "section_count": len(sections),
-        "visual_count": sum(len(s.get("visualContainers", []) or []) for s in sections if isinstance(s, dict)),
-    })
-
-
-@contextmanager
-def dry_run_layout_writes() -> Iterator[list[dict[str, Any]]]:
-    """While active, ``_save_layout`` records the would-be write instead of
-    flushing to disk. Yields the list that captures one entry per intercepted
-    write — callers can return it as a "preview" payload.
-    """
-    _LAYOUT_WRITE_TL.active = True
-    _LAYOUT_WRITE_TL.log = []
-    try:
-        yield _LAYOUT_WRITE_TL.log
-    finally:
-        _LAYOUT_WRITE_TL.active = False
-        _LAYOUT_WRITE_TL.log = None
-
-
-def _save_layout(extract_folder: Path, layout: dict[str, Any]) -> None:
-    """Atomic layout write with .bak fallback.
-
-    1. Serialise to a sibling temp file (``Layout.tmp.<pid>``).
-    2. Copy the existing Layout (if any) to ``Layout.bak`` so a previous
-       known-good version is recoverable after a crash mid-write.
-    3. ``os.replace`` the temp onto Layout — atomic on Windows + POSIX.
-
-    On any exception during steps 1/2, the original Layout is untouched.
-    """
-    if _is_dry_run():
-        _record_dry_run_write(extract_folder, layout)
-        return
-    layout_path = _layout_path(extract_folder)
-    layout_path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = json.dumps(layout, ensure_ascii=False, indent=2).encode("utf-16-le")
-
-    tmp_path = layout_path.with_name(f"{layout_path.name}.tmp.{os.getpid()}")
-    bak_path = layout_path.with_name(f"{layout_path.name}.bak")
-    try:
-        tmp_path.write_bytes(encoded)
-        if layout_path.exists():
-            try:
-                # Refresh the .bak with the current good content before overwrite.
-                bak_path.write_bytes(layout_path.read_bytes())
-            except OSError as exc:  # non-fatal — backup is best-effort
-                logger.warning("Layout backup failed (%s); proceeding with atomic write.", exc)
-        os.replace(tmp_path, layout_path)
-    finally:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
-
-
-def _parse_embedded_json(value: Any, default: Any) -> Any:
-    if value in (None, ""):
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    if not isinstance(value, str):
-        return default
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return default
-
-
-def _dump_embedded_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
-def _normalize_page_name(display_name: str) -> str:
-    cleaned = "".join(char for char in display_name if char.isalnum())
-    return cleaned or "Page"
-
-
-def _next_page_name(layout: dict[str, Any], display_name: str) -> str:
-    existing = {str(section.get("name", "")) for section in layout.get("sections", [])}
-    base = f"ReportSection{_normalize_page_name(display_name)}"
-    if base not in existing:
-        return base
-    index = 1
-    while f"{base}{index}" in existing:
-        index += 1
-    return f"{base}{index}"
-
-
-def _find_page(layout: dict[str, Any], page: str) -> dict[str, Any]:
-    wanted = page.casefold()
-    for section in layout.get("sections", []):
-        name = str(section.get("name", ""))
-        display_name = str(section.get("displayName", ""))
-        if name.casefold() == wanted or display_name.casefold() == wanted:
-            return section
-    raise PageNotFoundError(
-        f"Page '{page}' was not found.",
-        details={"page": page, "available_pages": [str(item.get("displayName") or item.get("name")) for item in layout.get("sections", [])]},
-    )
-
-
-def _page_summary(section: dict[str, Any]) -> dict[str, Any]:
-    visuals = section.get("visualContainers", []) or []
-    return {
-        "name": str(section.get("name", "")),
-        "display_name": str(section.get("displayName", "")),
-        "width": int(section.get("width", DEFAULT_PAGE_WIDTH)),
-        "height": int(section.get("height", DEFAULT_PAGE_HEIGHT)),
-        "visual_count": len(visuals),
-    }
-
-
-# Match the standard Power BI bracket forms: Table[Column] or 'Table With Spaces'[Column].
-_BRACKET_REF_RE = re.compile(r"^\s*'?(?P<table>[^'\[\]]+?)'?\s*\[\s*(?P<column>[^\[\]]+?)\s*\]\s*$")
-
-
-def _normalize_reference(reference: str) -> str:
-    """Normalise a user-supplied field reference into ``"Table.Column"`` form.
-
-    Accepts (case-insensitive on whitespace; surrounding quotes optional):
-    - ``"Table.Column"`` (existing canonical form, returned as-is)
-    - ``"Table[Column]"``
-    - ``"'Table With Spaces'[Column]"``
-    - ``"BareMeasureName"`` (measure references stay unchanged)
-
-    The downstream tooling (``_split_column_ref``, ``_query_ref``) treats the
-    returned string as ``Table.Column``.
-    """
-    if not isinstance(reference, str):
-        return reference  # type: ignore[return-value]
-    raw = reference.strip()
-    if not raw:
-        return raw
-    match = _BRACKET_REF_RE.match(raw)
-    if match:
-        table = match.group("table").strip()
-        column = match.group("column").strip()
-        return f"{table}.{column}"
-    return raw
-
-
-def _split_column_ref(reference: str) -> tuple[str, str]:
-    normalized = _normalize_reference(reference)
-    if "." not in normalized:
-        raise PowerBIValidationError(
-            "Column references must use 'TableName.ColumnName', 'TableName[ColumnName]', "
-            "or '\\'Table Name\\'[Column Name]' format.",
-            details={"reference": reference},
-        )
-    table, column = normalized.rsplit(".", 1)
-    if not table.strip() or not column.strip():
-        raise PowerBIValidationError(
-            "Column references must include both a table and a column name.",
-            details={"reference": reference},
-        )
-    return table.strip(), column.strip()
-
-
 def _unique_visual_id() -> str:
     return uuid.uuid4().hex[:20]
 
@@ -466,16 +223,6 @@ def _validate_dimensions(x: int, y: int, width: int, height: int) -> None:
 def _page_next_z(section: dict[str, Any]) -> int:
     z_values = [int(container.get("z", 0)) for container in section.get("visualContainers", []) if isinstance(container, dict)]
     return (max(z_values) + 1) if z_values else 0
-
-
-def _query_ref(reference: str) -> str:
-    """Return the short queryRef name (column part only, without table prefix).
-
-    Accepts the same flexible reference forms as :func:`_normalize_reference`
-    (``Table.Column``, ``Table[Column]``, ``'Table'[Column]``, bare measure).
-    """
-    normalized = _normalize_reference(reference)
-    return normalized.split(".", 1)[1] if "." in normalized else normalized
 
 
 def _scan_measure_home_tables(extract_folder: Path) -> dict[str, str]:
@@ -1117,124 +864,18 @@ def _assert_container_bindings(container: dict[str, Any], measure_home_map: dict
         raise PowerBIValidationError("Visual field bindings are invalid.", details={"issues": blocking})
 
 
-def _literal_value(value: Any) -> dict[str, Any]:
-    return {"expr": {"Literal": {"Value": json.dumps(value)}}}
-
-
-def _decimal_literal(value: float) -> dict[str, Any]:
-    """Power BI numeric literal (Decimal). Uses 'D' suffix expected by the report engine."""
-    return {"expr": {"Literal": {"Value": f"{float(value)}D"}}}
-
-
-def _int_literal(value: int) -> dict[str, Any]:
-    return {"expr": {"Literal": {"Value": f"{int(value)}L"}}}
-
-
-def _text_literal(value: str) -> dict[str, Any]:
-    """Power BI canonical text literal: 'value' with embedded quotes doubled.
-
-    PBI's Literal.Value field for text uses single-quoted form (the older
-    json.dumps-derived '"…"' style is silently ignored by some visual
-    serializers, which is why titles set that way never render).
-    """
-    escaped = str(value).replace("'", "''")
-    return {"expr": {"Literal": {"Value": f"'{escaped}'"}}}
-
-
-def _solid_color(color: str) -> dict[str, Any]:
-    if not HEX_COLOR_RE.match(color):
-        raise PowerBIValidationError(
-            "color must match '#RRGGBB'.",
-            details={"value": color},
-        )
-    return {"solid": {"color": {"expr": {"Literal": {"Value": f"'{color}'"}}}}}
-
-
-def _gauge_axis_objects(min_value: float | None, max_value: float | None, target_value: float | None) -> list[dict[str, Any]]:
-    properties: dict[str, Any] = {}
-    if min_value is not None:
-        properties["min"] = _decimal_literal(min_value)
-    if max_value is not None:
-        properties["max"] = _decimal_literal(max_value)
-    if target_value is not None:
-        properties["target"] = _decimal_literal(target_value)
-    if not properties:
-        return []
-    return [{"properties": properties}]
-
-
-_VISUAL_FORMAT_TYPES = frozenset({"auto", "text", "bool", "int", "decimal", "color", "raw"})
-
-
-def _encode_visual_format_value(value: Any, hint: str | None = None) -> Any:
-    """Encode a Python value as a Power BI visual format property.
-
-    ``hint`` (optional, one of ``text``, ``bool``, ``int``, ``decimal``,
-    ``color``, ``raw``) selects the literal form. ``auto`` (default) infers
-    from the Python type. ``raw`` returns the value untouched so callers can
-    pass an already-shaped dict (e.g. a measure binding).
-    """
-    if hint is not None and hint not in _VISUAL_FORMAT_TYPES:
-        raise PowerBIValidationError(
-            f"unknown property type hint '{hint}'.",
-            details={"hint": hint, "allowed": sorted(_VISUAL_FORMAT_TYPES)},
-        )
-    if hint == "raw":
-        return value
-    if hint == "color":
-        if not isinstance(value, str):
-            raise PowerBIValidationError("color values must be strings.", details={"value": repr(value)})
-        return _solid_color(value)
-    if hint == "text":
-        return _text_literal(str(value))
-    if hint == "bool":
-        return _literal_value(bool(value))
-    if hint == "int":
-        return _int_literal(int(value))
-    if hint == "decimal":
-        return _decimal_literal(float(value))
-    # auto
-    if isinstance(value, bool):
-        return _literal_value(value)
-    if isinstance(value, int):
-        return _int_literal(value)
-    if isinstance(value, float):
-        return _decimal_literal(value)
-    if isinstance(value, str):
-        if HEX_COLOR_RE.match(value):
-            return _solid_color(value)
-        return _text_literal(value)
-    if isinstance(value, dict):
-        # Allow callers to pass already-shaped expr/Measure/etc. payloads
-        return value
-    raise PowerBIValidationError(
-        f"cannot encode value of type {type(value).__name__} for visual format property.",
-        details={"value": repr(value)},
-    )
-
-
-def _datapoint_fill_objects(fill_color: str | None, target_color: str | None) -> list[dict[str, Any]]:
-    properties: dict[str, Any] = {}
-    if fill_color is not None:
-        properties["fill"] = _solid_color(fill_color)
-    if target_color is not None:
-        properties["targetFill"] = _solid_color(target_color)
-    if not properties:
-        return []
-    return [{"properties": properties}]
-
-
-def _title_objects(title: str) -> dict[str, Any]:
-    return {
-        "title": [
-            {
-                "properties": {
-                    "show": _literal_value(True),
-                    "text": _literal_value(title),
-                }
-            }
-        ]
-    }
+from ._formatting import (
+    _VISUAL_FORMAT_TYPES,
+    _datapoint_fill_objects,
+    _decimal_literal,
+    _encode_visual_format_value,
+    _gauge_axis_objects,
+    _int_literal,
+    _literal_value,
+    _solid_color,
+    _text_literal,
+    _title_objects,
+)
 
 
 def _base_visual_config(

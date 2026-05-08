@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.10.7] — 2026-05-08 — Refactor phase 2: visuals/ submodule fan-out (5 modules extracted)
+
+Continuation of the file-split refactor started in v0.10.6. No behavior change, no tool surface change. Breaks the visuals package into focused submodules so future edits target the relevant concern rather than scrolling a 3500-line monolith.
+
+### Changed
+
+Five submodules extracted from `src/tools/visuals/__init__.py`:
+
+1. **`_base.py`** (92 L) — constants (`DEFAULT_PAGE_WIDTH/HEIGHT`, `LAYOUT_RELATIVE_PATH`, `THEMES_RELATIVE_DIR`, `MODEL_TABLES_RELATIVE_DIR`, `HEX_COLOR_RE`, `DEFAULT_VISUAL_SIZES`, `VISUAL_FIELD_ROLES`, `VISUAL_ROLE_KINDS`) and error classes (`VisualToolError`, `PBIToolsNotInstalledError`, `ReportLayoutError`, `PageNotFoundError`, `VisualNotFoundError`). Bottom of the import graph — no internal deps.
+
+2. **`_paths.py`** (25 L) — path resolution helpers (`_resolve_pbix_path`, `_resolve_extract_folder`, `_resolve_theme_path`, `_layout_path`).
+
+3. **`_refs.py`** (61 L) — field reference normalisation (`_BRACKET_REF_RE`, `_normalize_reference`, `_split_column_ref`, `_query_ref`). Accepts `Table.Column`, `Table[Column]`, `'Table'[Column]`, bare measure.
+
+4. **`_layout.py`** (168 L) — layout I/O: `_load_layout`, atomic `_save_layout` with `.bak` fallback (v0.10.5), `dry_run_layout_writes()` context manager (v0.10.5), embedded JSON helpers, page utilities (`_find_page`, `_normalize_page_name`, `_next_page_name`, `_page_summary`).
+
+5. **`_formatting.py`** (135 L) — Power BI visual literal + format-property encoders: `_literal_value`, `_decimal_literal`, `_int_literal`, `_text_literal`, `_solid_color`, `_gauge_axis_objects`, `_datapoint_fill_objects`, `_title_objects`, `_encode_visual_format_value`, `_VISUAL_FORMAT_TYPES`.
+
+The package `__init__.py` re-exports every name to preserve back-compat — every existing `from tools.visuals import …` keeps working unchanged.
+
+### Internals
+
+- `tools/visuals/__init__.py`: 3607 → 3248 lines (-359, after also dropping unused `re`, `threading`, `contextmanager`, `Iterator` imports).
+- 5 new submodules totalling 481 lines.
+- Registry audit clean: 131/131, 0 orphans.
+
+### Tests
+
+- 167 passing, 2 platform skips. No test changes required.
+
+### Deferred to v0.10.8+
+
+Heavier extractions still in the monolith: bindings (`_build_select_entry`, `_build_prototype_query`, `_validate_field_references_live`, `_validate_projection_roles`, `_scan_visual_bindings`), containers (`_create_chart_container`, `_make_visual_container`, `_base_visual_config`, `_append_visual`), home tables (`_scan_measure_home_tables`, `_resolve_measure_home_map`, `_inspect_value_measures`), I/O (`pbi_extract_report`, `pbi_compile_report`, PowerShell helpers), and per-domain tool wrappers (`charts.py`, `cards.py`, `structure.py`, `pages.py`, `ops.py`, `design.py`, `dispatcher.py`).
+
 ## [0.10.6] — 2026-05-08 — Refactor phase 1: package skeleton + mcp_core extraction
 
 Foundational refactor (no behavior change, no tool surface change). Splits the two largest modules into a package + a runtime core, preparing the codebase for incremental fan-out of the visual / wrapper sub-modules in later releases.
