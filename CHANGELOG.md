@@ -3,6 +3,125 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.12.0] — 2026-05-09 — Security release: Codex audit findings (14 fixes)
+
+External security audit (Codex) flagged 1 critical + 13 high findings.
+This release closes all of them. No tool surface change.
+
+### Critical
+
+1. **SSE without authentication or DNS-rebinding defense**
+   (`src/server.py`). The optional SSE transport accepted any HTTP client
+   reachable on the bind host, and even when bound to ``127.0.0.1`` a
+   browser tricked into resolving an attacker-owned domain to loopback
+   could call the endpoint. Two new defenses:
+   - **Fail-closed** when SSE is bound to a non-loopback host without
+     ``PBI_MCP_AUTH_TOKEN``. The operator must either bind to localhost,
+     set a bearer token, or explicitly opt out via
+     ``PBI_MCP_ALLOW_UNAUTHENTICATED_SSE=1`` (logged as a warning).
+   - **Always-on Host/Origin allowlist middleware**
+     (``_origin_host_check_middleware``) — Host and Origin headers must
+     match the bind host (loopback synonyms when bound to localhost) plus
+     any ``PBI_MCP_ALLOWED_ORIGINS`` (csv) extension. Mismatches are
+     rejected with HTTP 403, blocking DNS-rebinding from a malicious
+     web page.
+
+### High — readonly / deny-write policy bypass
+
+2. **22 newly-added mutating tools were missing from `WRITE_TOOLS`**
+   (`src/security.py`). `tool_category()` defaults unknown tools to
+   ``"read"``, so ``--readonly`` / ``deny_categories: ["write"]`` did not
+   block them. Added to the WRITE classification:
+   `pbi_export_correction_report`, `pbi_create_time_intelligence_pack`,
+   `pbi_create_ytd_measure`, `pbi_create_mtd_measure`,
+   `pbi_create_spy_measure`, `pbi_create_yoy_measure`,
+   `pbi_create_variance_measure`, `pbi_create_contribution_measure`,
+   `pbi_create_topn_measure`, `pbi_create_rolling_average_measure`,
+   `pbi_apply_format_preset`, `pbi_set_column_data_type`,
+   `pbi_parameterize_data_source`, `pbi_relocate_data_source`,
+   `pbi_add_scatter_chart`, `pbi_add_combo_chart`, `pbi_add_kpi`,
+   `pbi_add_matrix`, `pbi_add_labelled_card`, `pbi_convert_visual_type`,
+   `pbi_set_visual_format_property`, `pbi_disable_card_autoscale`.
+3. **`pbi_validate_pbix_reopen` reclassified as WRITE** (was READ).
+   The probe captures the entire primary screen, may close existing
+   PBI Desktop windows, and writes a PNG to a caller-controlled path —
+   none of which is read-only. Removed from `READ_TOOLS`, added to
+   `WRITE_TOOLS`.
+4. **`pbi_export_correction_report` removed from `READ_TOOLS` and
+   `GRADING_TOOLS`** — it writes a Markdown report to ``output_path``
+   so it is unambiguously a write tool.
+5. **`--profile readonly` now also enables runtime readonly mode**
+   (`src/server.py`). Previously it only pruned the registered tool
+   surface using static `READ_TOOLS`, leaving dual-mode workflows
+   (`pbi_excel_import_workflow`, `pbi_measure_workflow`,
+   `pbi_repair_report_fields`) callable with ``apply=true`` and
+   classified as write at call time but allowed by default policy. Now
+   `--profile readonly` triggers `SECURITY.set_runtime_readonly(True)`,
+   matching `--readonly` behavior.
+
+### High — confidentiality / DMV / OCR
+
+6. **`pbi_measure_dependencies` no longer bypasses the DMV guard**
+   (`src/tools/query.py`). The tool hard-codes
+   ``SELECT * FROM $SYSTEM.DISCOVER_CALC_DEPENDENCY``; it now calls
+   `_validate_dax_query` first so the same ``PBI_MCP_ALLOW_DMV=1``
+   opt-in that gates `pbi_execute_dax` applies here too.
+7. **Windows OCR no longer leaks raw screen text**
+   (`src/tools/quality.py`). The PowerShell helper used to serialize
+   ``$result.Text`` (full recognized desktop text) into the response.
+   Removed the `text` field entirely — only `text_length` and the
+   matched signal labels (``"Fix this"`` etc.) are returned. Default
+   `use_windows_ocr` flipped from ``True`` → ``False`` so callers must
+   opt in explicitly even for the bounded form.
+
+### High — input-validation / lexical bypasses
+
+8. **M expression validator hardened against quoted-identifier and
+   indirect-call bypasses** (`src/m_expression_security.py`).
+   - Reject ``#"…"\s*(`` calls up-front against the **raw** expression.
+     The literal stripper used to erase quoted identifiers as if they
+     were strings, so ``#"Web.Contents"("https://…")`` slipped past the
+     blocklist + allowlist.
+   - Reject `Value.Invoke`, `Function.Invoke`, `Function.InvokeAfter`,
+     and `Record.Field` explicitly. Each takes a callable as a
+     first-class value and would let an attacker invoke a blocked
+     function indirectly even though the wrapper sits under an allowed
+     prefix.
+9. **Zip-Slip in PBIX native ZIP extraction**
+   (`src/tools/visuals/_io.py`). The fallback extraction iterated ZIP
+   entries starting with ``Report/StaticResources/`` and joined them
+   blindly with ``target / name``. A malicious PBIX with
+   ``Report/StaticResources/../../../tmp/owned.txt`` could write outside
+   the extraction folder. Now: members containing ``..``, ``.``,
+   absolute prefixes, or drive letters are rejected, and the resolved
+   destination must stay under ``target.resolve()``.
+
+### High — security policy plumbing
+
+10. **`enabled_tools: []` now denies every tool** (`src/security.py`).
+    Previously the truthiness check ``{...} if enabled else None``
+    coerced an explicit empty list to ``None``, which silently disabled
+    the allowlist gate. Changed to ``if enabled is not None`` so an
+    empty allowlist is treated as documented (lock everything down).
+11. **Working-directory `security_policy.json` is honored again**
+    (`src/server.py`). Server startup used
+    ``cwd=Path(__file__).parent`` which made the loader probe
+    ``src/security_policy.json`` instead of the operator's launch CWD.
+    Restored to ``Path.cwd()`` so the documented configuration source
+    works.
+
+### Tests
+
+12. **+4 regression tests** in `tests/test_security.py`:
+    - `test_quoted_identifier_function_call_rejected`
+    - `test_value_invoke_blocked`
+    - `test_empty_enabled_tools_denies_every_tool`
+    - `test_extract_report_zip_native_rejects_path_traversal`
+
+    Plus updates to `tests/test_quality.py` for the OCR opt-in default
+    and the `pbi_validate_pbix_reopen` reclassification. Suite now
+    198 passing (was 194).
+
 ## [0.11.3] — 2026-05-08 — Runtime constant-measure probe + utcnow deprecation
 
 Targeted fixes from the v0.11.x retrospective.

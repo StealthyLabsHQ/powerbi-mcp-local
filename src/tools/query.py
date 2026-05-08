@@ -478,6 +478,11 @@ def pbi_measure_dependencies_tool(
         validate_model_object_name(table)
 
     query = "SELECT * FROM $SYSTEM.DISCOVER_CALC_DEPENDENCY"
+    # DISCOVER_CALC_DEPENDENCY is a DMV — gate it through the same opt-in
+    # (PBI_MCP_ALLOW_DMV=1) the generic pbi_execute_dax path enforces, so
+    # readonly clients cannot exfiltrate raw model dependency/expression
+    # metadata that the DMV policy is meant to withhold.
+    _validate_dax_query(query)
     result = manager.run_adomd_query(query, max_rows=SECURITY.policy().max_rows_for_dax)
 
     rows = result.get("rows", [])

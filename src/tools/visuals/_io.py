@@ -97,20 +97,50 @@ def _extract_pbix_zip_natively(pbix: Path, target: Path) -> dict[str, Any]:
     connection via pbi_connect.
     """
     target.mkdir(parents=True, exist_ok=True)
+    target_resolved = target.resolve()
     extracted: list[str] = []
     layout_path = target / LAYOUT_RELATIVE_PATH
     layout_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _is_safe_member(name: str) -> bool:
+        # Reject absolute paths, drive letters, and any traversal component
+        # before joining with target. Power BI member names always use
+        # forward slashes, so split on both separators defensively.
+        if not name or name.endswith("/") or name.endswith("\\"):
+            return False
+        if name.startswith("/") or name.startswith("\\") or (len(name) >= 2 and name[1] == ":"):
+            return False
+        parts = [p for p in name.replace("\\", "/").split("/") if p]
+        if any(p == ".." or p == "." for p in parts):
+            return False
+        return True
+
+    def _safe_dest(name: str) -> Path | None:
+        if not _is_safe_member(name):
+            return None
+        dest = (target / name).resolve()
+        try:
+            dest.relative_to(target_resolved)
+        except ValueError:
+            return None
+        return dest
+
     with zipfile.ZipFile(pbix, "r") as zf:
         names = set(zf.namelist())
         if "Report/Layout" in names:
             layout_path.write_bytes(zf.read("Report/Layout"))
             extracted.append("Report/Layout")
         for name in names:
-            if name.startswith("Report/StaticResources/") and not name.endswith("/"):
-                dest = target / name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(zf.read(name))
-                extracted.append(name)
+            if not name.startswith("Report/StaticResources/"):
+                continue
+            dest = _safe_dest(name)
+            if dest is None:
+                # Path-traversal attempt (zip-slip) — skip silently and
+                # do not surface the malicious member name in extracted[].
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(zf.read(name))
+            extracted.append(name)
     return {"method": "zip_native", "extracted_entries": extracted}
 
 

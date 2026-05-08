@@ -1488,7 +1488,6 @@ foreach ($signal in $signals) {
     if ($text -like "*$signal*") { $matches += $signal }
 }
 [PSCustomObject]@{
-    text = $text
     text_length = if ($text) { $text.Length } else { 0 }
     matches = $matches
 } | ConvertTo-Json -Depth 3
@@ -1517,9 +1516,16 @@ def pbi_validate_pbix_reopen_tool(
     screenshot_path: str | None = None,
     close_after: bool = False,
     analyze_screenshot: bool = True,
-    use_windows_ocr: bool = True,
+    use_windows_ocr: bool = False,
 ) -> dict[str, Any]:
-    """Open a PBIX in Power BI Desktop and scan for visible repair-error signals."""
+    """Open a PBIX in Power BI Desktop and scan for visible repair-error signals.
+
+    ``use_windows_ocr`` defaults to ``False`` because the underlying screenshot
+    captures the entire primary desktop, not just the Power BI window. The
+    OCR helper now returns only the matched signal labels and a length —
+    never raw recognized text — so screen contents from other applications
+    cannot leak through the response.
+    """
     if timeout_seconds < 10 or timeout_seconds > 300:
         raise PowerBIValidationError(
             "timeout_seconds must be between 10 and 300.", details={"timeout_seconds": timeout_seconds}

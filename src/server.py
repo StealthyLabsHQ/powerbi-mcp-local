@@ -22,7 +22,7 @@ from mcp_core import (
     logger,
     mcp,
 )
-from security import SECURITY
+from security import SECURITY, SecurityPolicyError
 
 # Imports needed only by the @mcp.resource() handlers below — every other
 # tools.* import has moved into the corresponding wrappers/<domain>.py module.
@@ -205,6 +205,13 @@ def model_snapshot_export(output_path: str = "./docs/model.json") -> str:
     )
 
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _is_loopback(host: str) -> bool:
+    return host.strip().lower() in _LOOPBACK_HOSTS
+
+
 def _bearer_auth_middleware(app: Any, token: str) -> Any:
     """ASGI middleware that requires Authorization: Bearer <token> on HTTP requests."""
     expected = f"Bearer {token}".encode()
@@ -230,15 +237,92 @@ def _bearer_auth_middleware(app: Any, token: str) -> Any:
     return wrapped
 
 
+def _origin_host_check_middleware(app: Any, allowed_hosts: set[str]) -> Any:
+    """Block DNS-rebinding by requiring Host (and Origin, when present) to match an allowlist.
+
+    A browser fetching ``http://attacker.com`` resolved to 127.0.0.1 will send
+    the attacker's domain in the Host/Origin headers — this middleware rejects
+    those requests so the SSE endpoint cannot be hijacked from a malicious page.
+    """
+    allowed = {item.strip().lower() for item in allowed_hosts if item}
+
+    async def wrapped(scope: dict, receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        host_raw = headers.get(b"host", b"").decode("latin-1", errors="ignore")
+        host = host_raw.rsplit(":", 1)[0].strip("[]").lower()
+        if host and host not in allowed:
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 403,
+                    "headers": [(b"content-type", b"text/plain")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b"Forbidden host"})
+            return
+        origin = headers.get(b"origin", b"").decode("latin-1", errors="ignore")
+        if origin:
+            origin_host = origin.split("//", 1)[-1].split("/", 1)[0].rsplit(":", 1)[0].strip("[]").lower()
+            if origin_host and origin_host not in allowed:
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 403,
+                        "headers": [(b"content-type", b"text/plain")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": b"Forbidden origin"})
+                return
+        await app(scope, receive, send)
+
+    return wrapped
+
+
 async def _run_sse_with_auth(host: str, port: int) -> None:
-    """Mirror FastMCP.run_sse_async but allow wrapping with Bearer auth middleware."""
+    """Mirror FastMCP.run_sse_async but enforce auth + DNS-rebinding defenses.
+
+    Security gates layered onto the upstream SSE app:
+    - Fail-closed if SSE is bound to a non-loopback host without
+      ``PBI_MCP_AUTH_TOKEN``. The operator must either bind to localhost,
+      configure a token, or explicitly opt out via
+      ``PBI_MCP_ALLOW_UNAUTHENTICATED_SSE=1``.
+    - Always require Host/Origin to match an allowlist (loopback +
+      explicit ``--host`` + ``PBI_MCP_ALLOWED_ORIGINS``) so a browser
+      tricked into resolving ``attacker.com`` to 127.0.0.1 cannot reach
+      the endpoint.
+    - Wrap with Bearer auth when ``PBI_MCP_AUTH_TOKEN`` is set.
+    """
     import uvicorn
 
     mcp.settings.host = host
     mcp.settings.port = port
 
-    asgi_app = mcp.sse_app()
     token = os.getenv("PBI_MCP_AUTH_TOKEN", "").strip()
+    if not _is_loopback(host) and not token:
+        if os.environ.get("PBI_MCP_ALLOW_UNAUTHENTICATED_SSE", "0") != "1":
+            raise SecurityPolicyError(
+                f"SSE bound to non-loopback host '{host}' requires PBI_MCP_AUTH_TOKEN. "
+                "Set the token, bind to 127.0.0.1, or set "
+                "PBI_MCP_ALLOW_UNAUTHENTICATED_SSE=1 to acknowledge the risk.",
+                details={"host": host, "port": port},
+            )
+        logger.warning(
+            "SECURITY: SSE bound to %s without authentication (PBI_MCP_ALLOW_UNAUTHENTICATED_SSE=1 acknowledged).",
+            host,
+        )
+
+    asgi_app = mcp.sse_app()
+
+    allowed_hosts = set(_LOOPBACK_HOSTS) if _is_loopback(host) else {host.strip().lower()}
+    extra = os.environ.get("PBI_MCP_ALLOWED_ORIGINS", "").strip()
+    if extra:
+        allowed_hosts |= {item.strip().lower() for item in extra.split(",") if item.strip()}
+    asgi_app = _origin_host_check_middleware(asgi_app, allowed_hosts)
+    logger.info("SECURITY: SSE Host/Origin allowlist = %s", sorted(allowed_hosts))
+
     if token:
         asgi_app = _bearer_auth_middleware(asgi_app, token)
         logger.info("SECURITY: SSE Bearer auth enabled (PBI_MCP_AUTH_TOKEN set).")
@@ -292,10 +376,14 @@ def main() -> None:
         help="Filter exposed tool surface: readonly, write (read+write), grading (analysis + scoring only), or all (default).",
     )
     args = parser.parse_args()
-    SECURITY.policy(reload=True, cwd=Path(__file__).parent)
-    if args.readonly:
+    # Honor the operator's working directory for security_policy.json
+    # (documented behavior). Path(__file__).parent silently ignored a
+    # restrictive policy placed next to the launch CWD.
+    SECURITY.policy(reload=True, cwd=Path.cwd())
+    if args.readonly or args.profile == "readonly":
         SECURITY.set_runtime_readonly(True)
-        logger.info("SECURITY: readonly mode enabled via --readonly")
+        reason = "--readonly" if args.readonly else "--profile readonly"
+        logger.info("SECURITY: readonly mode enabled via %s", reason)
 
     # Pre-flight: detect registration drift between tools/__all__ and @mcp.tool()
     # wrappers. Opt-in via env var so production servers skip the introspection

@@ -86,6 +86,24 @@ M_ALLOWED_PREFIXES = (
 M_FUNCTION_CALL_RE = re.compile(r"(?<![#\w])(?P<name>[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*\(")
 M_CUSTOM_FUNCTION_RE = re.compile(r"(?<![#\w])(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*\(")
 
+# M quoted identifiers (#"…") are valid executable identifier syntax, not
+# string literals. The sanitizer treats them as strings, which would let a
+# caller smuggle a blocked function in via #"Web.Contents"(…). Reject any
+# quoted-identifier *call* (followed by `(`) up front so neither the
+# blocklist nor the allowlist can be bypassed.
+M_QUOTED_IDENTIFIER_CALL_RE = re.compile(r'#"(?:[^"]|"")*"\s*\(')
+
+# Functions that accept other functions as first-class values would let an
+# attacker invoke a blocked callable indirectly (e.g.
+# ``Value.Invoke(Web.Contents, {"http://…"})``). Reject them explicitly
+# even though they live under an otherwise-allowed prefix.
+M_DISALLOWED_INDIRECT_CALLS = {
+    "Value.Invoke",
+    "Function.Invoke",
+    "Function.InvokeAfter",
+    "Record.Field",
+}
+
 
 def strip_m_literals_and_comments(text: str) -> str:
     output: list[str] = []
@@ -193,6 +211,17 @@ def _collect_custom_function_names(sanitized_expression: str) -> set[str]:
 
 
 def validate_m_expression_policy(expression: str) -> None:
+    # Reject quoted-identifier *calls* against the raw expression — the
+    # sanitizer below would otherwise strip them and the blocklist /
+    # allowlist would never see Web.Contents inside #"…".
+    if M_QUOTED_IDENTIFIER_CALL_RE.search(expression):
+        raise PowerBIValidationError(
+            'M expression contains a quoted-identifier function call (#"…"(…)). '
+            "These are not allowed because they bypass the network/external "
+            "function blocklist.",
+            details={"reason": "quoted_identifier_call_not_allowed"},
+        )
+
     sanitized = strip_m_literals_and_comments(expression)
 
     for pattern in M_BLOCKED_FUNCTIONS:
@@ -213,6 +242,12 @@ def validate_m_expression_policy(expression: str) -> None:
             continue
         if name in custom_functions:
             continue
+        if name in M_DISALLOWED_INDIRECT_CALLS:
+            raise PowerBIValidationError(
+                f"M expression contains '{name}', which can invoke arbitrary callables "
+                "and bypass the function allowlist.",
+                details={"disallowed_functions": [name]},
+            )
         if name in M_ALLOWED_FUNCTIONS or any(name.startswith(prefix) for prefix in M_ALLOWED_PREFIXES):
             continue
         disallowed.append(name)

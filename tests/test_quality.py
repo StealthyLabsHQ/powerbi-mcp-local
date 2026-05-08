@@ -597,7 +597,10 @@ class QualityToolTests(unittest.TestCase):
             ),
         ):
             result = pbi_validate_pbix_reopen_tool(
-                pbix_path=str(pbix), timeout_seconds=10, screenshot_path=str(screenshot)
+                pbix_path=str(pbix),
+                timeout_seconds=10,
+                screenshot_path=str(screenshot),
+                use_windows_ocr=True,
             )
 
         self.assertFalse(result["valid"], result)
@@ -614,7 +617,6 @@ class QualityToolTests(unittest.TestCase):
             "pbi_detect_empty_visuals",
             "pbi_generate_measure_tests",
             "pbi_validate_pbix_persistence",
-            "pbi_validate_pbix_reopen",
             "pbi_lint_report_layout",
             "pbi_validate_visual_bindings",
             "pbi_score_dashboard",
@@ -623,6 +625,9 @@ class QualityToolTests(unittest.TestCase):
         ]:
             self.assertEqual(tool_category(name), "read")
         self.assertEqual(tool_category("pbi_export_validation_report"), "write")
+        # pbi_validate_pbix_reopen captures screen + may close PBI Desktop —
+        # treat as write so --readonly blocks it.
+        self.assertEqual(tool_category("pbi_validate_pbix_reopen"), "write")
 
 
 if __name__ == "__main__":

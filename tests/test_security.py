@@ -89,6 +89,21 @@ class SecurityTests(unittest.TestCase):
             with self.assertRaises(PowerBIValidationError):
                 _validate_m_expression('let Source = Web.Contents("https://example.com") in Source')
 
+    def test_quoted_identifier_function_call_rejected(self) -> None:
+        # Quoted-identifier syntax #"…" is executable in M but the literal
+        # stripper would erase it before the blocklist runs. The validator
+        # must reject the call form up-front.
+        with patch.dict(os.environ, {"PBI_MCP_ALLOW_EXTERNAL_M": "0"}, clear=False):
+            with self.assertRaises(PowerBIValidationError):
+                _validate_m_expression('let Source = #"Web.Contents"("https://example.com") in Source')
+
+    def test_value_invoke_blocked(self) -> None:
+        # Value.Invoke can call any callable as a first-class value, which
+        # would let an attacker bypass the function allowlist.
+        with patch.dict(os.environ, {"PBI_MCP_ALLOW_EXTERNAL_M": "0"}, clear=False):
+            with self.assertRaises(PowerBIValidationError):
+                _validate_m_expression('let Source = Value.Invoke(Web.Contents, {"https://example.com"}) in Source')
+
     def test_measure_name_injection_rejected(self) -> None:
         for name in ("Bad[Measure]", 'Bad"Measure', "Bad'Measure", "Bad\nMeasure"):
             with self.subTest(name=name):
@@ -174,6 +189,21 @@ class SecurityTests(unittest.TestCase):
                 "pbi_execute_dax",
                 {"query": 'EVALUATE ROW("Value", 1)', "max_rows": 11},
             )
+
+    def test_empty_enabled_tools_denies_every_tool(self) -> None:
+        # Regression: an explicit empty allowlist used to be coerced to None
+        # (truthiness check), which silently disabled the allowlist gate.
+        policy_path = self.root / "security_policy.json"
+        policy_path.write_text(
+            json.dumps({"enabled_tools": [], "allowed_base_dirs": [str(self.root)]}),
+            encoding="utf-8",
+        )
+        manager = SecurityManager()
+        manager.policy(reload=True, cwd=self.root)
+        for tool_name in ("pbi_list_tables", "pbi_create_measure", "pbi_delete_measure"):
+            with self.subTest(tool=tool_name):
+                with self.assertRaises(SecurityPolicyError):
+                    manager.validate_tool_call(tool_name, {})
 
 
 class ErrorPayloadTests(unittest.TestCase):
@@ -383,6 +413,44 @@ class V010MatskiBugfixTests(unittest.TestCase):
                 self.assertTrue((target / LAYOUT_RELATIVE_PATH).exists())
                 # Static resources copied too.
                 self.assertTrue((target / "Report" / "StaticResources" / "Themes" / "Dummy.json").exists())
+            finally:
+                SECURITY.configure_allowed_dirs(previous)
+
+    def test_extract_report_zip_native_rejects_path_traversal(self) -> None:
+        # Regression: a malicious PBIX with a member name containing ".."
+        # used to escape the extraction folder. Confirm the traversal entry
+        # is silently dropped while a sibling legitimate entry still lands
+        # inside the target.
+        from tools.visuals import (
+            VisualToolError,
+            pbi_extract_report_tool,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            previous = [str(item) for item in SECURITY.allowed_base_dirs()]
+            SECURITY.configure_allowed_dirs([str(root)])
+            try:
+                pbix = root / "evil.pbix"
+                outside = root / "outside.txt"
+                with zipfile.ZipFile(pbix, "w") as zf:
+                    zf.writestr("Report/Layout", json.dumps({"sections": []}, ensure_ascii=False).encode("utf-16-le"))
+                    zf.writestr("Report/StaticResources/Themes/Good.json", b'{"name":"Good"}')
+                    zf.writestr("Report/StaticResources/../../outside.txt", b"owned")
+                target = root / "extracted"
+
+                def _fake_run_pbi_tools(args):
+                    raise VisualToolError(
+                        "pbi-tools command failed.",
+                        details={"stdout": "Unknown action: 'extract'", "stderr": ""},
+                    )
+
+                with patch("tools.visuals._run_pbi_tools", side_effect=_fake_run_pbi_tools):
+                    result = pbi_extract_report_tool(str(pbix), extract_folder=str(target))
+
+                self.assertTrue(result["ok"], result)
+                self.assertFalse(outside.exists())
+                self.assertTrue((target / "Report" / "StaticResources" / "Themes" / "Good.json").exists())
             finally:
                 SECURITY.configure_allowed_dirs(previous)
 
