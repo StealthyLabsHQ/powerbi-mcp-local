@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import zipfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -2027,7 +2027,7 @@ def pbi_export_correction_report_tool(
         rubric = pbi_score_rubric_tool(manager, extract_folder=extract_folder, criteria=rubric_criteria)
 
     lines: list[str] = []
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     lines.append("# Power BI correction report")
     lines.append("")
     lines.append(f"_Generated {now}_")

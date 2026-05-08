@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -399,7 +399,7 @@ class PowerBIConnectionManager:
     ) -> None:
         """Append an entry to the operation history ring buffer."""
         entry: dict[str, Any] = {
-            "ts": datetime.utcnow().isoformat() + "Z",
+            "ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "op": op,
             "kind": kind,  # "read" | "write"
             "duration_ms": int((time.perf_counter() - started) * 1000),
@@ -464,7 +464,7 @@ class PowerBIConnectionManager:
                 adomd_available=adomd_connection is not None,
                 dll_directory=dll_directory,
                 warnings=warnings,
-                connected_at=datetime.utcnow().isoformat() + "Z",
+                connected_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             )
             snapshot = self._state.snapshot()
             snapshot["instances"] = self.list_instances()

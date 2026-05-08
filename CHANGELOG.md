@@ -3,6 +3,95 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.11.3] — 2026-05-08 — Runtime constant-measure probe + utcnow deprecation
+
+Targeted fixes from the v0.11.x retrospective.
+
+### Fixed
+
+1. **`datetime.utcnow()` deprecation** in `src/pbi_connection.py` (×2,
+   `connected_at` + operation log `ts`) and `src/tools/quality.py` (×1,
+   correction-report header). Replaced with
+   `datetime.now(UTC).isoformat().replace("+00:00", "Z")` to keep the
+   trailing ``Z`` suffix that downstream tooling parses. Eliminates the
+   `64 warnings` block that was appearing in every pytest run since
+   Python 3.12 graduated the deprecation.
+
+### Added
+
+2. **Runtime probe for the bug-0.92 family** —
+   `_runtime_probe_measure_constancy(manager, axis_ref, measure)` in
+   `src/tools/visuals/_home_tables.py`. When a connection manager is
+   available and the visual's axis can be recovered as ``Table.Column``,
+   the probe issues a single DAX query:
+
+   ```text
+   EVALUATE TOPN(<sample_count>,
+                 ADDCOLUMNS(VALUES('Table'[Column]), "__probe_v", [Measure]))
+   ```
+
+   and flags the measure as `runtime_constant_measure` when every
+   sampled value is identical. This catches the cases the static
+   `_is_likely_constant_dax` heuristic misses — e.g.
+   `CALCULATE(SUM(Sales[Amount]), Sales[Amount] = 0)` references
+   `Sales[Amount]` (so static parsing leaves it alone) but always returns
+   zero. PBI Desktop renders these as a flat baseline or, on some
+   builds, an opaque internal error.
+
+   Default sample count is 3, clamped to ``[2, 10]``. Engine errors,
+   < 2 distinct axis values, and missing axis information all degrade
+   to ``(False, None)`` — the probe is conservative and never flags
+   inconclusively.
+
+### Changed
+
+3. **`_inspect_value_measures` now accepts an `axis_ref` keyword** and
+   runs the runtime probe as a second pass when the static check
+   returns clean. Adds a new `runtime_constant_measure` warning entry
+   alongside the existing `constant_measure` one.
+
+4. **`pbi_add_line_chart_tool`, `pbi_add_combo_chart_tool`, and
+   `pbi_add_waterfall_tool` now wire the axis through** —
+   `axis_column` / `category_column` is forwarded to
+   `_inspect_value_measures` so the runtime probe can fire at write
+   time too, not just from the diagnostic tool.
+
+5. **`pbi_diagnose_render_risks_tool`** now extracts the Category
+   column from each cartesian visual's prototypeQuery (via the new
+   `_recover_axis_full_ref` helper) and surfaces both
+   `constant_measure` (static) and `runtime_constant_measure` (live
+   engine) in `constant_measure_risks`. The probe payload is included
+   per finding when present.
+
+### Internals
+
+- No new runtime dependency. The probe re-uses
+  `pbi_execute_dax_tool` with a one-shot DAX query.
+- `_recover_axis_full_ref` lives in `_repair.py`; sibling to the
+  `_recover_full_refs_from_prototype` helper added in v0.11.0 (kept
+  separate to avoid the bindings module taking on a layout-walk
+  responsibility).
+- Tool count unchanged: 134/134. ruff + format clean.
+
+### Tests
+
+- 6 new offline tests in `tests/test_visuals.py`:
+  - `test_runtime_probe_returns_false_when_manager_is_none`
+  - `test_runtime_probe_returns_false_when_axis_ref_invalid`
+  - `test_runtime_probe_flags_dynamic_constant` — mocked
+    `pbi_execute_dax_tool` returns 3 identical samples, asserts
+    `is_constant=True`, probe payload populated.
+  - `test_runtime_probe_passes_when_values_vary` — varying samples
+    return `False`.
+  - `test_runtime_probe_returns_false_on_engine_error` — DAX raise
+    degrades cleanly to inconclusive.
+  - `test_diagnose_render_risks_runtime_constant_surfaces` — full
+    pipeline: build a line chart with a sneaky dynamic-constant
+    measure, mock the probe, assert the diagnostic tool surfaces
+    `runtime_constant_measure` with `axis_ref` populated.
+- 194 passing locally (was 188), 2 platform skips. The pytest run is
+  now warning-free.
+
 ## [0.11.2] — 2026-05-08 — Bug 0.92 diagnostic + render-risk aggregator
 
 Best-effort static diagnostic for the bug-0.92 family — line / combo /

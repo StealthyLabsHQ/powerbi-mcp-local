@@ -142,10 +142,81 @@ def _augment_measure_home_map_with_live(
     return measure_home_map
 
 
+def _runtime_probe_measure_constancy(
+    manager: Any | None,
+    axis_ref: str | None,
+    measure: str,
+    *,
+    sample_count: int = 3,
+) -> tuple[bool, dict[str, Any] | None]:
+    """Live-engine probe for "this measure returns the same scalar across
+    every axis value".
+
+    Catches the dynamic-but-still-constant cases the static
+    :func:`_is_likely_constant_dax` heuristic misses (e.g.
+    ``CALCULATE(SUM(Sales[Amount]), Sales[Amount] = 0)``).
+
+    Returns ``(is_constant, probe_data)``:
+    - ``manager`` ``None`` or ``axis_ref`` not in ``Table.Column`` form →
+      ``(False, None)`` — no probe attempted.
+    - Engine call fails or returns < 2 distinct axis values →
+      ``(False, None)`` — inconclusive.
+    - All ``sample_count`` measure values match → ``(True, {…samples…})``.
+    """
+    if manager is None or not axis_ref or "." not in axis_ref:
+        return False, None
+    table, column = axis_ref.split(".", 1)
+    table = table.strip()
+    column = column.strip()
+    if not table or not column:
+        return False, None
+    sample_count = max(2, min(int(sample_count), 10))
+    table_q = f"'{table}'" if any(ch in table for ch in " -.") else table
+    column_q = f"[{column}]"
+    measure_q = f"[{measure}]"
+    query = f'EVALUATE TOPN({sample_count}, ADDCOLUMNS(VALUES({table_q}{column_q}), "__probe_v", {measure_q}))'
+    try:
+        from ..query import pbi_execute_dax_tool
+    except ImportError:
+        return False, None
+    try:
+        result = pbi_execute_dax_tool(manager, query=query, max_rows=sample_count)
+    except Exception:
+        return False, None
+    if not isinstance(result, dict) or not result.get("ok"):
+        return False, None
+    rows = result.get("rows") or []
+    if len(rows) < 2:
+        # Need at least 2 distinct axis values to call something constant.
+        return False, None
+    values: list[Any] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        # ADOMD returns column names as "[__probe_v]" — try both forms.
+        v = row.get("[__probe_v]")
+        if v is None:
+            v = row.get("__probe_v")
+        values.append(v)
+    if len(values) < 2:
+        return False, None
+    distinct = {repr(v) for v in values}
+    is_constant = len(distinct) == 1
+    return is_constant, {
+        "axis": axis_ref,
+        "measure": measure,
+        "samples": values,
+        "distinct_count": len(distinct),
+        "rows_probed": len(rows),
+    }
+
+
 def _inspect_value_measures(
     value_measures: list[str],
     measure_home_map: dict[str, str],
     manager: Any | None,
+    *,
+    axis_ref: str | None = None,
 ) -> list[dict[str, Any]]:
     """Diagnostic warnings for line/area/combo Y measures.
 
@@ -200,6 +271,28 @@ def _inspect_value_measures(
                         "use a card visual instead."
                     ),
                     "expression_preview": expr[:120],
+                }
+            )
+            continue  # static check fired — no need for the runtime probe
+        # Runtime probe (only when axis ref + manager available): catches
+        # dynamic-but-still-constant DAX (e.g. ``CALCULATE(... , <filter>)``
+        # that always evaluates to the same scalar) which static parsing
+        # cannot see.
+        is_runtime_constant, probe = _runtime_probe_measure_constancy(manager, axis_ref, measure)
+        if is_runtime_constant and probe is not None:
+            warnings.append(
+                {
+                    "measure": measure,
+                    "issue": "runtime_constant_measure",
+                    "hint": (
+                        f"Runtime probe: measure returned the same value across "
+                        f"{probe.get('rows_probed', '?')} distinct axis points "
+                        f"({probe.get('axis')}). Line/combo/waterfall charts may "
+                        "render as a flat baseline or trigger an internal error. "
+                        "Add filter context that varies along the axis."
+                    ),
+                    "probe": probe,
+                    "expression_preview": expr[:120] if expr else None,
                 }
             )
     return warnings

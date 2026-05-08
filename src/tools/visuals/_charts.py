@@ -77,7 +77,7 @@ def pbi_add_line_chart_tool(
         expected_kinds[m] = "measure"
     _validate_field_references_live(manager, [axis_column, *value_measures], expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
-    diagnostics = _inspect_value_measures(value_measures, measure_home_map, manager)
+    diagnostics = _inspect_value_measures(value_measures, measure_home_map, manager, axis_ref=axis_column)
     result = _append_visual(
         extract_folder,
         page,
@@ -159,7 +159,7 @@ def pbi_add_waterfall_tool(
         manager, [category_column, value_measure], expected_kinds={category_column: "column", value_measure: "measure"}
     )
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
-    diagnostics = _inspect_value_measures([value_measure], measure_home_map, manager)
+    diagnostics = _inspect_value_measures([value_measure], measure_home_map, manager, axis_ref=category_column)
     result = _append_visual(
         extract_folder,
         page,
@@ -284,7 +284,9 @@ def pbi_add_combo_chart_tool(
         expected_kinds[legend_column] = "column"
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
-    diagnostics = _inspect_value_measures([*bar_measures, *line_measures], measure_home_map, manager)
+    diagnostics = _inspect_value_measures(
+        [*bar_measures, *line_measures], measure_home_map, manager, axis_ref=category_column
+    )
     result = _append_visual(
         extract_folder,
         page,

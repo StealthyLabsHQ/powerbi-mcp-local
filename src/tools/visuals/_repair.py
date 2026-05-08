@@ -112,9 +112,42 @@ def pbi_repair_report_fields_tool(
     return _run(_impl)
 
 
+def _recover_axis_full_ref(prototype_query: dict[str, Any], category_query_ref: str) -> str | None:
+    """Recover the ``Table.Column`` form of the Category axis from a
+    visual's prototypeQuery. Returns ``None`` when the queryRef points to
+    a measure or no matching Select entry is found.
+    """
+    select_entries = prototype_query.get("Select") or []
+    from_entries = prototype_query.get("From") or []
+    alias_to_entity: dict[str, str] = {}
+    for entry in from_entries:
+        if isinstance(entry, dict):
+            alias_to_entity[str(entry.get("Name", ""))] = str(entry.get("Entity", ""))
+    for entry in select_entries:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("Name", "")) != category_query_ref:
+            continue
+        column = entry.get("Column")
+        if not isinstance(column, dict):
+            return None
+        prop = str(column.get("Property", ""))
+        source_ref = (
+            column.get("Expression", {}).get("SourceRef", {}) if isinstance(column.get("Expression"), dict) else {}
+        )
+        alias = str(source_ref.get("Source", "")) if isinstance(source_ref, dict) else ""
+        table = alias_to_entity.get(alias, "")
+        if table and prop:
+            return f"{table}.{prop}"
+        return None
+    return None
+
+
 def _collect_cartesian_y_measures(layout: dict[str, Any], page: str | None) -> list[dict[str, Any]]:
     """Walk visualContainers and yield ``{page, visual_id, visual_type,
-    measures}`` for every cartesian chart whose Y/Y2 role binds measures.
+    measures, axis_ref}`` for every cartesian chart whose Y/Y2 role binds
+    measures. ``axis_ref`` is the Category column in ``Table.Column`` form
+    when recoverable, ``None`` otherwise.
     """
     findings: list[dict[str, Any]] = []
     sections = layout.get("sections", []) or []
@@ -152,12 +185,23 @@ def _collect_cartesian_y_measures(layout: dict[str, Any], page: str | None) -> l
                             measures.append(ref)
             if not measures:
                 continue
+            axis_ref: str | None = None
+            category_items = projections.get("Category") or []
+            if isinstance(category_items, list) and category_items:
+                first = category_items[0]
+                if isinstance(first, dict):
+                    cat_qref = str(first.get("queryRef", "")).strip()
+                    if cat_qref:
+                        prototype = sv.get("prototypeQuery") or {}
+                        if isinstance(prototype, dict):
+                            axis_ref = _recover_axis_full_ref(prototype, cat_qref)
             findings.append(
                 {
                     "page": section_name,
                     "visual_id": str(config.get("name", "")),
                     "visual_type": visual_type,
                     "measures": measures,
+                    "axis_ref": axis_ref,
                 }
             )
     return findings
@@ -219,19 +263,23 @@ def pbi_diagnose_render_risks_tool(
 
         constant_findings: list[dict[str, Any]] = []
         for finding in cartesian_findings:
-            warnings = _inspect_value_measures(finding["measures"], measure_home_map, manager)
+            warnings = _inspect_value_measures(
+                finding["measures"], measure_home_map, manager, axis_ref=finding.get("axis_ref")
+            )
             for warning in warnings:
-                if warning.get("issue") != "constant_measure":
+                if warning.get("issue") not in {"constant_measure", "runtime_constant_measure"}:
                     continue
                 constant_findings.append(
                     {
                         "page": finding["page"],
                         "visual_id": finding["visual_id"],
                         "visual_type": finding["visual_type"],
+                        "axis_ref": finding.get("axis_ref"),
                         "measure": warning.get("measure"),
                         "issue": warning.get("issue"),
                         "hint": warning.get("hint"),
                         "expression_preview": warning.get("expression_preview"),
+                        "probe": warning.get("probe"),
                     }
                 )
 

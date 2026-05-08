@@ -52,7 +52,7 @@ from tools.visuals import (
     pbi_set_visual_format_property_tool,
     pbi_update_visual_bindings_tool,
 )
-from tools.visuals._home_tables import _is_likely_constant_dax
+from tools.visuals._home_tables import _is_likely_constant_dax, _runtime_probe_measure_constancy
 
 
 def _base_layout() -> dict:
@@ -1034,6 +1034,112 @@ class VisualToolTests(unittest.TestCase):
         self.assertEqual(len(risks), 1)
         self.assertEqual(risks[0]["measure"], "Constant")
         self.assertEqual(risks[0]["visual_type"], "lineChart")
+
+    def test_runtime_probe_returns_false_when_manager_is_none(self) -> None:
+        is_const, probe = _runtime_probe_measure_constancy(None, "Sales.Year", "Total")
+        self.assertFalse(is_const)
+        self.assertIsNone(probe)
+
+    def test_runtime_probe_returns_false_when_axis_ref_invalid(self) -> None:
+        is_const, probe = _runtime_probe_measure_constancy(SimpleNamespace(), None, "Total")
+        self.assertFalse(is_const)
+        self.assertIsNone(probe)
+        is_const, probe = _runtime_probe_measure_constancy(SimpleNamespace(), "BareMeasure", "Total")
+        self.assertFalse(is_const)
+
+    def test_runtime_probe_flags_dynamic_constant(self) -> None:
+        # Mock pbi_execute_dax_tool to simulate a measure that returns the
+        # same value for 3 axis points — i.e. a CALCULATE-with-fixed-filter
+        # case the static heuristic misses.
+        fake_result = {
+            "ok": True,
+            "rows": [
+                {"[Sales][Year]": 2023, "[__probe_v]": 100.0},
+                {"[Sales][Year]": 2024, "[__probe_v]": 100.0},
+                {"[Sales][Year]": 2025, "[__probe_v]": 100.0},
+            ],
+        }
+        with patch("tools.query.pbi_execute_dax_tool", return_value=fake_result):
+            is_const, probe = _runtime_probe_measure_constancy(SimpleNamespace(), "Sales.Year", "Total")
+        self.assertTrue(is_const)
+        self.assertIsNotNone(probe)
+        self.assertEqual(probe["distinct_count"], 1)
+        self.assertEqual(probe["axis"], "Sales.Year")
+        self.assertEqual(probe["rows_probed"], 3)
+
+    def test_runtime_probe_passes_when_values_vary(self) -> None:
+        fake_result = {
+            "ok": True,
+            "rows": [
+                {"[__probe_v]": 100.0},
+                {"[__probe_v]": 200.0},
+                {"[__probe_v]": 300.0},
+            ],
+        }
+        with patch("tools.query.pbi_execute_dax_tool", return_value=fake_result):
+            is_const, probe = _runtime_probe_measure_constancy(SimpleNamespace(), "Sales.Year", "Total")
+        self.assertFalse(is_const)
+
+    def test_runtime_probe_returns_false_on_engine_error(self) -> None:
+        with patch("tools.query.pbi_execute_dax_tool", side_effect=RuntimeError("DAX failed")):
+            is_const, probe = _runtime_probe_measure_constancy(SimpleNamespace(), "Sales.Year", "Total")
+        self.assertFalse(is_const)
+        self.assertIsNone(probe)
+
+    def test_diagnose_render_risks_runtime_constant_surfaces(self) -> None:
+        from tools.visuals import pbi_add_line_chart_tool
+
+        # A measure whose DAX has a column ref (escapes the static heuristic)
+        # but whose runtime evaluation is constant across the axis.
+        sneaky_expr = "CALCULATE(SUM(Sales[Amount]), Sales[Amount] = 0)"
+        fake_probe_rows = {
+            "ok": True,
+            "rows": [
+                {"[__probe_v]": 0},
+                {"[__probe_v]": 0},
+                {"[__probe_v]": 0},
+            ],
+        }
+        with patch(
+            "tools.visuals.pbi_model_info_tool",
+            return_value={
+                "ok": True,
+                "tables": [{"name": "Dim_Date", "columns": [{"name": "Year"}]}],
+                "measures": [
+                    {"name": "SneakyZero", "table": "Sales", "expression": sneaky_expr},
+                ],
+            },
+        ):
+            with patch(
+                "tools.measures.pbi_list_measures_tool",
+                return_value={
+                    "ok": True,
+                    "measures": [{"name": "SneakyZero", "table": "Sales", "expression": sneaky_expr}],
+                },
+            ):
+                with patch("tools.query.pbi_execute_dax_tool", return_value=fake_probe_rows):
+                    manager = SimpleNamespace()
+                    pbi_add_line_chart_tool(
+                        str(self.extract_folder),
+                        "Overview",
+                        "Dim_Date.Year",
+                        ["SneakyZero"],
+                        20,
+                        20,
+                        manager=manager,
+                    )
+                    result = pbi_diagnose_render_risks_tool(
+                        str(self.extract_folder),
+                        "Overview",
+                        manager=manager,
+                    )
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["risk_count"], 1)
+        risks = result["constant_measure_risks"]
+        self.assertEqual(len(risks), 1)
+        self.assertEqual(risks[0]["issue"], "runtime_constant_measure")
+        self.assertEqual(risks[0]["axis_ref"], "Dim_Date.Year")
+        self.assertIsNotNone(risks[0]["probe"])
 
     def test_diagnose_render_risks_clean_layout_returns_healthy(self) -> None:
         # Empty page → no visuals → no risks.
