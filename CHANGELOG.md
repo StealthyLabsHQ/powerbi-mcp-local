@@ -3,6 +3,96 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.11.1] — 2026-05-08 — pbi_persist_now: opt-in Ctrl+S for Power BI Desktop
+
+Closes the long-standing "TOM mutations are in-memory only" gap. Until now
+every measure / column / table / relationship change a tool made lived in
+the AS engine in memory; the user had to switch to PBI Desktop and press
+Ctrl+S to persist. With `PBI_MCP_ALLOW_UI_AUTOMATION=1` and
+`confirm=True`, callers can now ask the server to drive that key chord.
+
+### Added
+
+1. **`pbi_persist_now_tool`** in `src/tools/ui_automation.py`. Hard gates,
+   both required:
+   - **Server env**: `PBI_MCP_ALLOW_UI_AUTOMATION=1` must be set when the
+     server starts. Without it the call fails with an explicit error.
+   - **Per-call**: `confirm=True` must be passed. Default refuses.
+
+   Behaviour:
+   - Resolves the target PBI Desktop PID from the connection manager's
+     live instance metadata (`manager._state.instance.pid`); falls back to
+     the most recently started `PBIDesktop.exe` via `psutil` when no
+     manager is connected.
+   - Finds the visible top-level window of that PID via
+     `EnumWindows` + `GetWindowThreadProcessId`.
+   - Brings it to the foreground (`SetForegroundWindow`, with
+     `ShowWindow(SW_RESTORE)` if minimised), captures the previous
+     foreground HWND.
+   - Injects exactly **one** key sequence — `Ctrl + S` — through
+     `SendInput`. No other key sequences are emitted.
+   - Optional `pbix_path`: when provided, polls the file's modification
+     timestamp up to `timeout_seconds` (clamped to `[1, 60]`) and reports
+     the observed delta in `save_observed`, `mtime_before`, `mtime_after`.
+   - Restores focus to the previously-foreground window (best-effort).
+
+2. **`src/wrappers/ui_automation.py`** — one-line `register_tool()` call,
+   wired into `server.py` alongside the other domain wrappers.
+
+### Internals
+
+- All Win32 calls use `ctypes.windll.user32` directly — no extra runtime
+  dependency (no pywinauto, pyautogui, keyboard).
+- Tool count: 132 → 133. Strict registry audit (`PBI_MCP_STRICT_REGISTRY=1`)
+  clean: 133/133.
+- Registered as `write` in `security.WRITE_TOOLS`. Not exposed in the
+  `grading` profile.
+- `platform.system()` guard returns a structured error with
+  `{"platform": "..."}` outside Windows so the tool never reaches the
+  Win32 imports on Linux/macOS.
+
+### Tests
+
+- New `tests/test_ui_automation.py` (7 cases):
+  - **Gate tests** (run on every platform):
+    - `test_requires_confirm` — `confirm=False` raises.
+    - `test_requires_env_opt_in` — env var unset raises (Windows path) /
+      platform guard raises (non-Windows path).
+    - `test_tool_category` — categorised as `write`.
+  - **Execution tests** (Windows-only via `skipUnless`):
+    - `test_no_pid_returns_error_payload` — no PBI Desktop process raises.
+    - `test_no_window_for_pid_returns_error` — process exists but no
+      visible window raises.
+    - `test_full_path_polls_mtime` — full happy path with mocked Win32
+      injection that simulates Power BI flushing the pbix; asserts mtime
+      observation works.
+    - `test_no_pbix_path_returns_immediately` — Ctrl+S sent, no polling.
+- 181 passing locally (was 174), 2 platform skips. ruff check + format
+  check clean.
+
+### Lessons / footguns avoided
+
+- `SendInput` is the only Win32 API that survives UAC isolation between
+  unprivileged and elevated processes; `keybd_event` does not. PBI
+  Desktop typically runs unelevated, but if a user starts the MCP server
+  from an elevated terminal it would silently no-op with `keybd_event`.
+- `SetForegroundWindow` requires the calling process to own the
+  foreground or have specific input ownership. The brief 150 ms sleep
+  after `SetForegroundWindow` keeps Windows from racing the key injection
+  back to the previous focus owner.
+- Mtime polling has a 250 ms granularity — snappy enough for interactive
+  feel, tight enough to detect saves that finish in under a second.
+
+### Caveats
+
+- If the PBIX has never been saved (no on-disk file), Ctrl+S triggers
+  a "Save As…" dialog. The tool injects the key chord regardless; it
+  does not (and will not) auto-fill the filename. Caller should ensure
+  the file has been saved at least once.
+- If a modal dialog is open in PBI Desktop (refresh prompt, conflict
+  resolution, etc.), Ctrl+S is consumed by the dialog. The tool reports
+  `save_observed=False` after the timeout in that case.
+
 ## [0.11.0] — 2026-05-08 — Visual binding edits without remove + recreate
 
 First feature drop after the 0.10.x stabilisation cycle. Adds

@@ -167,6 +167,7 @@ WRITE_TOOLS = {
     "pbi_excel_import_workflow",
     "pbi_measure_workflow",
     "pbi_repair_report_fields",
+    "pbi_persist_now",
 }
 
 DESTRUCTIVE_TOOLS = {

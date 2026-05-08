@@ -11,7 +11,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 132](https://img.shields.io/badge/tools-132-orange)](#tool-catalog)
+[![Tools 133](https://img.shields.io/badge/tools-133-orange)](#tool-catalog)
 [![CI](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml/badge.svg)](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml)
 
 </div>
@@ -141,7 +141,7 @@ Setup guides:
 <a id="tool-catalog"></a>
 ## Tool Catalog
 
-132 MCP tools are grouped into these areas:
+133 MCP tools are grouped into these areas:
 
 | Area | Coverage |
 | --- | --- |
@@ -167,6 +167,17 @@ In-place binding edits (no remove + recreate) via:
 ```text
 pbi_update_visual_bindings(extract_folder, page, visual_id,
                            projections={"Y": ["Total Sales"]})
+```
+
+Force Power BI Desktop to flush in-memory TOM mutations to the PBIX file
+(opt-in UI automation):
+
+```powershell
+$env:PBI_MCP_ALLOW_UI_AUTOMATION = "1"   # set before launching the server
+```
+
+```text
+pbi_persist_now(pbix_path="C:\\reports\\sales.pbix", confirm=true)
 ```
 
 ## Automation Flow

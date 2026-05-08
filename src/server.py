@@ -60,6 +60,7 @@ from wrappers import query as _wrappers_query  # noqa: F401
 from wrappers import relationships as _wrappers_relationships  # noqa: F401
 from wrappers import rls as _wrappers_rls  # noqa: F401
 from wrappers import tmdl as _wrappers_tmdl  # noqa: F401
+from wrappers import ui_automation as _wrappers_ui_automation  # noqa: F401
 from wrappers import visuals as _wrappers_visuals  # noqa: F401
 from wrappers import workflows as _wrappers_workflows  # noqa: F401
 

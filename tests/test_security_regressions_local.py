@@ -38,34 +38,26 @@ def test_pbi_execute_dax_as_role_blocks_connection_string_separator() -> None:
 
 def test_validate_m_expression_blocks_dynamic_shared_bypass() -> None:
     with pytest.raises(PowerBIValidationError):
-        _validate_m_expression(
-            'let Fn = Record.Field(#shared, "Web" & ".Contents") in Fn("https://example.com")'
-        )
+        _validate_m_expression('let Fn = Record.Field(#shared, "Web" & ".Contents") in Fn("https://example.com")')
 
 
 def test_validate_m_expression_ignores_blocked_tokens_inside_comments() -> None:
     _validate_m_expression(
         "let\n"
-        "    /* Web.Contents(\"https://example.com\") */\n"
-        "    Source = Table.FromRows({{\"x\"}}, {\"A\"})\n"
+        '    /* Web.Contents("https://example.com") */\n'
+        '    Source = Table.FromRows({{"x"}}, {"A"})\n'
         "in\n"
         "    Source"
     )
 
 
 def test_validate_m_expression_ignores_blocked_tokens_inside_escaped_strings() -> None:
-    _validate_m_expression(
-        'let Message = "Web.Contents(""https://example.com"")", Clean = Text.Trim(Message) in Clean'
-    )
+    _validate_m_expression('let Message = "Web.Contents(""https://example.com"")", Clean = Text.Trim(Message) in Clean')
 
 
 def test_validate_m_expression_allows_locally_defined_safe_function() -> None:
     _validate_m_expression(
-        "let\n"
-        "    Clean = (value as text) => Text.Trim(value),\n"
-        "    Result = Clean(\" hello \")\n"
-        "in\n"
-        "    Result"
+        'let\n    Clean = (value as text) => Text.Trim(value),\n    Result = Clean(" hello ")\nin\n    Result'
     )
 
 

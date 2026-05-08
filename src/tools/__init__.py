@@ -130,6 +130,7 @@ from .rls import (
     pbi_remove_role_member_tool,
     pbi_set_role_filter_tool,
 )
+from .ui_automation import pbi_persist_now_tool
 from .visuals import (
     pbi_add_bar_chart_tool,
     pbi_add_card_tool,
@@ -282,6 +283,7 @@ __all__ = [
     "pbi_read_tmdl_file_tool",
     "pbi_write_tmdl_file_tool",
     "pbi_create_persistent_report_tool",
+    "pbi_persist_now_tool",
     "pbi_extract_report_tool",
     "pbi_compile_report_tool",
     "pbi_patch_layout_tool",
