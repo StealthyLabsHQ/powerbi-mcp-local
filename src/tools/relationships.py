@@ -164,6 +164,7 @@ def pbi_create_relationship_tool(
         relationship=payload["relationship"],
         action=payload["action"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -232,6 +233,7 @@ def pbi_delete_relationship_tool(
         f"Relationship '{payload['deleted_relationship']['name']}' deleted successfully.",
         deleted_relationship=payload["deleted_relationship"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -300,6 +302,7 @@ def pbi_update_relationship_tool(
         f"Relationship '{payload['relationship']['name']}' updated successfully.",
         relationship=payload["relationship"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 

@@ -2761,12 +2761,18 @@ def pbi_add_visual(
     height: int | None = None,
     title: str = "",
     config: dict[str, Any] | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Add any visual via a generic dispatcher.
 
     visual_type: card | bar_chart | line_chart | donut | table | waterfall |
     slicer | gauge | kpi | scatter_chart | combo_chart | matrix | map |
     text_box | labelled_card.
+
+    Set ``dry_run=True`` to validate and resolve bindings without writing the
+    layout to disk — the response carries ``dry_run=True`` and a ``write_log``
+    summarising what would have been persisted. Use it to preview a change
+    before committing.
 
     The active connection manager is forwarded to every dispatcher so live
     field validation and home-table resolution happen — no
@@ -2785,6 +2791,7 @@ def pbi_add_visual(
         title=title,
         config=config,
         manager=CONNECTION_MANAGER,
+        dry_run=dry_run,
     )
 
 
@@ -3296,9 +3303,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--profile",
-        choices=["readonly", "write", "all"],
+        choices=["readonly", "write", "all", "grading"],
         default="all",
-        help="Filter exposed tool surface: readonly, write (read+write), or all (default).",
+        help="Filter exposed tool surface: readonly, write (read+write), grading (analysis + scoring only), or all (default).",
     )
     args = parser.parse_args()
     SECURITY.policy(reload=True, cwd=Path(__file__).parent)
@@ -3389,12 +3396,14 @@ def _apply_profile(profile: str) -> None:
     """Prune FastMCP's registered tools based on the selected profile."""
     if profile == "all":
         return
-    from security import READ_TOOLS, WRITE_TOOLS, DESTRUCTIVE_TOOLS
+    from security import READ_TOOLS, WRITE_TOOLS, DESTRUCTIVE_TOOLS, GRADING_TOOLS
 
     if profile == "readonly":
         allowed = set(READ_TOOLS)
     elif profile == "write":
         allowed = set(READ_TOOLS) | set(WRITE_TOOLS)
+    elif profile == "grading":
+        allowed = set(GRADING_TOOLS)
     else:
         return
 

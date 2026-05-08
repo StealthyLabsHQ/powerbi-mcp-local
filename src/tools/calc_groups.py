@@ -187,6 +187,7 @@ def pbi_create_calc_group_tool(
         calc_group=payload["calc_group"],
         action=payload["action"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -212,6 +213,7 @@ def pbi_delete_calc_group_tool(manager: Any, *, table_name: str) -> dict[str, An
         f"Calculation group '{table_name}' deleted successfully.",
         deleted_calc_group=payload["deleted_calc_group"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 

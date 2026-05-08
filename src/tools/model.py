@@ -368,6 +368,7 @@ def pbi_create_table_tool(
         table=payload["table"],
         action=payload["action"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -388,6 +389,7 @@ def pbi_delete_table_tool(manager: Any, *, name: str) -> dict[str, Any]:
         f"Table '{name}' deleted successfully.",
         deleted_table=payload["deleted_table"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -415,6 +417,7 @@ def pbi_delete_column_tool(manager: Any, *, table: str, name: str) -> dict[str, 
         f"Column '{table}[{name}]' deleted successfully.",
         deleted_column=payload["deleted_column"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -441,6 +444,7 @@ def pbi_rename_table_tool(manager: Any, *, name: str, new_name: str) -> dict[str
         f"Table '{name}' renamed to '{new_name}'.",
         rename=payload["rename"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -474,6 +478,7 @@ def pbi_rename_column_tool(manager: Any, *, table: str, name: str, new_name: str
         f"Column '{table}[{name}]' renamed to '{table}[{new_name}]'.",
         rename=payload["rename"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -550,6 +555,7 @@ def pbi_create_column_tool(
         column=payload["column"],
         action=payload["action"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -720,6 +726,7 @@ def pbi_set_column_data_type_tool(
         before=payload["before"],
         after=payload["after"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 

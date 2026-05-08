@@ -66,6 +66,47 @@ READ_TOOLS = {
     "pbi_get_page",
     "pbi_validate_report_fields",
     "pbi_repair_report_fields",
+    "pbi_validate_star_schema",
+    "pbi_detect_circular_dependencies",
+    "pbi_validate_power_query_steps",
+    "pbi_detect_missing_visuals",
+    "pbi_score_rubric",
+    "pbi_export_correction_report",
+    "pbi_describe_page",
+    "pbi_system_health",
+    "pbi_operation_history",
+}
+
+
+# Tightly-scoped profile for grading workflows: read-only tools that surface
+# model + report structure, validation, and rubric scoring. Drops the bulk of
+# the write surface to reduce LLM tool-selection noise during evaluation.
+GRADING_TOOLS = {
+    "pbi_connect",
+    "pbi_list_instances",
+    "pbi_list_tables",
+    "pbi_list_measures",
+    "pbi_list_relationships",
+    "pbi_list_pages",
+    "pbi_get_page",
+    "pbi_describe_page",
+    "pbi_model_info",
+    "pbi_execute_dax",
+    "pbi_validate_dax",
+    "pbi_audit_model",
+    "pbi_validate_star_schema",
+    "pbi_detect_circular_dependencies",
+    "pbi_validate_power_query_steps",
+    "pbi_detect_missing_visuals",
+    "pbi_validate_visual_bindings",
+    "pbi_validate_report_fields",
+    "pbi_score_rubric",
+    "pbi_export_correction_report",
+    "pbi_lint_dax",
+    "pbi_lint_report_layout",
+    "pbi_get_power_query",
+    "pbi_list_power_queries",
+    "pbi_measure_dependencies",
 }
 
 WRITE_TOOLS = {

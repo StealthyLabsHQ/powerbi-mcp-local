@@ -539,5 +539,6 @@ def pbi_refresh_tool(
         f"Refresh requested successfully for {payload['refresh']['target_type']} '{payload['refresh']['target']}'.",
         refresh=payload["refresh"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )

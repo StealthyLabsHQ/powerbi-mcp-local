@@ -602,6 +602,18 @@ class PowerBIConnectionManager:
                 self._read_cache.clear()
                 payload["save_result"] = serialize_value(save_result)
                 payload["connection"] = self._state.snapshot()
+                # The TOM SaveChanges call only commits to the in-memory AS engine.
+                # The on-disk .pbix is NOT updated until the user runs Ctrl+S in
+                # Power BI Desktop (or a future pbi_persist_now tool). Surface this
+                # so callers don't assume durability.
+                payload["persistence"] = {
+                    "scope": "memory_only",
+                    "hint": (
+                        "Change committed to the AS engine in memory. The .pbix on "
+                        "disk is unchanged until Power BI Desktop saves the file. "
+                        "Closing Desktop without saving will lose this change."
+                    ),
+                }
                 self._record_operation(op=operation_name, kind="write", started=started, ok_=True)
                 return payload
             except Exception as exc:  # pragma: no cover - exercised on Windows

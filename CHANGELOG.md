@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.10.5] — 2026-05-08 — Atomicity, dry-run, persistence warnings, grading profile
+
+Foundational reliability improvements addressing the four highest-ROI structural gaps identified in the v0.10.4 retrospective. No tool removals; new optional `dry_run` parameter on the generic visual dispatcher; existing signatures unchanged.
+
+### Fixed
+
+1. **Atomic layout writes with `.bak` recovery.** `_save_layout` now serialises to `Layout.tmp.<pid>`, copies the previous-good content to `Layout.bak`, then `os.replace`s the temp file onto `Layout` — atomic on Windows + POSIX. A crash mid-write leaves the original Layout intact and the previous version available at `Layout.bak`. Previously, an interrupted write could corrupt the Layout JSON and break the entire `.pbix`.
+
+2. **Persistence warning on every TOM mutation.** `PowerBIConnectionManager.execute_write()` injects a `persistence: {scope: "memory_only", hint: "..."}` field into every write payload. The hint explicitly states that the change committed to the AS engine in memory and that the `.pbix` on disk is unchanged until Power BI Desktop saves the file. All measure / table / column / relationship / role / calc-group / Power Query / TMDL writes now propagate this warning to the response. Eliminates the silent-loss failure mode where a user closes Power BI Desktop without realising changes weren't persisted.
+
+### Added
+
+3. **Dry-run scaffolding for visual writes.** New `dry_run_layout_writes()` context manager + thread-local flag. While active, `_save_layout` records a per-write log entry (`{folder, section_count, visual_count}`) instead of writing to disk. The generic `pbi_add_visual` MCP tool gained a `dry_run: bool = False` parameter — when True, all validation, binding resolution, and home-table lookups still run, but the layout is left untouched. The response carries `dry_run=True`, a `write_log`, and a `[dry-run]`-prefixed message. Use it to preview a proposed change before committing.
+
+4. **`grading` profile.** New `--profile=grading` exposes a tightly-scoped 25-tool surface (vs. ~130 in `all`): connect / list / model_info / page reads, DAX validation, all six v0.10.4 analysis tools, lint, audit. Drops every visual writer, calc group, role, Power Query mutator, Excel write, and persistence tool. Drastically reduces LLM tool-selection noise during evaluation workflows. Existing `readonly` / `write` / `all` profiles unchanged.
+
+### Internals
+
+- `READ_TOOLS` extended with the v0.10.4 analysis tools + `pbi_describe_page`, `pbi_system_health`, `pbi_operation_history` (these were always read-only but missing from the readonly profile).
+- New `GRADING_TOOLS` set in `src/security.py`.
+- New imports in `src/tools/visuals.py`: `threading`, `Iterator`, `contextmanager`. New module-level `_LAYOUT_WRITE_TL` thread-local.
+- `pbi_add_visual_tool` signature gained `dry_run: bool = False` (kw-only). Existing callers unaffected.
+
+### Tests
+
+- 167 passing (was 162) — 5 new offline tests covering atomic write + `.bak` creation, no-temp-leak after exception, dry-run interception, dry-run context reset, and `execute_write` persistence injection. 2 platform skips unchanged.
+
+### Still pending (deferred to v0.10.6)
+
+- `pbi_persist_now()` — would-be replacement for manual Ctrl+S. Requires UI automation (`pywinauto` or `SendKeys`) which is fragile on Windows; will be opt-in via env var or a separate package extra.
+- `dry_run` propagation to per-type visual tools (`pbi_add_line_chart`, `pbi_add_bar_chart`, …). Currently only the generic `pbi_add_visual` dispatcher exposes it. The plumbing is centralised so this is a fan-out, not a redesign.
+- `pbi_update_visual_bindings` — patch projections without remove + recreate.
+
 ## [0.10.4] — 2026-05-08 — Analysis & scoring tools, line-chart pre-flight, column qualification docs
 
 Six new analysis tools for grading and rubric scoring of Power BI deliverables, plus a pre-flight diagnostic for the line-chart constant-measure failure mode and clarified column-qualification docs across the visual surface. No tool removals; existing signatures unchanged.

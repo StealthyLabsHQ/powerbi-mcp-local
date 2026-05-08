@@ -9,11 +9,13 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from pbi_connection import PowerBIError, PowerBINotFoundError, PowerBIValidationError, error_payload, ok
 from security import SECURITY, resolve_local_path
@@ -276,10 +278,74 @@ def _load_layout(extract_folder: str | Path) -> tuple[Path, dict[str, Any]]:
     return folder, layout
 
 
+_LAYOUT_WRITE_TL = threading.local()
+
+
+def _is_dry_run() -> bool:
+    return bool(getattr(_LAYOUT_WRITE_TL, "active", False))
+
+
+def _record_dry_run_write(folder: Path, layout: dict[str, Any]) -> None:
+    log = getattr(_LAYOUT_WRITE_TL, "log", None)
+    if log is None:
+        return
+    sections = layout.get("sections", []) or []
+    log.append({
+        "folder": str(folder),
+        "section_count": len(sections),
+        "visual_count": sum(len(s.get("visualContainers", []) or []) for s in sections if isinstance(s, dict)),
+    })
+
+
+@contextmanager
+def dry_run_layout_writes() -> Iterator[list[dict[str, Any]]]:
+    """While active, ``_save_layout`` records the would-be write instead of
+    flushing to disk. Yields the list that captures one entry per intercepted
+    write — callers can return it as a "preview" payload.
+    """
+    _LAYOUT_WRITE_TL.active = True
+    _LAYOUT_WRITE_TL.log = []
+    try:
+        yield _LAYOUT_WRITE_TL.log
+    finally:
+        _LAYOUT_WRITE_TL.active = False
+        _LAYOUT_WRITE_TL.log = None
+
+
 def _save_layout(extract_folder: Path, layout: dict[str, Any]) -> None:
+    """Atomic layout write with .bak fallback.
+
+    1. Serialise to a sibling temp file (``Layout.tmp.<pid>``).
+    2. Copy the existing Layout (if any) to ``Layout.bak`` so a previous
+       known-good version is recoverable after a crash mid-write.
+    3. ``os.replace`` the temp onto Layout — atomic on Windows + POSIX.
+
+    On any exception during steps 1/2, the original Layout is untouched.
+    """
+    if _is_dry_run():
+        _record_dry_run_write(extract_folder, layout)
+        return
     layout_path = _layout_path(extract_folder)
     layout_path.parent.mkdir(parents=True, exist_ok=True)
-    layout_path.write_text(json.dumps(layout, ensure_ascii=False, indent=2), encoding="utf-16-le")
+    encoded = json.dumps(layout, ensure_ascii=False, indent=2).encode("utf-16-le")
+
+    tmp_path = layout_path.with_name(f"{layout_path.name}.tmp.{os.getpid()}")
+    bak_path = layout_path.with_name(f"{layout_path.name}.bak")
+    try:
+        tmp_path.write_bytes(encoded)
+        if layout_path.exists():
+            try:
+                # Refresh the .bak with the current good content before overwrite.
+                bak_path.write_bytes(layout_path.read_bytes())
+            except OSError as exc:  # non-fatal — backup is best-effort
+                logger.warning("Layout backup failed (%s); proceeding with atomic write.", exc)
+        os.replace(tmp_path, layout_path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 def _parse_embedded_json(value: Any, default: Any) -> Any:
@@ -3240,6 +3306,7 @@ def pbi_add_visual_tool(
     config: dict[str, Any] | None = None,
     *,
     manager: Any | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Generic visual dispatcher. Keeps the per-type tools as stable API surface.
 
@@ -3248,6 +3315,10 @@ def pbi_add_visual_tool(
                  text_box, labelled_card.
     config: per-type keyword arguments (e.g. {"measure": "Total Sales"} for card,
             {"category_column": "...", "value_measure": "..."} for bar_chart).
+    dry_run: when True, run all validation and binding logic but skip the
+             layout disk write. Useful to preview what the call would produce
+             before committing — the response carries ``dry_run=True`` and a
+             ``write_log`` with one entry per intercepted save.
 
     When ``manager`` is supplied the dispatchers forward it to the underlying
     ``pbi_add_*_tool`` so live field validation and home-table resolution
@@ -3266,11 +3337,20 @@ def pbi_add_visual_tool(
             f"Unknown visual_type '{visual_type}'. Allowed: {sorted(_VISUAL_TYPE_DISPATCH)}",
             details={"visual_type": visual_type},
         )
-    # Inject manager into cfg so each dispatcher can opt-in without breaking
-    # callers that don't supply one. Dispatchers respecting this convention
-    # call ``cfg.get("__manager__")`` on entry.
     if manager is not None and "__manager__" not in cfg:
         cfg["__manager__"] = manager
+
+    if dry_run:
+        with dry_run_layout_writes() as write_log:
+            try:
+                result = handler(extract_folder, page, x, y, effective_width, effective_height, title, cfg)
+            except Exception:
+                raise
+        result = dict(result or {})
+        result["dry_run"] = True
+        result["write_log"] = list(write_log)
+        result["message"] = "[dry-run] " + str(result.get("message", ""))
+        return result
     return handler(extract_folder, page, x, y, effective_width, effective_height, title, cfg)
 
 

@@ -121,6 +121,7 @@ def pbi_create_role_tool(
         role=payload["role"],
         action=payload["action"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -141,6 +142,7 @@ def pbi_delete_role_tool(manager: Any, *, name: str) -> dict[str, Any]:
         f"Role '{name}' deleted successfully.",
         deleted_role=payload["deleted_role"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -199,6 +201,7 @@ def pbi_set_role_filter_tool(
         f"RLS filter applied on '{role}' for table '{table}'.",
         filter=payload["filter"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -281,6 +284,7 @@ def pbi_add_role_member_tool(
         member=payload["member"],
         action=payload["action"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -314,6 +318,7 @@ def pbi_remove_role_member_tool(manager: Any, *, role: str, member_name: str) ->
         f"Member '{member_name}' removed from role '{role}'.",
         removed_member=payload["removed_member"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 

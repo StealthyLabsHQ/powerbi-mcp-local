@@ -329,6 +329,7 @@ def pbi_set_power_query_tool(
         f"Power Query expression updated for table '{table}'.",
         query=payload["query"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -528,6 +529,7 @@ def pbi_bulk_import_excel_tool(
         skipped=payload["skipped"],
         refresh_requested=payload["refresh_requested"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -702,6 +704,7 @@ def pbi_parameterize_data_source_tool(
         rewrite_count=payload["rewrite_count"],
         refresh_requested=payload["refresh_requested"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -809,6 +812,7 @@ def pbi_relocate_data_source_tool(
         match_count=payload["match_count"],
         refresh_requested=payload["refresh_requested"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 

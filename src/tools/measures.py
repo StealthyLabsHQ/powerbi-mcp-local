@@ -127,6 +127,7 @@ def pbi_create_measure_tool(
         measure=payload["measure"],
         action=payload["action"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -158,6 +159,7 @@ def pbi_delete_measure_tool(manager: Any, *, table: str, name: str) -> dict[str,
         f"Measure '{table}[{name}]' deleted successfully.",
         deleted_measure=payload["deleted_measure"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -199,6 +201,7 @@ def pbi_rename_measure_tool(
         f"Measure '{table}[{name}]' renamed to '{table}[{new_name}]'.",
         rename=payload["rename"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -263,6 +266,7 @@ def pbi_set_format_tool(
         table=payload["table"],
         format_string=payload["format_string"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
@@ -481,6 +485,7 @@ def pbi_create_measures_tool(
         updated=payload["updated"],
         failed=payload["failed"],
         save_result=payload["save_result"],
+        persistence=payload.get("persistence"),
         connection=payload["connection"],
     )
 
