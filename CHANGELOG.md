@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.10.8] — 2026-05-08 — Refactor phase 3: bindings, home_tables, containers extracted
+
+Continuation of the visuals/ fan-out. Three more focused submodules pulled out of `src/tools/visuals/__init__.py`. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.
+
+### Changed
+
+3 new submodules extracted from `src/tools/visuals/__init__.py`:
+
+1. **`_home_tables.py`** (173 L) — measure → home table resolution: `_scan_measure_home_tables`, `_resolve_measure_home_map`, `_augment_measure_home_map_with_live`, `_inspect_value_measures`, `_persistence_risks`. Lazy-imports `pbi_model_info_tool` through the package re-export so existing test patches against `tools.visuals.pbi_model_info_tool` keep working.
+
+2. **`_bindings.py`** (499 L) — visual binding builders + validators: `_build_select_entry`, `_build_prototype_query`, `_select_name_map`, `_from_entity_by_alias`, `_next_alias`, `_sync_container_query`, `_validate_projection_roles`, `_validate_field_references_live`, `_live_model_field_index`, `_visual_binding_issues`, `_scan_visual_bindings`, `_assert_container_bindings`. Same patchable-lookup pattern: `_validate_field_references_live` and `_validate_projection_roles` resolve `_live_model_field_index` through the package so tests patching `tools.visuals._live_model_field_index` keep working.
+
+3. **`_containers.py`** (236 L) — visual container builders: `_unique_visual_id`, `_validate_dimensions`, `_page_next_z`, `_base_visual_config`, `_make_visual_container`, `_visual_payload`, `_find_visual`, `_append_visual`, `_create_chart_container`.
+
+### Internals
+
+- `tools/visuals/__init__.py`: 3248 → 2440 lines (-808 across phases 2 + 3).
+- 8 submodules total (`_base`, `_paths`, `_refs`, `_layout`, `_formatting`, `_home_tables`, `_bindings`, `_containers`).
+- Registry audit clean: 131/131, 0 orphans.
+
+### Tests
+
+- 167 passing, 2 platform skips. No test changes required.
+
+### Deferred to v0.10.9+
+
+Still in the monolith: I/O block (`_extract_pbix_zip_natively`, `pbi_extract_report_tool`, `pbi_compile_report_tool`, PowerShell helpers, `_run_pbi_tools`, `_find_pbi_tools`), per-domain tool wrappers (`charts.py`, `cards.py`, `structure.py`, `pages.py`, `ops.py`, `design.py`, `dispatcher.py`), and the `server.py` wrapper split into `src/wrappers/`.
+
 ## [0.10.7] — 2026-05-08 — Refactor phase 2: visuals/ submodule fan-out (5 modules extracted)
 
 Continuation of the file-split refactor started in v0.10.6. No behavior change, no tool surface change. Breaks the visuals package into focused submodules so future edits target the relevant concern rather than scrolling a 3500-line monolith.
