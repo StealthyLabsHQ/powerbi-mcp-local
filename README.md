@@ -121,6 +121,47 @@ Standard `stdio` config:
 }
 ```
 
+Google Antigravity on Windows can launch the server through the dedicated
+PowerShell wrapper so cwd and Python stdio encoding stay stable:
+
+```json
+{
+  "mcpServers": {
+    "powerbi": {
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\Users\\stealthy\\Documents\\GitHub\\powerbi-mcp-local\\tools\\antigravity_mcp_launcher.ps1",
+        "--profile",
+        "readonly"
+      ]
+    }
+  }
+}
+```
+
+Use `--profile readonly` first to keep `tools/list` small while validating the
+client connection. Switch to `--profile all` after Antigravity lists resources
+and tools successfully.
+
+Local compatibility probe:
+
+```powershell
+$init = @(
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"antigravity-probe","version":"1.0"}}}',
+  '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
+)
+
+($init + '{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}') -join "`n" |
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\antigravity_mcp_launcher.ps1 --profile readonly
+
+($init + '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}') -join "`n" |
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\antigravity_mcp_launcher.ps1 --profile readonly
+```
+
 SSE endpoint:
 
 ```text
