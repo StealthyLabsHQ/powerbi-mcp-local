@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "powerbi-mcp-local"
-version = "0.12.0"
+version = "0.12.1"
 description = "FastMCP server for Power BI Desktop model, Excel, and Power Query automation."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,6 +43,7 @@ Repository = "https://github.com/StealthyLabsHQ/powerbi-mcp-local"
 
 [project.scripts]
 powerbi-mcp-local = "src.server:main"
+powerbi-mcp-antigravity = "src.server_antigravity:main"
 
 [tool.setuptools]
 py-modules = []

@@ -226,6 +226,39 @@ Create `.mcp/config.json` in your project root:
 
 ---
 
+## Google Antigravity (compat entry point)
+
+Antigravity's bundled MCP client closes the connection during the
+`resources/list` exchange when talking to the default FastMCP 1.27 stdio
+server (`connection closed: client is closing: EOF`). A dedicated entry
+point — `src/server_antigravity.py` — works around it without affecting
+Claude Desktop / Cursor / other clients.
+
+What it does:
+- forces UTF-8, line-buffered, `\n` line endings on stdout/stderr
+- routes every log record to stderr at `ERROR` level (stdout reserved
+  for JSON-RPC)
+- advertises only the `tools` capability (no `prompts`, no `resources`,
+  no `experimental`, no `listChanged` notifications)
+
+The full tool surface is still callable through `tools/call`; only the
+capability advertisement is stripped.
+
+`%USERPROFILE%\.gemini\antigravity\mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "powerbi": {
+      "command": "C:\\path\\to\\powerbi-mcp-local\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\path\\to\\powerbi-mcp-local\\src\\server_antigravity.py"]
+    }
+  }
+}
+```
+
+---
+
 ## SSE Mode (any HTTP client)
 
 For tools that don't support stdio, run the server as an HTTP endpoint:

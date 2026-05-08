@@ -3,6 +3,44 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.12.1] — 2026-05-09 — Google Antigravity compat entry point
+
+### Added
+
+1. **`src/server_antigravity.py`** — dedicated stdio entry point for the
+   Google Antigravity MCP client, registered as
+   ``powerbi-mcp-antigravity`` in ``[project.scripts]``. The default
+   entry point keeps shipping the full FastMCP capability set for
+   Claude Desktop / Cursor / Anthropic CLI; this one strips it down to
+   what Antigravity's bundled client accepts.
+
+   Antigravity used to fail with
+   ``connection closed: calling "resources/list": client is closing: EOF``
+   immediately after ``initialize``. Three differences vs. the default
+   entry point fix it:
+
+   - **stdio hygiene**: UTF-8, line-buffered, ``\n`` line endings on
+     stdout/stderr (the Windows default ``\r\n`` breaks strict
+     JSON-RPC framing).
+   - **Logs to stderr only at ERROR level**: stdout is reserved for
+     JSON-RPC frames; even one INFO line on stdout would corrupt the
+     next frame.
+   - **Minimal capability advertisement**: only ``tools`` (no
+     ``prompts``, no ``resources``, no ``experimental``, no
+     ``listChanged`` notifications). Antigravity's strict validator
+     rejects shapes it doesn't recognize. Tools, resources, and
+     prompts registered on the FastMCP instance remain reachable
+     through ``tools/call``; only the capability advertisement is
+     stripped.
+
+   Same single-instance lock and parent-watcher lifecycle as the
+   default entry point.
+
+   Configure Antigravity at
+   ``%USERPROFILE%\.gemini\antigravity\mcp_config.json`` to point
+   ``command`` + ``args`` at ``server_antigravity.py``. See
+   ``docs/SETUP.md`` for the full snippet.
+
 ## [0.12.0] — 2026-05-09 — Security release: Codex audit findings (14 fixes)
 
 External security audit (Codex) flagged 1 critical + 13 high findings.
