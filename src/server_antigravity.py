@@ -75,6 +75,34 @@ def _silence_loggers() -> None:
         logging.getLogger(name).setLevel(logging.ERROR)
 
 
+def _parse_args(argv: list[str] | None = None) -> object:
+    """Mirror the relevant ``--readonly`` / ``--profile`` flags from the
+    main entry point so the same launcher invocation works either way.
+
+    The Antigravity adapter only uses stdio, so transport flags are
+    irrelevant — we accept them silently for argv-passthrough simplicity
+    in case the launcher ever forwards them.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="powerbi-mcp-antigravity",
+        description="Antigravity-compatible stdio MCP server (subset of src/server.py flags).",
+    )
+    parser.add_argument(
+        "--readonly",
+        action="store_true",
+        help="Disable write and destructive tools for this server process.",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=["readonly", "write", "all", "grading"],
+        default="all",
+        help="Filter exposed tool surface (same semantics as src/server.py).",
+    )
+    return parser.parse_args(argv)
+
+
 async def _run_minimal_stdio() -> None:
     """Replicate FastMCP.run_stdio_async with a stripped capabilities payload.
 
@@ -100,9 +128,18 @@ async def _run_minimal_stdio() -> None:
     _acquire_single_instance_lock()
     _start_parent_watcher()
 
+    server_version = getattr(mcp, "version", None)
+    if not server_version:
+        try:
+            from importlib.metadata import version as _pkg_version
+
+            server_version = _pkg_version("powerbi-mcp-local")
+        except Exception:
+            server_version = "0.0.0"
+
     init_options = InitializationOptions(
         server_name=mcp.name,
-        server_version=getattr(mcp, "version", None) or "0.12.0",
+        server_version=server_version,
         capabilities=ServerCapabilities(
             tools=ToolsCapability(listChanged=False),
         ),
@@ -117,10 +154,30 @@ def main() -> None:
 
     Equivalent to ``python src/server.py`` for the tool surface, but
     with the stdio/capability tweaks documented at the top of this
-    module.
+    module. Supports ``--readonly`` and ``--profile`` for parity with
+    the main entry point.
     """
     _harden_stdio()
     _silence_loggers()
+
+    args = _parse_args()
+
+    # Late import: defer touching SECURITY / mcp_core until after stdio
+    # + logging are hardened.
+    from mcp_core import _apply_profile
+    from security import SECURITY
+
+    SECURITY.policy(reload=True)  # honors operator CWD security_policy.json
+    if args.readonly or args.profile == "readonly":
+        SECURITY.set_runtime_readonly(True)
+
+    # _apply_profile mutates the registered FastMCP tool surface. It must
+    # run BEFORE _run_minimal_stdio so the pruned set is what gets
+    # advertised through tools/list.
+    from server import mcp  # noqa: F401  -- side-effect registration
+
+    _apply_profile(args.profile)
+
     import anyio
 
     anyio.run(_run_minimal_stdio)

@@ -11,7 +11,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 134](https://img.shields.io/badge/tools-134-orange)](#tool-catalog)
+[![Tools 147](https://img.shields.io/badge/tools-147-orange)](#tool-catalog)
 [![CI](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml/badge.svg)](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml)
 
 </div>
@@ -121,8 +121,20 @@ Standard `stdio` config:
 }
 ```
 
-Google Antigravity on Windows can launch the server through the dedicated
-PowerShell wrapper so cwd and Python stdio encoding stay stable:
+Google Antigravity (Gemini-based IDE) ships a stricter MCP client that
+drops the connection at `resources/list` against the default FastMCP
+1.27.x stdio server. Since v0.12.1 the project ships a dedicated entry
+point — `src/server_antigravity.py` — that strips the capability
+advertisement to `tools` only, forces UTF-8 / `\n` stdio, and routes
+every log to stderr at ERROR level. The default `src/server.py` is left
+untouched for Claude Desktop / Cursor / Anthropic CLI.
+
+The PowerShell wrapper at `tools/antigravity_mcp_launcher.ps1` pins the
+working directory and exports `PYTHONUTF8=1` / `PYTHONIOENCODING=utf-8`
+before invoking the venv Python on `server_antigravity.py`, so the
+encoding stays stable regardless of how Antigravity spawns the process.
+
+`%USERPROFILE%\.gemini\antigravity\mcp_config.json`:
 
 ```json
 {
@@ -143,9 +155,12 @@ PowerShell wrapper so cwd and Python stdio encoding stay stable:
 }
 ```
 
-Use `--profile readonly` first to keep `tools/list` small while validating the
-client connection. Switch to `--profile all` after Antigravity lists resources
-and tools successfully.
+Adjust the `-File` path to your clone. `--profile readonly` keeps
+`tools/list` small while validating the client connection — switch to
+`--profile all` (or omit the flag) once Antigravity lists tools
+successfully. `--readonly` and `--profile {readonly,write,all,grading}`
+are all forwarded through the wrapper to the entry point with the same
+semantics as `src/server.py`.
 
 Local compatibility probe:
 
@@ -182,7 +197,7 @@ Setup guides:
 <a id="tool-catalog"></a>
 ## Tool Catalog
 
-134 MCP tools are grouped into these areas:
+147 MCP tools are grouped into these areas:
 
 | Area | Coverage |
 | --- | --- |

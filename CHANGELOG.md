@@ -3,6 +3,33 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.12.2] — 2026-05-09 — Antigravity adapter polish
+
+### Changed
+
+1. **`tools/antigravity_mcp_launcher.ps1`** now invokes
+   `src/server_antigravity.py` instead of `src/server.py`, so the
+   capability-stripping logic introduced in v0.12.1 actually applies
+   when Antigravity launches the server through the documented
+   PowerShell wrapper.
+2. **`src/server_antigravity.py`** gained a small argparse layer
+   exposing `--readonly` and `--profile {readonly,write,all,grading}`
+   with the same semantics as `src/server.py`. Both flags are honored:
+   `--readonly` toggles `SECURITY.set_runtime_readonly(True)` and
+   `--profile readonly` does the same plus prunes the registered tool
+   surface to `READ_TOOLS`.
+3. **`server_version` in the InitializationOptions** is now read
+   dynamically from `importlib.metadata` so the value reflects the
+   installed package, not a hard-coded fallback.
+
+### Docs
+
+4. **README.md** — Antigravity section reworded to explain *why* the
+   dedicated entry point exists (FastMCP 1.27 capability mismatch),
+   what the PowerShell wrapper does (cwd + UTF-8 env), and how to map
+   the `--profile` flags. Tool-count badge bumped 134 → 147 to match
+   the current registered surface.
+
 ## [0.12.1] — 2026-05-09 — Google Antigravity compat entry point
 
 ### Added

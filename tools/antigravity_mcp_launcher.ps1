@@ -7,7 +7,10 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
-$Server = Join-Path $RepoRoot "src\server.py"
+# Antigravity-specific entry point: minimal capabilities + stdio
+# hygiene. See src/server_antigravity.py for the rationale and
+# CHANGELOG v0.12.1 for the protocol-compat tweaks.
+$Server = Join-Path $RepoRoot "src\server_antigravity.py"
 
 if (-not (Test-Path -LiteralPath $Python)) {
     Write-Error "Python venv not found: $Python"
