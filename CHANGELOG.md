@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.10.10] — 2026-05-08 — Refactor phase 5: pages, design, repair extracted
+
+Three more focused submodules pulled out of `src/tools/visuals/__init__.py`. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.
+
+### Changed
+
+1. **`_pages.py`** (209 L) — page-level tools: `pbi_list_pages_tool`, `pbi_get_page_tool`, `pbi_describe_page_tool`, `pbi_create_page_tool`, `pbi_delete_page_tool`, `pbi_set_page_size_tool`.
+
+2. **`_design.py`** (344 L) — theme + preset application + dashboard composition: `DESIGN_PRESETS` catalogue, `_validate_hex_color`, `_validate_preset_hex_colors`, `_card_vc_objects`, `pbi_apply_theme_tool`, `pbi_apply_design_tool`, `_create_visual_from_spec`, `pbi_build_dashboard_tool`.
+
+3. **`_repair.py`** (91 L) — `pbi_validate_report_fields_tool`, `pbi_repair_report_fields_tool`.
+
+### Internals
+
+- `tools/visuals/__init__.py`: 2207 → 1666 lines.
+- 12 submodules total.
+- Registry audit clean: 131/131, 0 orphans.
+
+### Tests
+
+- 167 passing, 2 platform skips.
+
+### Deferred to v0.10.11+
+
+The 14 `pbi_add_*_tool` visual builders, ops (`pbi_remove_visual_tool`, `pbi_move_visual_tool`, `pbi_set_visual_format_property_tool`, `pbi_disable_card_autoscale_tool`, `pbi_convert_visual_type_tool`, `pbi_auto_grid_layout_tool`, `pbi_patch_layout_tool`), the dispatcher (`pbi_add_visual_tool` + `_VISUAL_TYPE_DISPATCH`), and the `server.py` wrapper split.
+
 ## [0.10.9] — 2026-05-08 — Refactor phase 4: I/O block extracted
 
 External-tool plumbing pulled out of `src/tools/visuals/__init__.py`. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.
