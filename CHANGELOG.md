@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.10.12] — 2026-05-08 — Refactor phase 7 (final): server.py wrapper split
+
+The full structural refactor is **complete**. `src/server.py` shrunk from 3215 → 323 lines; the 144 `@mcp.tool()` wrappers are now distributed across 14 focused domain modules under `src/wrappers/`. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.
+
+### Changed
+
+`src/wrappers/` package created. Each module registers its tools as a side-effect of import:
+
+| Module | Wrappers | Lines |
+|---|---|---|
+| `wrappers/connection.py` | 7 | 92 |
+| `wrappers/model.py` | 10 | 175 |
+| `wrappers/measures.py` | 19 | 467 |
+| `wrappers/relationships.py` | 4 | 103 |
+| `wrappers/rls.py` | 6 | 101 |
+| `wrappers/calc_groups.py` | 3 | 50 |
+| `wrappers/query.py` | 7 | 138 |
+| `wrappers/quality.py` | 21 | 385 |
+| `wrappers/visuals.py` | 36 | 949 |
+| `wrappers/excel.py` | 13 | 186 |
+| `wrappers/power_query.py` | 11 | 246 |
+| `wrappers/tmdl.py` | 4 | 72 |
+| `wrappers/project.py` | 1 | 32 |
+| `wrappers/workflows.py` | 2 | 47 |
+| **Total** | **144** | **3043** |
+
+`src/server.py` now keeps only:
+- runtime-singletons import from `mcp_core` (mcp, CONNECTION_MANAGER, _run, audit, profile, lock, watcher)
+- `find_pbi_port()` compatibility shim for standalone scripts
+- Side-effect imports of every `wrappers.<domain>` module
+- `@mcp.resource()` and `@mcp.prompt()` registrations (3 resources, 7 prompts)
+- SSE Bearer-auth middleware + `_run_sse_with_auth`
+- `main()` with argparse + profile filter + transport launcher
+
+### Internals
+
+- `server.py`: 3215 → 323 lines (-90%).
+- Total `src/` line count after refactor: **roughly half** of pre-refactor when measured against the original monoliths.
+- Registry audit clean: 131/131, 0 orphans.
+- Per-wrapper imports of `mcp` from `mcp_core`, `_run` + `CONNECTION_MANAGER`, plus only the specific `pbi_*_tool` it wraps.
+
+### Tests
+
+- 167 passing, 2 platform skips.
+
+### End of refactor sequence
+
+- v0.10.6: package skeleton + mcp_core extraction
+- v0.10.7: visuals/ phase 2 (5 submodules)
+- v0.10.8: visuals/ phase 3 (bindings, home_tables, containers)
+- v0.10.9: visuals/ phase 4 (I/O block)
+- v0.10.10: visuals/ phase 5 (pages, design, repair)
+- v0.10.11: visuals/ phase 6 final (charts, cards, structure, ops, dispatcher)
+- **v0.10.12: server.py wrapper split (this release)**
+
+The codebase is now organised into ~30 focused modules instead of the original 3 monoliths totalling ~7100 lines.
+
 ## [0.10.11] — 2026-05-08 — Refactor phase 6 (final): charts, cards, structure, ops, dispatcher
 
 The visuals/ fan-out is **complete**. The original 3607-line monolithic `tools/visuals.py` is now a 17-module package with `__init__.py` reduced to a 260-line re-export façade. No behavior change, no tool surface change. 167/167 tests, registry 131/131 clean.
