@@ -19,7 +19,7 @@ from typing import Any, Callable, Iterator
 
 from pbi_connection import PowerBIError, PowerBINotFoundError, PowerBIValidationError, error_payload, ok
 from security import SECURITY, resolve_local_path
-from .model import pbi_model_info_tool
+from ..model import pbi_model_info_tool
 
 DEFAULT_PAGE_WIDTH = 1280
 DEFAULT_PAGE_HEIGHT = 720
@@ -198,7 +198,8 @@ def _find_pbi_tools() -> str:
     discovered = shutil.which("pbi-tools") or shutil.which("pbi-tools.exe") or shutil.which("pbi-tools.core.exe")
     if discovered:
         return discovered
-    bundled = Path(__file__).resolve().parents[2] / "tools-bin" / "pbi-tools.core.exe"
+    # __file__ is src/tools/visuals/__init__.py — repo root is parents[3].
+    bundled = Path(__file__).resolve().parents[3] / "tools-bin" / "pbi-tools.core.exe"
     if bundled.exists():
         return str(bundled)
     # Fallback: check common install locations
@@ -579,7 +580,7 @@ def _inspect_value_measures(
       with no axis dependency. Wrap the value in ``VAR`` or persist the model
       to bind it through a real table entity first.
     """
-    from .measures import pbi_list_measures_tool  # local: avoid circular imports
+    from ..measures import pbi_list_measures_tool  # local: avoid circular imports
 
     warnings: list[dict[str, Any]] = []
     expressions: dict[str, str] = {}

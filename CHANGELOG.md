@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.10.6] — 2026-05-08 — Refactor phase 1: package skeleton + mcp_core extraction
+
+Foundational refactor (no behavior change, no tool surface change). Splits the two largest modules into a package + a runtime core, preparing the codebase for incremental fan-out of the visual / wrapper sub-modules in later releases.
+
+### Changed
+
+1. **`src/tools/visuals.py` → `src/tools/visuals/__init__.py`** (package conversion). Every existing import (`from tools.visuals import …`) keeps working unchanged — the file is now an `__init__.py` that exports the same surface. Subsequent releases will extract layout / refs / bindings / containers / formatting / charts / cards / structure / dispatcher into sibling submodules without breaking callers. The internal `Path(__file__).resolve().parents[2]` was updated to `parents[3]` to keep the bundled `tools-bin/pbi-tools.core.exe` resolvable.
+
+2. **`src/mcp_core.py` extracted from `src/server.py`**. The FastMCP instance, the `CONNECTION_MANAGER`, the `_run` helper, the PID lock + parent-watcher lifecycle (v0.10.3), the registry audit (v0.10.3), and the profile filter (v0.10.5) now live in this dedicated runtime module. `server.py` keeps only `main()`, CLI argparsing, and the ~131 `@mcp.tool()` wrappers. Removed unused imports (`atexit`, `signal`, `sys`, `tempfile`, `threading`, `time`, `FastMCP`, `PowerBIConnectionManager`, `error_payload`) — they're now in `mcp_core`.
+
+### Internals
+
+- `server.py`: 3500 → 3215 lines (-285).
+- `mcp_core.py`: new, 249 lines.
+- `tools/visuals/`: package directory.
+- Registry audit clean: 131 wrapped, 131 implementations, 0 orphans.
+
+### Tests
+
+- 167 passing, 2 platform skips. No test changes required.
+
+### Deferred to v0.10.7+
+
+Per-domain wrapper split of `server.py` (`src/wrappers/measures.py`, `wrappers/visuals.py`, …) and per-concern submodule extraction of `tools/visuals/` (`_layout.py`, `_refs.py`, `_bindings.py`, `_containers.py`, …). Each can be done incrementally without breaking external imports.
+
 ## [0.10.5] — 2026-05-08 — Atomicity, dry-run, persistence warnings, grading profile
 
 Foundational reliability improvements addressing the four highest-ROI structural gaps identified in the v0.10.4 retrospective. No tool removals; new optional `dry_run` parameter on the generic visual dispatcher; existing signatures unchanged.

@@ -1,20 +1,27 @@
-"""FastMCP server exposing Power BI Desktop model operations over stdio."""
+"""FastMCP server exposing Power BI Desktop model operations over stdio.
+
+Tool registration lives here (every ``@mcp.tool()`` wrapper). The runtime
+plumbing — FastMCP instance, connection manager, ``_run`` helper, PID lock
+and parent-watcher lifecycle — is in :mod:`mcp_core` so this file stays
+focused on the API surface.
+"""
 
 from __future__ import annotations
 
-import atexit
 import os
-import signal
-import sys
-import tempfile
-import threading
-import time
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
-
-from pbi_connection import PowerBIConnectionManager, error_payload, logger
+from mcp_core import (
+    CONNECTION_MANAGER,
+    _acquire_single_instance_lock,
+    _apply_profile,
+    _audit_tool_registry,
+    _run,
+    _start_parent_watcher,
+    logger,
+    mcp,
+)
 from security import SECURITY
 from tools import (
     pbi_apply_format_preset_tool,
@@ -162,44 +169,6 @@ from tools import (
     pbi_measure_workflow_tool,
     pbi_model_audit_workflow_tool,
 )
-
-
-mcp = FastMCP(
-    "powerbi-desktop",
-    instructions=(
-        "Connects to the local Power BI Desktop Analysis Services instance, "
-        "lets clients inspect the semantic model, manage measures and "
-        "relationships, run DAX queries, trigger model refreshes, manage "
-        "Power Query partitions, and read or write Excel workbooks used in "
-        "the Power BI pipeline. It can also extract, modify, and compile "
-        "report layouts for page and visual automation."
-    ),
-    json_response=True,
-    log_level="INFO",
-)
-
-CONNECTION_MANAGER = PowerBIConnectionManager(logger)
-
-
-def _run(tool_name: str, callback: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
-    """Execute a tool callback with audit logging and error normalization."""
-    # Audit log: every tool call, before execution
-    safe_kwargs = {
-        key: SECURITY.sanitize_for_logging(value)
-        for key, value in kwargs.items()
-        if key != "manager" and not key.startswith("_")
-    }
-    logger.info("TOOL_CALL tool=%s params=%s", tool_name, safe_kwargs)
-    try:
-        SECURITY.validate_tool_call(tool_name, kwargs)
-        result = callback(*args, **kwargs)
-        status = result.get("status", "unknown") if isinstance(result, dict) else "ok"
-        logger.info("TOOL_OK tool=%s status=%s", tool_name, status)
-        return result
-    except Exception as exc:
-        logger.warning("TOOL_FAIL tool=%s error=%s", tool_name, str(exc)[:300])
-        logger.exception("Tool '%s' failed", tool_name)
-        return error_payload(exc)
 
 
 def find_pbi_port(preferred_port: int | None = None) -> int:
@@ -3176,104 +3145,6 @@ async def _run_sse_with_auth(host: str, port: int) -> None:
     await server.serve()
 
 
-_PID_LOCK_PATH = Path(tempfile.gettempdir()) / "powerbi-mcp.pid"
-
-
-def _release_pid_lock() -> None:
-    try:
-        if _PID_LOCK_PATH.exists():
-            content = _PID_LOCK_PATH.read_text(encoding="utf-8").strip()
-            if content == str(os.getpid()):
-                _PID_LOCK_PATH.unlink()
-    except Exception:
-        pass
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        import psutil  # local import: psutil already a runtime dep on Windows
-        return psutil.pid_exists(pid) and psutil.Process(pid).is_running()
-    except Exception:
-        try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
-            return False
-
-
-def _acquire_single_instance_lock() -> None:
-    """Force single-instance: kill any prior server holding the PID file, then claim it."""
-    try:
-        if _PID_LOCK_PATH.exists():
-            try:
-                old_pid = int(_PID_LOCK_PATH.read_text(encoding="utf-8").strip())
-            except (OSError, ValueError):
-                old_pid = 0
-            if old_pid and old_pid != os.getpid() and _pid_alive(old_pid):
-                logger.info("Single-instance: killing prior server PID %d", old_pid)
-                try:
-                    import psutil
-                    psutil.Process(old_pid).kill()
-                except Exception as exc:
-                    logger.warning("Single-instance: could not kill PID %d: %s", old_pid, exc)
-                else:
-                    for _ in range(20):  # up to 2s
-                        if not _pid_alive(old_pid):
-                            break
-                        time.sleep(0.1)
-        _PID_LOCK_PATH.write_text(str(os.getpid()), encoding="utf-8")
-    except Exception as exc:
-        logger.warning("Single-instance lock acquire failed: %s", exc)
-        return
-
-    atexit.register(_release_pid_lock)
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            signal.signal(sig, lambda *_: sys.exit(0))
-        except (ValueError, OSError):
-            pass  # not available on this thread/platform
-
-
-def _start_parent_watcher() -> None:
-    """Daemon thread: if the LLM parent process disappears, exit so atexit fires.
-
-    FastMCP's stdio transport owns stdin, so we cannot read it ourselves. Polling
-    the parent PID is the cross-platform way to detect a crashed/killed parent
-    (Claude Code, Codex, ...). On normal shutdown the parent sends SIGTERM/SIGINT
-    or closes the pipe and FastMCP exits on its own — this watcher only handles
-    the abnormal case where neither happens.
-    """
-    try:
-        import psutil
-    except ImportError:
-        return  # cannot watch without psutil
-    parent_pid = os.getppid() if hasattr(os, "getppid") else None
-    if not parent_pid or parent_pid <= 1:
-        return  # detached / no parent
-
-    def _watch() -> None:
-        try:
-            parent = psutil.Process(parent_pid)
-        except Exception:
-            return
-        while True:
-            time.sleep(2.0)
-            try:
-                if not parent.is_running() or parent.status() == psutil.STATUS_ZOMBIE:
-                    logger.info("Parent PID %d exited — shutting down", parent_pid)
-                    _release_pid_lock()
-                    os._exit(0)
-            except psutil.NoSuchProcess:
-                logger.info("Parent PID %d gone — shutting down", parent_pid)
-                _release_pid_lock()
-                os._exit(0)
-            except Exception:
-                continue
-
-    t = threading.Thread(target=_watch, daemon=True, name="parent-watcher")
-    t.start()
-
-
 def main() -> None:
     """Entry point — supports stdio (default) and sse transport."""
     import argparse
@@ -3338,84 +3209,6 @@ def main() -> None:
         _acquire_single_instance_lock()
         _start_parent_watcher()
         mcp.run(transport="stdio")
-
-
-def _audit_tool_registry(strict: bool = False) -> dict[str, list[str]]:
-    """Verify every public ``pbi_*_tool`` from the tools package has an
-    @mcp.tool() wrapper registered in this server module.
-
-    Returns a dict with keys ``orphan_implementations`` (tool functions that
-    are exposed in tools/__all__ but never wrapped) and ``unknown_wrappers``
-    (registered MCP tools whose name does not match any underlying function).
-    Logs warnings on issues; if ``strict`` is True, raises RuntimeError so a
-    CI pre-flight can fail fast on registration drift.
-    """
-    import tools as _tools
-
-    exported = set(getattr(_tools, "__all__", ()))
-    pbi_impls = {name[: -len("_tool")] for name in exported if name.startswith("pbi_") and name.endswith("_tool")}
-
-    manager = getattr(mcp, "_tool_manager", None)
-    tools_map = getattr(manager, "_tools", None)
-    registered = set(tools_map.keys()) if isinstance(tools_map, dict) else set()
-    pbi_registered = {name for name in registered if name.startswith("pbi_")}
-
-    orphan_implementations = sorted(pbi_impls - pbi_registered)
-    unknown_wrappers = sorted(pbi_registered - pbi_impls)
-
-    if orphan_implementations:
-        logger.warning(
-            "tool_registry: %d implementation(s) not wrapped as @mcp.tool(): %s",
-            len(orphan_implementations),
-            ", ".join(orphan_implementations),
-        )
-    if unknown_wrappers:
-        # Acceptable cases: meta-wrappers, workflow tools, etc. Still log INFO so
-        # operators can spot rogue registrations.
-        logger.info(
-            "tool_registry: %d wrapper(s) without a matching pbi_*_tool: %s",
-            len(unknown_wrappers),
-            ", ".join(unknown_wrappers),
-        )
-
-    if strict and orphan_implementations:
-        raise RuntimeError(
-            "tool_registry strict check failed: "
-            f"{len(orphan_implementations)} unwrapped tools: {orphan_implementations}"
-        )
-
-    return {
-        "orphan_implementations": orphan_implementations,
-        "unknown_wrappers": unknown_wrappers,
-        "registered_count": len(pbi_registered),
-        "implementation_count": len(pbi_impls),
-    }
-
-
-def _apply_profile(profile: str) -> None:
-    """Prune FastMCP's registered tools based on the selected profile."""
-    if profile == "all":
-        return
-    from security import READ_TOOLS, WRITE_TOOLS, DESTRUCTIVE_TOOLS, GRADING_TOOLS
-
-    if profile == "readonly":
-        allowed = set(READ_TOOLS)
-    elif profile == "write":
-        allowed = set(READ_TOOLS) | set(WRITE_TOOLS)
-    elif profile == "grading":
-        allowed = set(GRADING_TOOLS)
-    else:
-        return
-
-    manager = getattr(mcp, "_tool_manager", None)
-    tools_map = getattr(manager, "_tools", None)
-    if tools_map is None:
-        logger.warning("profile filter skipped: FastMCP tool registry not accessible")
-        return
-    removed = [name for name in list(tools_map.keys()) if name not in allowed]
-    for name in removed:
-        tools_map.pop(name, None)
-    logger.info("PROFILE %s applied: removed %d tools, exposing %d", profile, len(removed), len(tools_map))
 
 
 if __name__ == "__main__":
