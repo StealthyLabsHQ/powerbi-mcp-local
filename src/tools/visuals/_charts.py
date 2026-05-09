@@ -586,23 +586,48 @@ def pbi_add_treemap_tool(
     width: int = 360,
     height: int = 300,
     title: str = "",
+    details_column: str | None = None,
     *,
     manager: Any | None = None,
 ) -> dict[str, Any]:
-    """Treemap — nested rectangles sized by the measure, grouped by the category."""
-    return _add_categorical_chart(
-        visual_type="treemap",
-        extract_folder=extract_folder,
-        page=page,
-        category_column=category_column,
-        value_measure=value_measure,
-        x=x,
-        y=y,
-        width=width,
-        height=height,
-        title=title,
-        legend_column=None,
-        manager=manager,
+    """Treemap — nested rectangles sized by the measure, grouped by category.
+
+    Power BI's treemap uses the ``Category``, ``Details``, and ``Values``
+    projection roles — *not* the cartesian ``Y`` role. Earlier builds of
+    this tool emitted ``Y`` and the visual rendered empty (PBI Desktop's
+    data-shape pass dropped the unrecognised role for the treemap
+    visualType). The ``details_column`` parameter is optional — pass a
+    second-level grouping column to drill the treemap into nested
+    rectangles per Details value.
+    """
+    measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
+    projections: dict[str, list[dict[str, Any]]] = {
+        "Category": [_projection(category_column)],
+        "Values": [_projection(value_measure)],
+    }
+    references = [category_column, value_measure]
+    expected_kinds: dict[str, str] = {category_column: "column", value_measure: "measure"}
+    if details_column:
+        projections["Details"] = [_projection(details_column)]
+        references.append(details_column)
+        expected_kinds[details_column] = "column"
+    _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
+    return _append_visual(
+        extract_folder,
+        page,
+        lambda section, home_map: _create_chart_container(
+            section,
+            visual_type="treemap",
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            title=title or None,
+            projections=projections,
+            references=references,
+            measure_home_map=home_map,
+        ),
+        measure_home_map,
     )
 
 

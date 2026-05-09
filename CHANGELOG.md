@@ -3,6 +3,48 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.12.8] — 2026-05-09 — Treemap role-name fix
+
+Field report on top of v0.12.7: treemaps still rendered empty in PBI
+Desktop because the projection roles were wrong, not just the
+renderer-compat flags.
+
+### Bug fix
+
+1. **Treemap uses `Category` / `Details` / `Values`, not the cartesian
+   `Y`** (`src/tools/visuals/_charts.py`,
+   `src/tools/visuals/_base.py`). PBI Desktop's treemap field wells map
+   to those three roles internally; emitting `Y` (a cartesian role)
+   caused the data-shape pass to drop the projection silently and the
+   visual opened white. `pbi_add_treemap_tool` now writes `Values` for
+   the measure and accepts an optional `details_column` for the
+   second-level grouping.
+   `VISUAL_FIELD_ROLES["treemap"]` and `VISUAL_ROLE_KINDS["treemap"]`
+   updated to match so `pbi_convert_visual_type` and the role-binding
+   validator know the canonical shape.
+
+### Verified (no change)
+
+2. **Scatter chart roles** — already correct: `Category` / `X` / `Y` /
+   `Size` / `Series`. Both `Category` and `Details` are accepted by the
+   PBI renderer for scatter; we keep `Category` for legacy-build
+   compatibility.
+
+### Tests
+
+3. **`tests/test_v0_12_8_treemap_roles.py`** — 4 regressions:
+   - `VISUAL_FIELD_ROLES["treemap"]` is exactly
+     `{"Category", "Details", "Values"}` (and not `"Y"`).
+   - `VISUAL_ROLE_KINDS["treemap"]` categorises each role.
+   - `pbi_add_treemap_tool` emits `Values`, never `Y`.
+   - The optional `details_column` parameter routes to the `Details`
+     role.
+
+### Test coverage
+
+`pytest -q` → 237 passed, 2 skipped (was 233 in v0.12.7; +4 from
+v0.12.8).
+
 ## [0.12.7] — 2026-05-09 — Empty-visual renderer-compat fixes
 
 Field-tested against Power BI Desktop 2024 builds: every visual added by
