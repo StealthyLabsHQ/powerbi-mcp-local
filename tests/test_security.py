@@ -779,5 +779,79 @@ class V0102TestReportFollowupTests(unittest.TestCase):
             _VISUAL_TYPE_DISPATCH.pop("__test_dispatch__", None)
 
 
+class V0124RegressionTests(unittest.TestCase):
+    """Regressions for the v0.12.4 hardening sweep."""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp_dir.name)
+        self.previous_allowed = [str(item) for item in SECURITY.allowed_base_dirs()]
+        SECURITY.configure_allowed_dirs([str(self.root)])
+        SECURITY.policy(reload=True, cwd=self.root)
+
+    def tearDown(self) -> None:
+        self.temp_dir.cleanup()
+        SECURITY.configure_allowed_dirs(self.previous_allowed)
+        SECURITY.policy(reload=True, cwd=Path.cwd())
+
+    def test_max_response_bytes_returns_response_too_large(self) -> None:
+        from mcp_core import _enforce_response_size
+
+        policy = SECURITY.policy()
+        policy.max_response_bytes = 1024
+        try:
+            payload = {"ok": True, "rows": ["x" * 4096]}
+            result = _enforce_response_size("pbi_test", payload, policy)
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["error"]["code"], "response_too_large")
+            self.assertGreater(result["error"]["details"]["response_bytes"], 1024)
+        finally:
+            policy.max_response_bytes = 16 * 1024 * 1024
+
+    def test_max_response_bytes_zero_disables_check(self) -> None:
+        from mcp_core import _enforce_response_size
+
+        policy = SECURITY.policy()
+        original = policy.max_response_bytes
+        policy.max_response_bytes = 0
+        try:
+            payload = {"ok": True, "rows": ["x" * 4096]}
+            result = _enforce_response_size("pbi_test", payload, policy)
+            self.assertIs(result, payload)  # untouched
+        finally:
+            policy.max_response_bytes = original
+
+    def test_security_policy_hot_reload_on_mtime_change(self) -> None:
+        policy_path = self.root / "security_policy.json"
+        policy_path.write_text(json.dumps({"max_name_length": 64}), encoding="utf-8")
+        SECURITY.policy(reload=True, cwd=self.root)
+        self.assertEqual(SECURITY.policy().max_name_length, 64)
+
+        # Wait one filesystem-resolution tick + mutate the file.
+        import time as _time
+
+        _time.sleep(0.05)
+        policy_path.write_text(json.dumps({"max_name_length": 128}), encoding="utf-8")
+        # New mtime — bare policy() (no reload kw) should pick up the change.
+        os.utime(policy_path, None)
+        reloaded = SECURITY.policy()
+        self.assertEqual(reloaded.max_name_length, 128)
+
+    def test_m_blocklist_rejects_modern_cloud_connectors(self) -> None:
+        for source in (
+            'Snowflake.Databases("acct", "wh")',
+            "GoogleBigQuery.Database()",
+            'AmazonRedshift.Database("host", "db")',
+            "Excel.CurrentWorkbook()",
+            'AzureBlobStorage.Contents("https://acct.blob.core.windows.net/c")',
+            'AnalysisServices.Database("server", "db")',
+            "Salesforce.Reports()",
+            'GoogleSheets.Contents("https://docs.google.com/...")',
+        ):
+            with self.subTest(source=source):
+                with self.assertRaises(PowerBIValidationError):
+                    _validate_m_expression(source)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

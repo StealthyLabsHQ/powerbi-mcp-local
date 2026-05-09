@@ -120,14 +120,15 @@ Power Query expressions are validated before injection.
 
 Blocked by default:
 
-- `Web.*`
+- `Web.*`, `WebAction.*`
 - `OData.Feed`
-- `Sql.*`, `Oracle.*`, `PostgreSQL.*`, `MySQL.*`
-- `Odbc.*`, `OleDb.*`
-- `SharePoint.*`, `ActiveDirectory.*`, `AzureStorage.*`
-- `Expression.Evaluate`
-- `Value.NativeQuery`
-- `#shared`
+- Relational sources: `Sql.*`, `Mssql.*`, `Oracle.*`, `PostgreSQL.*`, `MySQL.*`, `Teradata.*`, `Sybase.*`, `IbmDb2.*`, `Informix.*`
+- Cloud DW: `Snowflake.*`, `GoogleBigQuery.*`, `BigQuery.*`, `AmazonRedshift.*`, `AzureSql*.*`, `AzureSynapse*.*`
+- Generic providers: `Odbc.*`, `OleDb.*`
+- SaaS: `SharePoint.*`, `ActiveDirectory.*`, `Exchange.*`, `Salesforce.*`, `GoogleSheets.*`, `GoogleAnalytics.*`, `Dynamics*.*`
+- Cloud storage: `AzureStorage.*`, `AzureBlob*.*`, `AzureDataLakeStorage.*`, `AdlsGen2.*`, `AmazonS3.*`, `Hdfs.*`
+- Cubes / cross-model: `AnalysisServices.*`, `Cube.*`, `Excel.CurrentWorkbook`
+- Reflection: `Expression.Evaluate`, `Value.NativeQuery`, `Value.Invoke`, `Function.Invoke*`, `#shared`, quoted-identifier calls (`#"Web.Contents"(…)`)
 
 The validator also performs a basic syntax sanity check:
 
@@ -239,7 +240,8 @@ Supported policy keys:
 | `max_excel_zip_compression_ratio` | float | `250.0` | Excel ZIP compression-ratio cap |
 | `max_excel_cells_scanned` | int | `200000` | Max cells scanned by read/search operations |
 | `warn_after_calls_per_minute` | int | `120` | Warning threshold for tool-call rate |
-| `rate_limit_calls_per_minute` | int/null | `null` | Hard limit for tool-call rate |
+| `rate_limit_calls_per_minute` | int/null | `600` | Hard limit for tool-call rate. `0` or `null` disables. |
+| `max_response_bytes` | int | `16777216` | Cap on a single tool response (UTF-8 JSON). `0` disables. Oversize → `response_too_large` error. |
 
 ### Production Example
 
@@ -290,6 +292,14 @@ python server.py --transport stdio
 | `PBI_DESKTOP_BIN` | unset | Absolute override path to the Power BI Desktop `bin` directory |
 | `PBI_DLL_DIR` | unset | Absolute override path to Analysis Services DLLs |
 | `PBI_WORKSPACE_ROOTS` | unset | Extra workspace roots to scan for local SSAS instances |
+| `PBI_MCP_AUTH_TOKEN` | unset | Bearer token enforced on the SSE transport. **Minimum 32 characters when set.** Use `python -c "import secrets; print(secrets.token_urlsafe(32))"`. |
+| `PBI_MCP_ALLOW_UNAUTHENTICATED_SSE` | `0` | Acknowledge non-loopback SSE bind without a token. Off-host without auth otherwise refuses to start. |
+| `PBI_MCP_ALLOWED_ORIGINS` | unset | Comma-separated extra Host/Origin allowlist for the SSE DNS-rebinding defense. |
+| `PBI_MCP_PBI_TOOLS_TIMEOUT` | `300` | Hard timeout (seconds) on `pbi-tools` subprocess invocations. |
+| `PBI_MCP_PERSIST_USE_SENDINPUT` | `0` | Fall back to legacy SendInput in `pbi_persist_now` on builds where the safer PostMessage path fails to trigger save. |
+| `PBI_MCP_ALLOW_UI_AUTOMATION` | `0` | Hard gate for `pbi_persist_now` (Ctrl+S keyboard injection). |
+| `PBI_MCP_AUDIT` | `0` | Run the tool-registry audit at startup (off in production for faster boot). |
+| `PBI_MCP_STRICT_REGISTRY` | `0` | CI strict mode: registry drift raises and exits non-zero. |
 
 ## Known Limitations
 

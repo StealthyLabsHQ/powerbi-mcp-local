@@ -96,6 +96,56 @@ def _run_pbi_tools(arguments: list[str]) -> dict[str, Any]:
     }
 
 
+def _inspect_pbix_archive(pbix: Path) -> None:
+    """Reject PBIX archives that look like zip bombs.
+
+    The active SecurityPolicy ships caps for Excel workbooks
+    (``max_excel_zip_*``); PBIX is also a ZIP container, so we reuse the
+    same caps here. A hostile PBIX with 100k members or a 1000:1
+    compression ratio could exhaust disk / memory during native
+    extraction; this preflight raises ``SecurityPolicyError`` before any
+    member is written.
+    """
+    from security import SECURITY, SecurityPolicyError
+
+    policy = SECURITY.policy()
+    if not zipfile.is_zipfile(pbix):
+        raise SecurityPolicyError("PBIX is not a valid ZIP archive.", details={"path": str(pbix)})
+    member_limit = policy.max_excel_zip_members
+    uncompressed_limit = policy.max_excel_zip_uncompressed_bytes
+    ratio_limit = policy.max_excel_zip_compression_ratio
+    with zipfile.ZipFile(pbix) as archive:
+        infos = archive.infolist()
+        if len(infos) > member_limit:
+            raise SecurityPolicyError(
+                "PBIX exceeds the maximum number of ZIP members.",
+                details={"members": len(infos), "limit": member_limit, "path": str(pbix)},
+            )
+        total_uncompressed = 0
+        for info in infos:
+            total_uncompressed += int(info.file_size)
+            if total_uncompressed > uncompressed_limit:
+                raise SecurityPolicyError(
+                    "PBIX exceeds the maximum decompressed size.",
+                    details={
+                        "bytes": total_uncompressed,
+                        "limit": uncompressed_limit,
+                        "path": str(pbix),
+                    },
+                )
+            compressed = max(int(info.compress_size), 1)
+            if info.file_size and (info.file_size / compressed) > ratio_limit:
+                raise SecurityPolicyError(
+                    "PBIX looks like a ZIP bomb.",
+                    details={
+                        "member": info.filename,
+                        "ratio": round(info.file_size / compressed, 2),
+                        "limit": ratio_limit,
+                        "path": str(pbix),
+                    },
+                )
+
+
 def _extract_pbix_zip_natively(pbix: Path, target: Path) -> dict[str, Any]:
     """Fallback PBIX extraction using the standard ZIP. Used when the bundled
     pbi-tools.core does not support 'extract' (it only ships 'compile').
@@ -105,6 +155,7 @@ def _extract_pbix_zip_natively(pbix: Path, target: Path) -> dict[str, Any]:
     consumers needing model definitions should rely on the live TOM
     connection via pbi_connect.
     """
+    _inspect_pbix_archive(pbix)
     target.mkdir(parents=True, exist_ok=True)
     target_resolved = target.resolve()
     extracted: list[str] = []
@@ -239,25 +290,97 @@ def _run_powershell(script: str, *, timeout: float = 20.0) -> subprocess.Complet
     )
 
 
+def _post_ctrl_s_to_pbi_processes() -> int:
+    """Send Ctrl+S to every running PBI Desktop window via PostMessage.
+
+    Returns the number of windows the chord was posted to. Uses
+    PostMessage instead of WScript.Shell SendKeys + AppActivate (the
+    legacy approach) so the chord stays bound to PBI Desktop's HWND
+    even if focus moves mid-call. Same rationale as
+    ``ui_automation._send_ctrl_s``: no global-input-queue routing.
+    """
+    if os.name != "nt":
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        import psutil
+    except ImportError:
+        return 0
+
+    pbi_pids = {
+        int(proc.info["pid"])
+        for proc in psutil.process_iter(attrs=["pid", "name"])
+        if (proc.info.get("name") or "").lower() in {"pbidesktop.exe", "pbidesktoprs.exe"}
+    }
+    if not pbi_pids:
+        return 0
+
+    user32 = ctypes.windll.user32
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.PostMessageW.restype = wintypes.BOOL
+
+    EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    targets: list[int] = []
+
+    def _cb(hwnd: int, _lparam: int) -> bool:
+        proc_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_pid))
+        if int(proc_pid.value) not in pbi_pids:
+            return True
+        if not user32.IsWindowVisible(hwnd) or user32.GetWindowTextLengthW(hwnd) <= 0:
+            return True
+        targets.append(int(hwnd))
+        return True
+
+    user32.EnumWindows(EnumWindowsProc(_cb), 0)
+
+    WM_KEYDOWN = 0x0100
+    WM_KEYUP = 0x0101
+    VK_CONTROL = 0x11
+    VK_S = 0x53
+    posted = 0
+    for hwnd in targets:
+        ok_ = all(
+            user32.PostMessageW(hwnd, msg, vk, 0)
+            for msg, vk in (
+                (WM_KEYDOWN, VK_CONTROL),
+                (WM_KEYDOWN, VK_S),
+                (WM_KEYUP, VK_S),
+                (WM_KEYUP, VK_CONTROL),
+            )
+        )
+        if ok_:
+            posted += 1
+    return posted
+
+
 def _save_and_close_powerbi_gracefully(pbix_path: Path | None = None) -> bool:
+    # Python-side keyboard injection via PostMessage avoids the focus race
+    # in the previous WScript.Shell SendKeys path. The PowerShell helper
+    # below now only handles the wait-for-mtime + CloseMainWindow phase.
+    posted = _post_ctrl_s_to_pbi_processes()
+    if posted == 0:
+        return True  # nothing to save; caller treats as success
     target_path = str(pbix_path) if pbix_path is not None else ""
     script = (
         "$TargetPath = "
         + json.dumps(target_path)
         + r"""
 $ErrorActionPreference = 'SilentlyContinue'
-$ws = New-Object -ComObject WScript.Shell
 $names = @('PBIDesktop', 'pbidesktoprs')
 $initialWrite = $null
 if ($TargetPath -and (Test-Path -LiteralPath $TargetPath)) {
     $initialWrite = (Get-Item -LiteralPath $TargetPath).LastWriteTimeUtc
 }
 $procs = Get-Process -Name $names | Where-Object { $_.MainWindowHandle -ne 0 }
-foreach ($proc in $procs) {
-    [void]$ws.AppActivate($proc.Id)
-    Start-Sleep -Milliseconds 500
-    $ws.SendKeys('^s')
-}
 if ($initialWrite -ne $null) {
     $deadline = (Get-Date).AddSeconds(30)
     do {

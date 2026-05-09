@@ -275,12 +275,31 @@ Built-in safeguards include:
 
 - local path restrictions and traversal protection
 - DAX/DMV unsafe-query guards
-- Power Query SSRF protections
+- Power Query SSRF protections (cloud DW + SaaS + reflection blocked by default)
 - export redaction controls
-- zip safety checks
+- zip safety checks (Excel + PBIX)
+- response-size cap (16 MiB by default) + per-minute rate limit (600/min)
+- SSE Bearer auth + DNS-rebinding host/origin allowlist
 - tool-call auditing
 
 Details: [SECURITY.md](SECURITY.md)
+
+### Environment variables (quick reference)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PBI_MCP_AUTH_TOKEN` | unset | SSE Bearer token (≥32 chars when set) |
+| `PBI_MCP_ALLOWED_ORIGINS` | unset | Extra Host/Origin allowlist for SSE |
+| `PBI_MCP_ALLOW_UNAUTHENTICATED_SSE` | `0` | Acknowledge non-loopback SSE without auth |
+| `PBI_MCP_READONLY` | `0` | Block all write/destructive tools |
+| `PBI_MCP_ALLOW_DMV` | `0` | Allow `$SYSTEM.*` / `DISCOVER_*` DAX |
+| `PBI_MCP_ALLOW_EXTERNAL_M` | `0` | Bypass the M function blocklist |
+| `PBI_MCP_ALLOW_UI_AUTOMATION` | `0` | Required for `pbi_persist_now` (Ctrl+S) |
+| `PBI_MCP_PERSIST_USE_SENDINPUT` | `0` | Fall back from PostMessage to SendInput |
+| `PBI_MCP_PBI_TOOLS_TIMEOUT` | `300` | `pbi-tools` subprocess timeout (s) |
+| `PBI_MCP_ALLOWED_DIRS` | cwd | `;`-separated filesystem roots |
+| `PBI_MCP_SECURITY_POLICY` | unset | Path or inline JSON for `security_policy.json` |
+| `PBI_MCP_AUDIT` / `PBI_MCP_STRICT_REGISTRY` | `0` | Tool registry audit (CI) |
 
 ## Development
 

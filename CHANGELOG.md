@@ -3,6 +3,60 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.12.4] — 2026-05-09 — Hardening polish
+
+Follow-up sweep on top of v0.12.3. Closes the residual zip-bomb gap on
+PBIX inputs, removes the last focus-race surface in the graceful-close
+helper, locks new defaults behind regression tests, and refreshes the
+docs.
+
+### Security
+
+1. **PBIX zip-bomb caps** (`src/tools/visuals/_io.py`). The native PBIX
+   extraction path now reuses the `max_excel_zip_*` policy caps
+   (decompressed size, member count, compression ratio) before writing
+   any member. Previously only `.xlsx` workbooks were inspected; a
+   hostile PBIX with 100k members or a 1000:1 ratio could exhaust disk
+   during the fallback extraction.
+2. **Graceful-close keyboard injection moved to PostMessage**
+   (`src/tools/visuals/_io.py`). `_save_and_close_powerbi_gracefully`
+   used to call `WScript.Shell.AppActivate` + `SendKeys('^s')`, which
+   has the same global-input-queue race as the legacy `pbi_persist_now`
+   path. The helper now enumerates every PBIDesktop top-level window
+   through Win32 and posts the WM_KEYDOWN/UP chord directly to each
+   HWND, before handing off to the existing PowerShell wait-for-mtime
+   loop.
+
+### Tests
+
+3. **`tests/test_security.py::V0124RegressionTests`** — four new
+   regressions:
+   - `max_response_bytes` cap returns a `response_too_large` error
+   - `max_response_bytes=0` disables the check (untouched payload)
+   - `security_policy.json` mtime change triggers a reload on the next
+     `policy()` call
+   - the v0.12.3 M blocklist additions (Snowflake, BigQuery, Redshift,
+     Excel.CurrentWorkbook, AzureBlobStorage, AnalysisServices,
+     Salesforce, GoogleSheets) are all rejected
+
+### Docs
+
+4. **SECURITY.md** — `security_policy.json` schema documents
+   `max_response_bytes` and the new default for
+   `rate_limit_calls_per_minute` (600). The M blocklist listing is
+   refreshed with cloud DW, SaaS, cloud storage, cubes, reflection,
+   and quoted-identifier classes.
+5. **SECURITY.md / README.md env-var tables** now list
+   `PBI_MCP_AUTH_TOKEN`, `PBI_MCP_ALLOWED_ORIGINS`,
+   `PBI_MCP_ALLOW_UNAUTHENTICATED_SSE`, `PBI_MCP_PBI_TOOLS_TIMEOUT`,
+   `PBI_MCP_PERSIST_USE_SENDINPUT`, `PBI_MCP_ALLOW_UI_AUTOMATION`,
+   and the audit knobs.
+
+### Test coverage
+
+`pytest -q` → 210 passed, 2 skipped (was 206 in v0.12.3; +4 from the
+new V0124RegressionTests block).
+
 ## [0.12.3] — 2026-05-09 — Hardening sweep
 
 A focused robustness pass across security, stdio I/O, and observability.
