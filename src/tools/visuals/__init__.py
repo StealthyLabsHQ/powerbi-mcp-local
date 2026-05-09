@@ -173,12 +173,14 @@ from ._io import (
     pbi_extract_report_tool,
 )
 from ._ops import (
+    pbi_add_conditional_formatting_tool,
     pbi_auto_grid_layout_tool,
     pbi_convert_visual_type_tool,
     pbi_disable_card_autoscale_tool,
     pbi_move_visual_tool,
     pbi_patch_layout_tool,
     pbi_remove_visual_tool,
+    pbi_set_series_color_tool,
     pbi_set_visual_format_property_tool,
     pbi_update_visual_bindings_tool,
 )
@@ -238,7 +240,9 @@ __all__ = [
     "pbi_disable_card_autoscale_tool",
     "pbi_remove_visual_tool",
     "pbi_set_page_size_tool",
+    "pbi_set_series_color_tool",
     "pbi_set_visual_format_property_tool",
+    "pbi_add_conditional_formatting_tool",
     "pbi_update_visual_bindings_tool",
     "pbi_validate_report_fields_tool",
 ]

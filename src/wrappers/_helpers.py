@@ -70,13 +70,15 @@ def register_tool(
     public_params = [p for p in params if p.name != "manager"] if inject_kind else params
     public_sig = sig.replace(parameters=public_params)
 
-    if inject_kind == "positional":
-
-        def _wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
-            return _run(tool_name, tool_fn, CONNECTION_MANAGER, *args, **kwargs)
-
-    elif inject_kind == "keyword":
-
+    if inject_kind:
+        # Always inject ``manager`` as a keyword argument. The previous
+        # positional path bound CONNECTION_MANAGER to ``*args[0]`` of the
+        # underlying tool, which only worked when ``manager`` was the FIRST
+        # positional parameter. Tools like ``pbi_patch_layout_tool`` that
+        # declare ``manager`` later in the signature would receive the
+        # connection manager as ``extract_folder`` and then collide with the
+        # actual ``extract_folder=`` kwarg from the MCP client (``TypeError:
+        # multiple values for argument 'extract_folder'``).
         def _wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
             kwargs.setdefault("manager", CONNECTION_MANAGER)
             return _run(tool_name, tool_fn, *args, **kwargs)

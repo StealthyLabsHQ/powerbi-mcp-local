@@ -425,6 +425,50 @@ def _force_kill_powerbi() -> None:
             pass
 
 
+def attempt_pbi_save_before_close(pbix_path: Path | None, timeout_seconds: float = 10.0) -> dict[str, Any]:
+    """Best-effort Ctrl+S to every running PBI Desktop window, then wait
+    for ``pbix_path`` mtime to change.
+
+    Used by :func:`pbi_patch_layout_tool` when ``save_before_close=True``
+    so in-memory TOM mutations (measures, columns, role filters) get
+    flushed to the PBIX before ``_maybe_force_close_powerbi`` kills the
+    Desktop process. Always returns a status payload — never raises —
+    because the patch-layout flow must continue regardless.
+    """
+    info: dict[str, Any] = {
+        "attempted": False,
+        "windows_targeted": 0,
+        "mtime_changed": False,
+        "polled_seconds": 0.0,
+        "skipped_reason": None,
+    }
+    if os.name != "nt":
+        info["skipped_reason"] = "non_windows_platform"
+        return info
+    posted = _post_ctrl_s_to_pbi_processes()
+    info["windows_targeted"] = posted
+    info["attempted"] = posted > 0
+    if posted == 0:
+        info["skipped_reason"] = "no_pbi_desktop_window"
+        return info
+    if pbix_path is None or not pbix_path.exists():
+        info["skipped_reason"] = "pbix_path_missing"
+        return info
+    deadline = time.monotonic() + max(1.0, float(timeout_seconds))
+    initial_mtime = pbix_path.stat().st_mtime
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        try:
+            current_mtime = pbix_path.stat().st_mtime
+        except OSError:
+            continue
+        if current_mtime > initial_mtime:
+            info["mtime_changed"] = True
+            break
+    info["polled_seconds"] = round(timeout_seconds - max(0.0, deadline - time.monotonic()), 3)
+    return info
+
+
 def _maybe_force_close_powerbi(force: bool, pbix_path: Path | None = None) -> None:
     if not force:
         return

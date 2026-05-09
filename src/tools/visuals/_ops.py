@@ -32,7 +32,7 @@ from ._bindings import (
 from ._containers import _find_visual, _validate_dimensions, _visual_payload
 from ._formatting import _decimal_literal, _encode_visual_format_value
 from ._home_tables import _persistence_risks, _resolve_measure_home_map, _scan_measure_home_tables
-from ._io import _maybe_force_close_powerbi, _page_names_from_layout_bytes
+from ._io import _maybe_force_close_powerbi, _page_names_from_layout_bytes, attempt_pbi_save_before_close
 from ._layout import (
     _dump_embedded_json,
     _find_page,
@@ -51,7 +51,24 @@ def pbi_patch_layout_tool(
     fail_on_persistence_risk: bool = True,
     manager: Any | None = None,
     include_hidden: bool = False,
+    save_before_close: bool = True,
 ) -> dict[str, Any]:
+    """Patch the modified Report/Layout back into the PBIX archive.
+
+    When ``force=True`` the call closes (and if necessary kills) Power BI
+    Desktop so the PBIX can be overwritten. ``save_before_close`` (default
+    ``True``) sends Ctrl+S to every running PBI Desktop window via
+    ``PostMessage`` *before* the kill, then waits up to 10 seconds for the
+    PBIX mtime to change. This flushes any in-memory TOM mutations
+    (measures, columns, role filters) that have not yet been persisted —
+    without this, those changes are lost when the process is killed.
+
+    The save attempt is best-effort: it never raises, and the layout patch
+    proceeds regardless of whether the save succeeded. The response
+    includes ``save_attempt`` with telemetry so the caller can detect
+    silent loss.
+    """
+
     def _impl() -> dict[str, Any]:
         folder = _resolve_extract_folder(extract_folder, must_exist=True)
         pbix = _resolve_pbix_path(pbix_path, must_exist=True)
@@ -76,6 +93,10 @@ def pbi_patch_layout_tool(
                         "model_validation": model_validation,
                     },
                 )
+
+        save_attempt: dict[str, Any] | None = None
+        if force and save_before_close:
+            save_attempt = attempt_pbi_save_before_close(pbix, timeout_seconds=10.0)
 
         _maybe_force_close_powerbi(force, pbix)
 
@@ -132,6 +153,7 @@ def pbi_patch_layout_tool(
             layout_size=len(layout_bytes),
             pages=pages,
             persistence_risk_checked=fail_on_persistence_risk,
+            save_attempt=save_attempt,
         )
 
     return _run(_impl)
@@ -378,21 +400,86 @@ def pbi_set_visual_format_property_tool(
     page: str,
     visual_id: str,
     object_name: str,
-    properties: dict[str, Any],
+    properties: dict[str, Any] | None = None,
     property_types: dict[str, str] | None = None,
+    reset_properties: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Set formatting properties on an existing visual's
-    ``singleVisual.objects[<object_name>][0].properties``. Encodes Python
-    values as proper Power BI literals via :func:`_encode_visual_format_value`.
+    """Set / reset formatting properties on a visual's
+    ``singleVisual.objects[<object_name>][0].properties``.
+
+    Parameters
+    ----------
+    extract_folder, page, visual_id, object_name:
+        Identify the target. ``object_name`` is the Power BI object key
+        ('title', 'dataPoint', 'labels', 'background', 'general', etc.).
+    properties:
+        ``{property_name: value}`` to set. Values are encoded as Power BI
+        literals via the type hint in ``property_types``.
+    property_types:
+        ``{property_name: type_hint}``. Valid hints:
+
+        - ``auto`` (default) — infer from Python type
+        - ``bool`` — booleans
+        - ``int`` — integers (alias: ``integer``)
+        - ``decimal`` — floats / numerics (alias: ``float``, ``number``)
+        - ``text`` — strings (alias: ``string``)
+        - ``color`` — hex strings ``"#RRGGBB"`` (alias: ``fill``, ``hex``,
+          ``rgb``); a previously-encoded ``{"solid": {"color": ...}}``
+          object is also accepted and unwrapped automatically
+        - ``raw`` — pass the value untouched (advanced)
+
+        Type names are case-insensitive. Unknown hints raise with the
+        full list.
+
+    reset_properties:
+        Optional list of property names to *delete* from the visual's
+        property bag. Use this to revert a property to Power BI's default
+        — passing an empty string would leave the key set to a blank
+        value instead.
+
+    Examples
+    --------
+    Set a title (text):
+
+        pbi_set_visual_format_property(
+            extract_folder, page, visual_id,
+            object_name="title",
+            properties={"text": "Sales", "show": True},
+            property_types={"text": "text", "show": "bool"},
+        )
+
+    Set a fill color (single-series default):
+
+        pbi_set_visual_format_property(
+            ...,
+            object_name="dataPoint",
+            properties={"defaultColor": "#4472C4"},
+            property_types={"defaultColor": "color"},
+        )
+
+    Reset a property to Power BI's default:
+
+        pbi_set_visual_format_property(
+            ...,
+            object_name="title",
+            reset_properties=["text"],
+        )
     """
 
     def _impl() -> dict[str, Any]:
         if not object_name or not str(object_name).strip():
             raise PowerBIValidationError("object_name must be non-empty.")
-        if not isinstance(properties, dict) or not properties:
+        properties_dict = properties or {}
+        reset_list = list(reset_properties or [])
+        if not properties_dict and not reset_list:
             raise PowerBIValidationError(
-                "properties must be a non-empty dict of {property_name: value}.",
-                details={"properties": repr(properties)},
+                "pass at least one of `properties` (to set) or `reset_properties` (to clear).",
+                details={"properties": repr(properties_dict), "reset_properties": repr(reset_list)},
+            )
+        if properties_dict and not isinstance(properties_dict, dict):
+            raise PowerBIValidationError(
+                "properties must be a dict of {property_name: value}.",
+                details={"properties": repr(properties_dict)},
             )
         types_map = {k: str(v) for k, v in (property_types or {}).items()}
 
@@ -407,15 +494,29 @@ def pbi_set_visual_format_property_tool(
         merged_props = dict(existing[0].get("properties", {}))
 
         encoded: dict[str, Any] = {}
-        for prop_name, raw_value in properties.items():
+        for prop_name, raw_value in properties_dict.items():
             if not prop_name or not str(prop_name).strip():
                 raise PowerBIValidationError(
                     "property names must be non-empty strings.",
                     details={"name": repr(prop_name)},
                 )
+            # Sentinel: pass "__reset__" as the value to clear a property.
+            # Sits alongside the explicit ``reset_properties`` list so
+            # callers that build a single dict (e.g. JSON payload) have
+            # an in-band reset path.
+            if isinstance(raw_value, str) and raw_value == "__reset__":
+                reset_list.append(prop_name)
+                continue
             hint = types_map.get(prop_name)
             encoded[prop_name] = _encode_visual_format_value(raw_value, hint=hint)
         merged_props.update(encoded)
+        cleared: list[str] = []
+        for prop_name in reset_list:
+            if not prop_name or not str(prop_name).strip():
+                continue
+            if prop_name in merged_props:
+                merged_props.pop(prop_name)
+                cleared.append(prop_name)
         existing[0]["properties"] = merged_props
         objects[object_name] = existing
         container["config"] = _dump_embedded_json(config)
@@ -427,6 +528,7 @@ def pbi_set_visual_format_property_tool(
             visual_id=visual_id,
             object=object_name,
             applied=sorted(encoded.keys()),
+            reset=sorted(cleared),
         )
 
     return _run(_impl)
@@ -731,6 +833,399 @@ def pbi_disable_card_autoscale_tool(
             patched=patched,
             patched_count=len(patched),
             label_precision=int(label_precision),
+        )
+
+    return _run(_impl)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Per-series colour + conditional formatting (v0.12.5)
+# ─────────────────────────────────────────────────────────────────────
+
+
+_SERIES_COLOR_DEFAULT_ROLE_ORDER = ("Y", "Values", "Series", "Category")
+
+
+def _resolve_series_target(
+    single_visual: dict[str, Any],
+    *,
+    series_index: int | None,
+    series_name: str | None,
+    role_hint: str | None = None,
+) -> dict[str, Any]:
+    """Resolve a series identifier (index or name) to the matching Select
+    entry in the visual's prototypeQuery. Returns the metadata needed to
+    build the ``dataPoint`` selector.
+
+    The result keys: ``query_ref``, ``role``, ``kind`` (``measure`` |
+    ``column``), ``entity``, ``property``.
+    """
+    projections = single_visual.get("projections", {}) or {}
+    prototype = single_visual.get("prototypeQuery", {}) or {}
+    select_by_name: dict[str, dict[str, Any]] = {}
+    for entry in prototype.get("Select", []) or []:
+        if isinstance(entry, dict) and entry.get("Name"):
+            select_by_name[str(entry["Name"])] = entry
+    from_alias_to_entity: dict[str, str] = {}
+    for entry in prototype.get("From", []) or []:
+        if isinstance(entry, dict):
+            from_alias_to_entity[str(entry.get("Name", ""))] = str(entry.get("Entity", ""))
+
+    candidate_roles: list[str]
+    if role_hint and role_hint in projections:
+        candidate_roles = [role_hint]
+    else:
+        # Walk roles in a predictable order so series_index is stable.
+        ordered = [r for r in _SERIES_COLOR_DEFAULT_ROLE_ORDER if r in projections]
+        rest = [r for r in projections if r not in ordered]
+        candidate_roles = ordered + rest
+
+    flat: list[tuple[str, str]] = []  # (role, queryRef)
+    for role in candidate_roles:
+        items = projections.get(role) or []
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            qref = str(item.get("queryRef", ""))
+            if qref:
+                flat.append((role, qref))
+
+    if not flat:
+        raise PowerBIValidationError(
+            "Visual has no projections; cannot target a series.",
+            details={"available_roles": list(projections.keys())},
+        )
+
+    chosen: tuple[str, str] | None = None
+    if series_index is not None:
+        if series_index < 0 or series_index >= len(flat):
+            raise PowerBIValidationError(
+                f"series_index {series_index} out of range; visual has {len(flat)} series.",
+                details={
+                    "series_index": series_index,
+                    "series_count": len(flat),
+                    "available": [{"role": r, "queryRef": q} for r, q in flat],
+                },
+            )
+        chosen = flat[series_index]
+    elif series_name is not None:
+        target = str(series_name).strip()
+        for role, qref in flat:
+            if qref == target or qref.casefold() == target.casefold():
+                chosen = (role, qref)
+                break
+        if chosen is None:
+            # Fall back to matching against the underlying measure / column property name.
+            for role, qref in flat:
+                entry = select_by_name.get(qref) or {}
+                measure = entry.get("Measure") if isinstance(entry, dict) else None
+                column = entry.get("Column") if isinstance(entry, dict) else None
+                prop = ""
+                if isinstance(measure, dict):
+                    prop = str(measure.get("Property", ""))
+                elif isinstance(column, dict):
+                    prop = str(column.get("Property", ""))
+                if prop and (prop == target or prop.casefold() == target.casefold()):
+                    chosen = (role, qref)
+                    break
+        if chosen is None:
+            raise PowerBIValidationError(
+                f"series_name '{series_name}' did not match any series in the visual.",
+                details={"available": [{"role": r, "queryRef": q} for r, q in flat]},
+            )
+    else:
+        raise PowerBIValidationError("pass either series_index or series_name.")
+
+    role, qref = chosen
+    entry = select_by_name.get(qref) or {}
+    measure = entry.get("Measure") if isinstance(entry, dict) else None
+    column = entry.get("Column") if isinstance(entry, dict) else None
+    if isinstance(measure, dict):
+        source_ref = (
+            measure.get("Expression", {}).get("SourceRef", {}) if isinstance(measure.get("Expression"), dict) else {}
+        )
+        alias = str(source_ref.get("Source", "")) if isinstance(source_ref, dict) else ""
+        return {
+            "kind": "measure",
+            "role": role,
+            "query_ref": qref,
+            "entity": from_alias_to_entity.get(alias, ""),
+            "property": str(measure.get("Property", qref)),
+        }
+    if isinstance(column, dict):
+        source_ref = (
+            column.get("Expression", {}).get("SourceRef", {}) if isinstance(column.get("Expression"), dict) else {}
+        )
+        alias = str(source_ref.get("Source", "")) if isinstance(source_ref, dict) else ""
+        return {
+            "kind": "column",
+            "role": role,
+            "query_ref": qref,
+            "entity": from_alias_to_entity.get(alias, ""),
+            "property": str(column.get("Property", qref)),
+        }
+    return {
+        "kind": "queryref",
+        "role": role,
+        "query_ref": qref,
+        "entity": "",
+        "property": qref,
+    }
+
+
+def _build_series_selector(target: dict[str, Any]) -> dict[str, Any]:
+    """Build the ``id`` selector that pins a dataPoint entry to one series.
+
+    Power BI uses a measure / column reference inside the selector to
+    differentiate per-series overrides from the default fill.
+    """
+    entity = target.get("entity") or ""
+    prop = target.get("property") or target.get("query_ref") or ""
+    expr = {"SourceRef": {"Entity": entity}} if entity else {"SourceRef": {}}
+    if target.get("kind") == "measure":
+        return {"measure": {"Expression": expr, "Property": prop}}
+    return {"column": {"Expression": expr, "Property": prop}}
+
+
+def pbi_set_series_color_tool(
+    extract_folder: str,
+    page: str,
+    visual_id: str,
+    color: str,
+    series_index: int | None = None,
+    series_name: str | None = None,
+    role: str | None = None,
+) -> dict[str, Any]:
+    """Set the fill colour for a single series of a chart visual.
+
+    Power BI stores per-series overrides inside ``singleVisual.objects.dataPoint``
+    as additional list entries with an ``id`` selector pinned to the target
+    series' measure or column. The bare ``defaultColor`` property only
+    affects series that do not have an explicit override — using it on a
+    multi-series chart paints every series the same colour.
+
+    Specify the target series by ``series_index`` (0-based across the
+    visual's projections, in role order) or ``series_name`` (matches the
+    queryRef or the underlying measure / column ``Property`` name).
+    Optional ``role`` narrows the lookup to a specific projection role
+    (e.g. ``"Y"``, ``"Values"``).
+    """
+
+    def _impl() -> dict[str, Any]:
+        from ._formatting import _coerce_color_value, _solid_color
+
+        hex_color = _coerce_color_value(color)
+        encoded = _solid_color(hex_color)
+
+        if series_index is None and not series_name:
+            raise PowerBIValidationError("pass either series_index or series_name.")
+
+        folder, layout = _load_layout(extract_folder)
+        section = _find_page(layout, page)
+        _, container, config = _find_visual(section, visual_id)
+        single_visual = config.setdefault("singleVisual", {})
+        target = _resolve_series_target(
+            single_visual,
+            series_index=series_index,
+            series_name=series_name,
+            role_hint=role,
+        )
+
+        objects = single_visual.setdefault("objects", {})
+        data_point = objects.get("dataPoint")
+        if not isinstance(data_point, list):
+            data_point = []
+
+        selector = _build_series_selector(target)
+        # Each entry has either a global selector (None / empty id → default
+        # for the visual) or a per-series id matching this measure / column.
+        match_index: int | None = None
+        for idx, entry in enumerate(data_point):
+            if not isinstance(entry, dict):
+                continue
+            entry_id = entry.get("selector") or entry.get("id") or {}
+            entry_target = entry_id.get("metadata") if isinstance(entry_id, dict) else None
+            measure_meta = entry_id.get("measure") if isinstance(entry_id, dict) else None
+            column_meta = entry_id.get("column") if isinstance(entry_id, dict) else None
+            prop = None
+            if isinstance(measure_meta, dict):
+                prop = str(measure_meta.get("Property", ""))
+            elif isinstance(column_meta, dict):
+                prop = str(column_meta.get("Property", ""))
+            if prop and prop == target.get("property"):
+                match_index = idx
+                break
+            if entry_target and str(entry_target) == target.get("query_ref"):
+                match_index = idx
+                break
+
+        new_entry: dict[str, Any] = {
+            "selector": selector,
+            "properties": {"fill": encoded},
+        }
+        if match_index is None:
+            data_point.append(new_entry)
+        else:
+            existing = data_point[match_index] or {}
+            props = dict(existing.get("properties", {}))
+            props["fill"] = encoded
+            existing["properties"] = props
+            existing["selector"] = selector
+            data_point[match_index] = existing
+
+        objects["dataPoint"] = data_point
+        container["config"] = _dump_embedded_json(config)
+        _save_layout(folder, layout)
+        return ok(
+            f"Series colour set on visual '{visual_id}'.",
+            extract_folder=str(folder),
+            page=str(section.get("displayName") or section.get("name")),
+            visual_id=visual_id,
+            target=target,
+            color=hex_color,
+            mode="updated" if match_index is not None else "appended",
+        )
+
+    return _run(_impl)
+
+
+_CONDITIONAL_FORMATS = ("dataBar", "colorScale", "iconSet")
+_ICON_SETS = ("threeArrows", "threeArrowsGray", "threeTrafficLights", "threeSymbols", "threeFlags", "fiveArrows")
+
+
+def pbi_add_conditional_formatting_tool(
+    extract_folder: str,
+    page: str,
+    visual_id: str,
+    column_name: str,
+    format_type: str,
+    min_color: str = "#FF0000",
+    mid_color: str | None = None,
+    max_color: str = "#00FF00",
+    bar_color: str = "#4472C4",
+    icon_set: str = "threeArrows",
+) -> dict[str, Any]:
+    """Add table / matrix conditional formatting (data bar, colour scale, icon set).
+
+    Power BI stores conditional formatting on table-style visuals under
+    ``singleVisual.objects.values`` (or ``columnFormatting`` on older
+    builds), keyed by a queryRef that matches the column / measure
+    bound to the visual's ``Values`` role. We write the canonical shape
+    Power BI Desktop emits in current builds.
+
+    Parameters
+    ----------
+    column_name:
+        The display name (Property) of the measure / column inside the
+        Values projection. Matched case-insensitively against the
+        prototypeQuery Select entries.
+    format_type:
+        One of ``dataBar``, ``colorScale``, ``iconSet``.
+    min_color, mid_color, max_color:
+        Colour scale endpoints (and optional midpoint). Hex strings.
+    bar_color:
+        Data bar fill colour.
+    icon_set:
+        One of ``threeArrows``, ``threeArrowsGray``, ``threeTrafficLights``,
+        ``threeSymbols``, ``threeFlags``, ``fiveArrows``.
+    """
+
+    def _impl() -> dict[str, Any]:
+        from ._formatting import _coerce_color_value, _literal_value, _solid_color
+
+        if format_type not in _CONDITIONAL_FORMATS:
+            raise PowerBIValidationError(
+                f"format_type must be one of {_CONDITIONAL_FORMATS}.",
+                details={"format_type": format_type},
+            )
+        if format_type == "iconSet" and icon_set not in _ICON_SETS:
+            raise PowerBIValidationError(
+                f"icon_set must be one of {_ICON_SETS}.",
+                details={"icon_set": icon_set},
+            )
+
+        folder, layout = _load_layout(extract_folder)
+        section = _find_page(layout, page)
+        _, container, config = _find_visual(section, visual_id)
+        single_visual = config.setdefault("singleVisual", {})
+        prototype = single_visual.get("prototypeQuery", {}) or {}
+        target_qref: str | None = None
+        for entry in prototype.get("Select", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            measure = entry.get("Measure") if isinstance(entry, dict) else None
+            column = entry.get("Column") if isinstance(entry, dict) else None
+            prop = ""
+            if isinstance(measure, dict):
+                prop = str(measure.get("Property", ""))
+            elif isinstance(column, dict):
+                prop = str(column.get("Property", ""))
+            if prop.casefold() == column_name.strip().casefold():
+                target_qref = str(entry.get("Name") or "")
+                break
+        if not target_qref:
+            available = [
+                str(entry.get("Name", "")) for entry in prototype.get("Select", []) or [] if isinstance(entry, dict)
+            ]
+            raise PowerBIValidationError(
+                f"column '{column_name}' is not bound to this visual.",
+                details={"column_name": column_name, "available": available},
+            )
+
+        objects = single_visual.setdefault("objects", {})
+        values_bag = objects.get("values")
+        if not isinstance(values_bag, list) or not values_bag:
+            values_bag = [{"properties": {}}]
+
+        properties: dict[str, Any] = {}
+        if format_type == "dataBar":
+            properties["dataBar"] = {
+                "solid": {
+                    "show": _literal_value(True),
+                    "fill": _solid_color(_coerce_color_value(bar_color)),
+                }
+            }
+        elif format_type == "colorScale":
+            scale: dict[str, Any] = {
+                "minColor": _solid_color(_coerce_color_value(min_color)),
+                "maxColor": _solid_color(_coerce_color_value(max_color)),
+            }
+            if mid_color is not None:
+                scale["midColor"] = _solid_color(_coerce_color_value(mid_color))
+            properties["backColor"] = {"gradient": scale}
+        else:  # iconSet
+            properties["icon"] = {
+                "set": _literal_value(icon_set),
+                "show": _literal_value(True),
+            }
+
+        existing_props = dict(values_bag[0].get("properties", {}) or {})
+        # Conditional formatting is stored per-column under a selector; mirror
+        # that shape so Power BI Desktop applies it to the right field.
+        column_overrides = existing_props.setdefault(
+            f"_columnFormatting_{target_qref}",
+            {"selector": {"metadata": target_qref}, "properties": {}},
+        )
+        if isinstance(column_overrides, dict):
+            override_props = dict(column_overrides.get("properties", {}) or {})
+            override_props.update(properties)
+            column_overrides["properties"] = override_props
+            existing_props[f"_columnFormatting_{target_qref}"] = column_overrides
+
+        values_bag[0]["properties"] = existing_props
+        objects["values"] = values_bag
+        container["config"] = _dump_embedded_json(config)
+        _save_layout(folder, layout)
+        return ok(
+            f"Conditional formatting ({format_type}) applied to '{column_name}' on visual '{visual_id}'.",
+            extract_folder=str(folder),
+            page=str(section.get("displayName") or section.get("name")),
+            visual_id=visual_id,
+            column_name=column_name,
+            queryRef=target_qref,
+            format_type=format_type,
         )
 
     return _run(_impl)

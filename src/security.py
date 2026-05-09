@@ -180,6 +180,8 @@ WRITE_TOOLS = {
     "pbi_convert_visual_type",
     "pbi_update_visual_bindings",
     "pbi_set_visual_format_property",
+    "pbi_set_series_color",
+    "pbi_add_conditional_formatting",
     "pbi_disable_card_autoscale",
     "pbi_apply_design",
     "pbi_apply_theme",

@@ -11,7 +11,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tools 147](https://img.shields.io/badge/tools-147-orange)](#tool-catalog)
+[![Tools 149](https://img.shields.io/badge/tools-149-orange)](#tool-catalog)
 <!-- Update the badge above by running `python scripts/tool_count.py` from the repo root. -->
 
 [![CI](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml/badge.svg)](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml)
@@ -199,7 +199,7 @@ Setup guides:
 <a id="tool-catalog"></a>
 ## Tool Catalog
 
-147 MCP tools are grouped into these areas:
+149 MCP tools are grouped into these areas:
 
 | Area | Coverage |
 | --- | --- |

@@ -3,6 +3,103 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.12.5] — 2026-05-09 — Visual ops bugfixes + per-series colour
+
+Field-tested against an LLM client driving layout patches: 4 bugs closed,
+2 capability gaps filled. No breaking changes.
+
+### Bug fixes
+
+1. **`pbi_patch_layout` — "multiple values for argument 'extract_folder'"**
+   (`src/wrappers/_helpers.py`). The `register_tool` helper detected
+   `manager` as a `POSITIONAL_OR_KEYWORD` parameter and injected
+   `CONNECTION_MANAGER` as `*args[0]`. That worked when `manager` was the
+   first positional but collided with the actual first positional
+   (`extract_folder`, `pbix_path`, etc.) in tools where `manager` appears
+   later in the signature. The wrapper now always injects `manager` as a
+   keyword argument, regardless of where it sits in the underlying
+   signature. Affects every tool with a non-first `manager` param —
+   primarily `pbi_patch_layout_tool` and `pbi_validate_report_fields_tool`.
+
+2. **`pbi_set_visual_format_property` — undocumented type hints + nested
+   colour rejection** (`src/tools/visuals/_formatting.py`,
+   `src/tools/visuals/_ops.py`). The valid `property_types` values were
+   only discoverable through the source. The tool now:
+   - Documents every type (`auto`, `bool`, `int`, `decimal`, `text`,
+     `color`, `raw`) in the docstring with a concrete example per type.
+   - Accepts common aliases (`integer`, `float`, `number`, `string`,
+     `fill`, `hex`, `rgb`, `boolean`) and maps them to the canonical
+     name. Unknown hints raise with the full allowlist.
+   - Auto-unwraps a previously-encoded
+     `{"solid": {"color": "#RRGGBB"}}` payload back to a hex string so
+     LLM clients that round-trip a returned colour value don't get a
+     confusing "color must match '#RRGGBB'" error.
+
+3. **`dataPoint.defaultColor` paints every series the same colour** —
+   new tool `pbi_set_series_color` (`src/tools/visuals/_ops.py`).
+   `defaultColor` is the visual-wide default; per-series overrides go
+   into the same `dataPoint` array as additional entries with an `id`
+   selector pinned to the target measure / column. The new tool
+   targets a series by index (0-based across projections, role-ordered
+   `Y` → `Values` → `Series` → `Category`) or by name (matches the
+   queryRef or the underlying `Property`), then writes the override
+   while leaving sibling series untouched.
+
+4. **PBIX locked → in-memory measures lost on `force=True` patch**
+   (`src/tools/visuals/_io.py`, `src/tools/visuals/_ops.py`).
+   `pbi_patch_layout_tool` now takes a `save_before_close: bool = True`
+   parameter. When `force=True` and `save_before_close=True`, the call
+   posts Ctrl+S to every running Power BI Desktop window via Win32
+   PostMessage (same hardened path as `pbi_persist_now`) and waits up
+   to 10 seconds for the PBIX mtime to advance *before* invoking the
+   close-then-kill path. The save attempt is best-effort, never
+   raises, and the response now includes a `save_attempt` block with
+   telemetry (`attempted`, `windows_targeted`, `mtime_changed`,
+   `polled_seconds`, `skipped_reason`) so callers can detect silent
+   loss.
+
+### New capabilities
+
+5. **`pbi_set_visual_format_property` reset path**
+   (`src/tools/visuals/_ops.py`). Two new ways to clear a property
+   instead of leaving it set to a blank value:
+   - `reset_properties: list[str] | None = None` — explicit list of
+     properties to delete from the visual's bag.
+   - In-band sentinel: pass `"__reset__"` as the value inside the
+     `properties` dict for the same effect, so callers that build a
+     single dict (e.g. JSON payload) have a single-call path.
+   The response surfaces `reset` (alongside `applied`) so callers see
+   exactly what was cleared.
+
+6. **`pbi_add_conditional_formatting` — table / matrix data bars,
+   colour scales, and icon sets** (`src/tools/visuals/_ops.py`,
+   registered for the `add_visual` neighbours). Supports
+   `format_type ∈ {"dataBar", "colorScale", "iconSet"}` with the
+   common per-type knobs (`bar_color`, `min/mid/max_color`,
+   `icon_set ∈ {threeArrows, threeArrowsGray, threeTrafficLights,
+   threeSymbols, threeFlags, fiveArrows}`). Targets a column / measure
+   by display name; matched case-insensitively against the visual's
+   `prototypeQuery.Select` entries.
+
+### Tests
+
+7. **`tests/test_v0_12_5_fixes.py`** — 8 new tests:
+   - Bug 1: keyword-injection works when `manager` is the 4th
+     parameter (the case that previously raised `TypeError: multiple
+     values for argument 'extract_folder'`); explicit caller-provided
+     manager wins over auto-injection.
+   - Bug 3: `series_index=1` writes a `dataPoint` entry pinned to the
+     second series (`Cost`) and not the first (`Revenue`); selector
+     shape is correct; out-of-range index returns a structured error;
+     role-priority order resolves `Y` before `Series`.
+   - Wrapper smoke: every `wrappers/<domain>.py` imports cleanly.
+
+### Tool count
+
+Registered `@mcp.tool()` handlers: 147 → 149 (+2 from
+`pbi_set_series_color` and `pbi_add_conditional_formatting`). README
+badge updated.
+
 ## [0.12.4] — 2026-05-09 — Hardening polish
 
 Follow-up sweep on top of v0.12.3. Closes the residual zip-bomb gap on

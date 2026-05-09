@@ -16,6 +16,69 @@ from ._base import HEX_COLOR_RE
 
 _VISUAL_FORMAT_TYPES = frozenset({"auto", "text", "bool", "int", "decimal", "color", "raw"})
 
+# Common LLM mistakes: aliases that map to the canonical type names.
+# Surfaced through ``_normalize_format_type_hint`` so the caller gets a
+# clear error listing the correct name when a typo slips through.
+_VISUAL_FORMAT_TYPE_ALIASES: dict[str, str] = {
+    "integer": "int",
+    "long": "int",
+    "float": "decimal",
+    "double": "decimal",
+    "number": "decimal",
+    "string": "text",
+    "str": "text",
+    "boolean": "bool",
+    "fill": "color",
+    "hex": "color",
+    "rgb": "color",
+}
+
+
+def _normalize_format_type_hint(hint: str | None) -> str | None:
+    if hint is None:
+        return None
+    canonical = _VISUAL_FORMAT_TYPE_ALIASES.get(str(hint).strip().lower(), str(hint).strip().lower())
+    if canonical not in _VISUAL_FORMAT_TYPES:
+        raise PowerBIValidationError(
+            f"unknown property type hint '{hint}'. Valid types: {', '.join(sorted(_VISUAL_FORMAT_TYPES))}.",
+            details={"hint": hint, "allowed": sorted(_VISUAL_FORMAT_TYPES)},
+        )
+    return canonical
+
+
+def _coerce_color_value(value: Any) -> str:
+    """Accept either a plain hex string or an already-shaped Power BI
+    ``{"solid": {"color": ...}}`` object and return the bare hex.
+
+    LLM clients frequently round-trip a previously-encoded value (the
+    nested ``solid.color.expr.Literal.Value`` shape) and re-pass it as
+    input. Rather than fail with a confusing "color must match
+    '#RRGGBB'" error, we unwrap the nested object back to a hex string.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        # Shape 1: {"solid": {"color": "#RRGGBB"}} (the form humans write)
+        solid = value.get("solid")
+        if isinstance(solid, dict):
+            color = solid.get("color")
+            if isinstance(color, str):
+                return color
+            if isinstance(color, dict):
+                # Shape 2: full Literal expr — extract the inner string
+                expr = color.get("expr") if isinstance(color, dict) else None
+                literal = expr.get("Literal") if isinstance(expr, dict) else None
+                literal_value = literal.get("Value") if isinstance(literal, dict) else None
+                if isinstance(literal_value, str):
+                    return literal_value.strip("'\"")
+        # Shape 3: bare {"color": "#RRGGBB"}
+        if isinstance(value.get("color"), str):
+            return value["color"]
+    raise PowerBIValidationError(
+        "color values must be a hex string '#RRGGBB' or a {'solid': {'color': '#RRGGBB'}} object.",
+        details={"value": repr(value)},
+    )
+
 
 def _literal_value(value: Any) -> dict[str, Any]:
     return {"expr": {"Literal": {"Value": json.dumps(value)}}}
@@ -73,17 +136,11 @@ def _encode_visual_format_value(value: Any, hint: str | None = None) -> Any:
     from the Python type. ``raw`` returns the value untouched so callers can
     pass an already-shaped dict (e.g. a measure binding).
     """
-    if hint is not None and hint not in _VISUAL_FORMAT_TYPES:
-        raise PowerBIValidationError(
-            f"unknown property type hint '{hint}'.",
-            details={"hint": hint, "allowed": sorted(_VISUAL_FORMAT_TYPES)},
-        )
+    hint = _normalize_format_type_hint(hint)
     if hint == "raw":
         return value
     if hint == "color":
-        if not isinstance(value, str):
-            raise PowerBIValidationError("color values must be strings.", details={"value": repr(value)})
-        return _solid_color(value)
+        return _solid_color(_coerce_color_value(value))
     if hint == "text":
         return _text_literal(str(value))
     if hint == "bool":

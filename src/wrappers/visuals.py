@@ -6,6 +6,7 @@ from tools import (
     pbi_add_bar_chart_tool,
     pbi_add_card_tool,
     pbi_add_combo_chart_tool,
+    pbi_add_conditional_formatting_tool,
     pbi_add_donut_chart_tool,
     pbi_add_gauge_tool,
     pbi_add_kpi_tool,
@@ -38,6 +39,7 @@ from tools import (
     pbi_remove_visual_tool,
     pbi_repair_report_fields_tool,
     pbi_set_page_size_tool,
+    pbi_set_series_color_tool,
     pbi_set_visual_format_property_tool,
     pbi_update_visual_bindings_tool,
     pbi_validate_report_fields_tool,
@@ -78,6 +80,8 @@ register_tool(pbi_remove_visual_tool)
 register_tool(pbi_move_visual_tool)
 register_tool(pbi_update_visual_bindings_tool)
 register_tool(pbi_set_visual_format_property_tool)
+register_tool(pbi_set_series_color_tool)
+register_tool(pbi_add_conditional_formatting_tool)
 register_tool(pbi_disable_card_autoscale_tool)
 register_tool(pbi_apply_theme_tool)
 register_tool(pbi_apply_design_tool)
