@@ -41,7 +41,7 @@ from ._layout import (
     dry_run_layout_writes,
 )
 from ._paths import _layout_path, _resolve_extract_folder, _resolve_pbix_path
-from ._refs import _query_ref
+from ._refs import _projection, _query_ref
 
 
 def pbi_patch_layout_tool(
@@ -705,9 +705,9 @@ def pbi_update_visual_bindings_tool(
                 details={"visual_id": visual_id, "visual_type": visual_type},
             )
 
-        # Convert {role: [full_ref]} → {role: [{"queryRef": short}]}
-        new_projections: dict[str, list[dict[str, str]]] = {
-            role: [{"queryRef": _query_ref(ref)} for ref in refs] for role, refs in new_full_refs.items()
+        # Convert {role: [full_ref]} → {role: [{"queryRef": short, "active": True}]}
+        new_projections: dict[str, list[dict[str, Any]]] = {
+            role: [_projection(ref) for ref in refs] for role, refs in new_full_refs.items()
         }
 
         # Role allowlist + (with manager) ref-kind validation per role.

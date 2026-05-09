@@ -33,7 +33,7 @@ from ._layout import (
     _save_layout,
 )
 from ._paths import _resolve_theme_path
-from ._refs import _query_ref
+from ._refs import _projection
 
 DESIGN_PRESETS: dict[str, dict[str, Any]] = {
     "powerbi-navy-pro": {
@@ -324,18 +324,18 @@ def _create_visual_from_spec(
             width=width,
             height=height,
             title=title,
-            projections={"Values": [{"queryRef": _query_ref(spec["measure"])}]},
+            projections={"Values": [_projection(spec["measure"])]},
             references=[spec["measure"]],
             measure_home_map=measure_home_map,
         )
     if visual_type in {"bar_chart", "bar"}:
         projections = {
-            "Category": [{"queryRef": _query_ref(spec["category"])}],
-            "Y": [{"queryRef": _query_ref(spec["measure"])}],
+            "Category": [_projection(spec["category"])],
+            "Y": [_projection(spec["measure"])],
         }
         references = [spec["category"], spec["measure"]]
         if spec.get("legend"):
-            projections["Series"] = [{"queryRef": _query_ref(spec["legend"])}]
+            projections["Series"] = [_projection(spec["legend"])]
             references.append(spec["legend"])
         return _create_chart_container(
             section,
@@ -360,8 +360,8 @@ def _create_visual_from_spec(
             height=height,
             title=title,
             projections={
-                "Category": [{"queryRef": _query_ref(spec["axis"])}],
-                "Y": [{"queryRef": _query_ref(item)} for item in measures],
+                "Category": [_projection(spec["axis"])],
+                "Y": [_projection(item) for item in measures],
             },
             references=[spec["axis"], *measures],
             measure_home_map=measure_home_map,
@@ -376,8 +376,8 @@ def _create_visual_from_spec(
             height=height,
             title=title,
             projections={
-                "Category": [{"queryRef": _query_ref(spec["category"])}],
-                "Y": [{"queryRef": _query_ref(spec["measure"])}],
+                "Category": [_projection(spec["category"])],
+                "Y": [_projection(spec["measure"])],
             },
             references=[spec["category"], spec["measure"]],
             measure_home_map=measure_home_map,
@@ -391,7 +391,7 @@ def _create_visual_from_spec(
             width=width,
             height=height,
             title=title,
-            projections={"Values": [{"queryRef": _query_ref(item)} for item in spec["columns"]]},
+            projections={"Values": [_projection(item) for item in spec["columns"]]},
             references=list(spec["columns"]),
             measure_home_map=measure_home_map,
         )
@@ -405,8 +405,8 @@ def _create_visual_from_spec(
             height=height,
             title=title,
             projections={
-                "Category": [{"queryRef": _query_ref(spec["category"])}],
-                "Y": [{"queryRef": _query_ref(spec["measure"])}],
+                "Category": [_projection(spec["category"])],
+                "Y": [_projection(spec["measure"])],
             },
             references=[spec["category"], spec["measure"]],
             measure_home_map=measure_home_map,
@@ -419,7 +419,7 @@ def _create_visual_from_spec(
             y=y,
             width=width,
             height=height,
-            projections={"Values": [{"queryRef": _query_ref(spec["column"])}]},
+            projections={"Values": [_projection(spec["column"])]},
             references=[spec["column"]],
             measure_home_map=measure_home_map,
             extra_single_visual={"slicerType": str(spec.get("slicer_type", "dropdown")).casefold()},
@@ -452,7 +452,7 @@ def _create_visual_from_spec(
             width=width,
             height=height,
             title=title,
-            projections={"Y": [{"queryRef": _query_ref(spec["measure"])}]},
+            projections={"Y": [_projection(spec["measure"])]},
             references=[spec["measure"]],
             measure_home_map=measure_home_map,
         )
@@ -469,20 +469,20 @@ def _create_visual_from_spec(
             height=height,
             title=title,
             projections={
-                "Value": [{"queryRef": _query_ref(spec["measure"])}],
-                "Goal": [{"queryRef": _query_ref(spec["target_measure"])}],
+                "Value": [_projection(spec["measure"])],
+                "Goal": [_projection(spec["target_measure"])],
             }
             if spec.get("target_measure")
-            else {"Value": [{"queryRef": _query_ref(spec["measure"])}]},
+            else {"Value": [_projection(spec["measure"])]},
             references=measures,
             measure_home_map=measure_home_map,
         )
     if visual_type == "map":
         refs = [spec["location"]]
-        projections = {"Category": [{"queryRef": _query_ref(spec["location"])}]}
+        projections = {"Category": [_projection(spec["location"])]}
         if spec.get("measure"):
             refs.append(spec["measure"])
-            projections["Y"] = [{"queryRef": _query_ref(spec["measure"])}]
+            projections["Y"] = [_projection(spec["measure"])]
         return _create_chart_container(
             section,
             visual_type="map",

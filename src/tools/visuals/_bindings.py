@@ -54,7 +54,12 @@ def _build_prototype_query(
 ) -> dict[str, Any]:
     aliases: dict[str, str] = {}
     select = [_build_select_entry(reference, aliases, measure_home_map) for reference in references]
-    from_entries = [{"Name": alias, "Entity": entity} for entity, alias in aliases.items()]
+    # ``Type: 0`` is the standard "Table" entity-source kind in Power BI's
+    # internal protobuf (vs. expression-based 1, search 2, …). Power BI
+    # Desktop's renderer ignores ``From`` entries that lack it, which
+    # presents to the user as a visual that opens with an empty data
+    # area despite all the projections / select entries being correct.
+    from_entries = [{"Name": alias, "Entity": entity, "Type": 0} for entity, alias in aliases.items()]
     return {"Version": 2, "From": from_entries, "Select": select}
 
 

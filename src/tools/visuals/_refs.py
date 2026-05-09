@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from pbi_connection import PowerBIValidationError
 
@@ -48,6 +49,21 @@ def _split_column_ref(reference: str) -> tuple[str, str]:
             details={"reference": reference},
         )
     return table.strip(), column.strip()
+
+
+def _projection(reference: str, *, active: bool = True) -> dict[str, Any]:
+    """Build a projection item dict for a visual ``singleVisual.projections``.
+
+    Power BI Desktop's renderer needs ``active: True`` on every projection
+    item — items without it are silently dropped during the data shape
+    pass and the visual opens with an empty data area. The dispatcher
+    code historically only emitted ``{"queryRef": …}``, which is the root
+    cause of the v0.12.6 "empty treemap / map / scatter" reports.
+    """
+    item: dict[str, Any] = {"queryRef": _query_ref(reference)}
+    if active:
+        item["active"] = True
+    return item
 
 
 def _query_ref(reference: str) -> str:

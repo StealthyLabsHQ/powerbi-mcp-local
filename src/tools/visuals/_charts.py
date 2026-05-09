@@ -9,7 +9,7 @@ from pbi_connection import PowerBIValidationError
 from ._bindings import _validate_field_references_live
 from ._containers import _append_visual, _create_chart_container
 from ._home_tables import _inspect_value_measures, _resolve_measure_home_map
-from ._refs import _query_ref
+from ._refs import _projection
 
 
 def pbi_add_bar_chart_tool(
@@ -28,13 +28,13 @@ def pbi_add_bar_chart_tool(
 ) -> dict[str, Any]:
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     projections = {
-        "Category": [{"queryRef": _query_ref(category_column)}],
-        "Y": [{"queryRef": _query_ref(value_measure)}],
+        "Category": [_projection(category_column)],
+        "Y": [_projection(value_measure)],
     }
     references = [category_column, value_measure]
     expected_kinds = {category_column: "column", value_measure: "measure"}
     if legend_column:
-        projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
+        projections["Series"] = [_projection(legend_column)]
         references.append(legend_column)
         expected_kinds[legend_column] = "column"
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
@@ -90,8 +90,8 @@ def pbi_add_line_chart_tool(
             height=height,
             title=title or None,
             projections={
-                "Category": [{"queryRef": _query_ref(axis_column)}],
-                "Y": [{"queryRef": _query_ref(measure)} for measure in value_measures],
+                "Category": [_projection(axis_column)],
+                "Y": [_projection(measure) for measure in value_measures],
             },
             references=[axis_column, *value_measures],
             measure_home_map=home_map,
@@ -132,8 +132,8 @@ def pbi_add_donut_chart_tool(
             height=height,
             title=title or None,
             projections={
-                "Category": [{"queryRef": _query_ref(category_column)}],
-                "Y": [{"queryRef": _query_ref(value_measure)}],
+                "Category": [_projection(category_column)],
+                "Y": [_projection(value_measure)],
             },
             references=[category_column, value_measure],
             measure_home_map=home_map,
@@ -172,8 +172,8 @@ def pbi_add_waterfall_tool(
             height=height,
             title=title or None,
             projections={
-                "Category": [{"queryRef": _query_ref(category_column)}],
-                "Y": [{"queryRef": _query_ref(value_measure)}],
+                "Category": [_projection(category_column)],
+                "Y": [_projection(value_measure)],
             },
             references=[category_column, value_measure],
             measure_home_map=home_map,
@@ -208,18 +208,18 @@ def pbi_add_scatter_chart_tool(
     between two measures grouped by a dimension.
     """
     projections = {
-        "Category": [{"queryRef": _query_ref(category_column)}],
-        "X": [{"queryRef": _query_ref(x_measure)}],
-        "Y": [{"queryRef": _query_ref(y_measure)}],
+        "Category": [_projection(category_column)],
+        "X": [_projection(x_measure)],
+        "Y": [_projection(y_measure)],
     }
     references = [category_column, x_measure, y_measure]
     expected_kinds = {category_column: "column", x_measure: "measure", y_measure: "measure"}
     if size_measure:
-        projections["Size"] = [{"queryRef": _query_ref(size_measure)}]
+        projections["Size"] = [_projection(size_measure)]
         references.append(size_measure)
         expected_kinds[size_measure] = "measure"
     if legend_column:
-        projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
+        projections["Series"] = [_projection(legend_column)]
         references.append(legend_column)
         expected_kinds[legend_column] = "column"
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
@@ -271,13 +271,13 @@ def _add_categorical_chart(
     """Shared backbone for bar / column / ribbon / pie / treemap variants."""
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     projections: dict[str, list[dict[str, str]]] = {
-        "Category": [{"queryRef": _query_ref(category_column)}],
-        "Y": [{"queryRef": _query_ref(value_measure)}],
+        "Category": [_projection(category_column)],
+        "Y": [_projection(value_measure)],
     }
     references = [category_column, value_measure]
     expected_kinds = {category_column: "column", value_measure: "measure"}
     if legend_column:
-        projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
+        projections["Series"] = [_projection(legend_column)]
         references.append(legend_column)
         expected_kinds[legend_column] = "column"
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
@@ -329,11 +329,11 @@ def _add_axis_chart(
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     diagnostics = _inspect_value_measures(value_measures, measure_home_map, manager, axis_ref=axis_column)
     projections: dict[str, list[dict[str, str]]] = {
-        "Category": [{"queryRef": _query_ref(axis_column)}],
-        "Y": [{"queryRef": _query_ref(measure)} for measure in value_measures],
+        "Category": [_projection(axis_column)],
+        "Y": [_projection(measure) for measure in value_measures],
     }
     if legend_column:
-        projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
+        projections["Series"] = [_projection(legend_column)]
     result = _append_visual(
         extract_folder,
         page,
@@ -627,8 +627,8 @@ def pbi_add_funnel_tool(
     """
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     projections = {
-        "Group": [{"queryRef": _query_ref(group_column)}],
-        "Values": [{"queryRef": _query_ref(value_measure)}],
+        "Group": [_projection(group_column)],
+        "Values": [_projection(value_measure)],
     }
     references = [group_column, value_measure]
     expected_kinds = {group_column: "column", value_measure: "measure"}
@@ -774,10 +774,10 @@ def pbi_add_multi_row_card_tool(
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
     projections: dict[str, list[dict[str, str]]] = {
-        "Values": [{"queryRef": _query_ref(item)} for item in measures],
+        "Values": [_projection(item) for item in measures],
     }
     if category_column:
-        projections["Category"] = [{"queryRef": _query_ref(category_column)}]
+        projections["Category"] = [_projection(category_column)]
     return _append_visual(
         extract_folder,
         page,
@@ -821,9 +821,9 @@ def pbi_add_combo_chart_tool(
     if not line_measures:
         raise PowerBIValidationError("line_measures must contain at least one measure.")
     projections: dict[str, list[dict[str, str]]] = {
-        "Category": [{"queryRef": _query_ref(category_column)}],
-        "Y": [{"queryRef": _query_ref(item)} for item in bar_measures],
-        "Y2": [{"queryRef": _query_ref(item)} for item in line_measures],
+        "Category": [_projection(category_column)],
+        "Y": [_projection(item) for item in bar_measures],
+        "Y2": [_projection(item) for item in line_measures],
     }
     references = [category_column, *bar_measures, *line_measures]
     expected_kinds = {category_column: "column"}
@@ -832,7 +832,7 @@ def pbi_add_combo_chart_tool(
     for m in line_measures:
         expected_kinds[m] = "measure"
     if legend_column:
-        projections["Series"] = [{"queryRef": _query_ref(legend_column)}]
+        projections["Series"] = [_projection(legend_column)]
         references.append(legend_column)
         expected_kinds[legend_column] = "column"
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)

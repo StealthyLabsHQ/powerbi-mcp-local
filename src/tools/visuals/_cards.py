@@ -10,7 +10,7 @@ from ._bindings import _validate_field_references_live
 from ._containers import _append_visual, _create_chart_container, _make_visual_container
 from ._formatting import _datapoint_fill_objects, _gauge_axis_objects, _text_literal
 from ._home_tables import _resolve_measure_home_map
-from ._refs import _query_ref
+from ._refs import _projection
 
 
 def pbi_add_card_tool(
@@ -43,7 +43,7 @@ def pbi_add_card_tool(
             width=width,
             height=height,
             title=title or None,
-            projections={"Values": [{"queryRef": _query_ref(measure)}]},
+            projections={"Values": [_projection(measure)]},
             references=[measure],
             measure_home_map=home_map,
         ),
@@ -88,10 +88,10 @@ def pbi_add_gauge_tool(
         expected_kinds[fill_color_measure] = "measure"
     _validate_field_references_live(manager, refs_to_validate, expected_kinds=expected_kinds)
     measure_home_map = _resolve_measure_home_map(extract_folder, manager=manager)
-    projections = {"Y": [{"queryRef": _query_ref(measure)}]}
+    projections = {"Y": [_projection(measure)]}
     references = [measure]
     if target_measure:
-        projections["Goal"] = [{"queryRef": _query_ref(target_measure)}]
+        projections["Goal"] = [_projection(target_measure)]
         references.append(target_measure)
     if fill_color_measure:
         references.append(fill_color_measure)
@@ -168,13 +168,13 @@ def pbi_add_kpi_tool(
             details={"direction": direction},
         )
     projections: dict[str, list[dict[str, str]]] = {
-        "Indicator": [{"queryRef": _query_ref(indicator_measure)}],
-        "TrendLine": [{"queryRef": _query_ref(trend_axis_column)}],
+        "Indicator": [_projection(indicator_measure)],
+        "TrendLine": [_projection(trend_axis_column)],
     }
     references = [indicator_measure, trend_axis_column]
     expected_kinds = {indicator_measure: "measure", trend_axis_column: "column"}
     if goal_measure:
-        projections["Goal"] = [{"queryRef": _query_ref(goal_measure)}]
+        projections["Goal"] = [_projection(goal_measure)]
         references.append(goal_measure)
         expected_kinds[goal_measure] = "measure"
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)

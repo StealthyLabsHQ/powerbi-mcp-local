@@ -3,6 +3,57 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.12.7] — 2026-05-09 — Empty-visual renderer-compat fixes
+
+Field-tested against Power BI Desktop 2024 builds: every visual added by
+`pbi_add_*` (treemap, map, scatter, the v0.12.6 chart pack…) opened
+with an empty data area despite the projections + select entries being
+correct. Two missing fields in the emitted JSON were the root cause —
+the renderer's data-shape pass silently drops items that lack them.
+
+### Bug fixes
+
+1. **`From` entries now carry `Type: 0`** (`src/tools/visuals/_bindings.py`).
+   `_build_prototype_query` was emitting `{"Name": …, "Entity": …}`. PBI
+   Desktop's renderer ignores entries that lack the `Type` discriminator
+   (0 = standard table entity-source kind in PBI's protobuf). Without
+   it, every `Measure`/`Column` whose `SourceRef.Source` points at the
+   stripped alias fails to bind, so the visual opens empty.
+
+2. **Projection items now carry `"active": True`**
+   (`src/tools/visuals/_refs.py`, every chart builder under
+   `src/tools/visuals/`). The dispatcher historically emitted
+   `{"queryRef": …}`; PBI's data-shape pass treats unflagged projection
+   items as draft / inactive and drops them. Affects every
+   ``pbi_add_*_tool`` plus ``pbi_update_visual_bindings_tool``. A new
+   ``_projection(reference, *, active=True)`` helper builds the
+   canonical shape so future chart additions can't regress.
+
+3. **Dispatcher coverage gap closed**
+   (`src/tools/visuals/_dispatcher.py`). The generic
+   ``pbi_add_visual(visual_type=…)`` registry only knew the original
+   chart set — `treemap`, `pie_chart`, `scatter_chart`, `combo_chart`,
+   the v0.12.6 stacked/area/ribbon/funnel/multi_row_card additions, all
+   raised "unknown visual_type". Three small `_categorical_dispatch` /
+   `_axis_chart_dispatch` factories add the missing 15 entries without
+   duplicating per-type validation.
+
+### Tests
+
+4. **`tests/test_v0_12_7_renderer_compat.py`** — 8 new regressions:
+   - `_build_prototype_query` emits `Type: 0` on every `From` entry.
+   - `_projection` defaults to `active: True` and supports opt-out.
+   - Treemap, pie, bar (with legend), line (multiple measures) all
+     produce on-disk Layouts where every `From` entry has `Type: 0`
+     and every projection item has `active: True`.
+   - The dispatcher exposes every v0.12.6 chart-pack key plus
+     `scatter_chart` / `combo_chart`.
+
+### Test coverage
+
+`pytest -q` → 233 passed, 2 skipped (was 225 in v0.12.6; +8 from
+v0.12.7).
+
 ## [0.12.6] — 2026-05-09 — Hot-reload bypass fix + chart-family pack
 
 Closes the high-severity Codex finding on the v0.12.3 hot-reload feature

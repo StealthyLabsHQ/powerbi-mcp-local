@@ -10,7 +10,7 @@ from ._bindings import _validate_field_references_live
 from ._containers import _append_visual, _create_chart_container
 from ._formatting import _int_literal, _literal_value, _text_literal
 from ._home_tables import _resolve_measure_home_map
-from ._refs import _query_ref
+from ._refs import _projection
 
 
 def pbi_add_table_visual_tool(
@@ -40,7 +40,7 @@ def pbi_add_table_visual_tool(
             width=width,
             height=height,
             title=title or None,
-            projections={"Values": [{"queryRef": _query_ref(item)} for item in columns]},
+            projections={"Values": [_projection(item) for item in columns]},
             references=list(columns),
             measure_home_map=home_map,
         ),
@@ -86,7 +86,7 @@ def pbi_add_slicer_tool(
             width=width,
             height=height,
             title=None,
-            projections={"Values": [{"queryRef": _query_ref(column)}]},
+            projections={"Values": [_projection(column)]},
             references=[column],
             measure_home_map=home_map,
             extra_single_visual=extra,
@@ -128,14 +128,14 @@ def pbi_add_matrix_tool(
             details={"column_layout": column_layout},
         )
     projections: dict[str, list[dict[str, str]]] = {
-        "Rows": [{"queryRef": _query_ref(item)} for item in rows],
-        "Values": [{"queryRef": _query_ref(item)} for item in values],
+        "Rows": [_projection(item) for item in rows],
+        "Values": [_projection(item) for item in values],
     }
     references = [*rows, *values]
     expected_kinds = {r: "column" for r in rows}
     expected_kinds.update({v: "measure" for v in values})
     if columns:
-        projections["Columns"] = [{"queryRef": _query_ref(item)} for item in columns]
+        projections["Columns"] = [_projection(item) for item in columns]
         references.extend(columns)
         for c in columns:
             expected_kinds[c] = "column"
@@ -188,11 +188,11 @@ def pbi_add_map_tool(
     Roles: ``Category`` (location column — country, city, Lat/Long…) and
     optional ``Y`` (measure that drives bubble size).
     """
-    projections: dict[str, list[dict[str, str]]] = {"Category": [{"queryRef": _query_ref(location_column)}]}
+    projections: dict[str, list[dict[str, str]]] = {"Category": [_projection(location_column)]}
     references = [location_column]
     expected_kinds = {location_column: "column"}
     if value_measure:
-        projections["Y"] = [{"queryRef": _query_ref(value_measure)}]
+        projections["Y"] = [_projection(value_measure)]
         references.append(value_measure)
         expected_kinds[value_measure] = "measure"
     _validate_field_references_live(manager, references, expected_kinds=expected_kinds)
