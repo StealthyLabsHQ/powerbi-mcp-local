@@ -7,24 +7,58 @@ import re
 from pbi_connection import PowerBIValidationError
 
 _M_BLOCKED_FUNCTION_PATTERNS = (
+    # Network / arbitrary code
     r"\bWeb\.Contents\b",
     r"\bWeb\.Page\b",
     r"\bWeb\.BrowserContents\b",
+    r"\bWebAction\.\w+",
     r"\bExpression\.Evaluate\b",
     r"\bValue\.NativeQuery\b",
+    # OData / generic feeds
     r"\bOData\.Feed\b",
+    # Relational sources
     r"\bSql\.Database\b",
     r"\bSql\.Databases\b",
+    r"\bMssql\.Database\b",
     r"\bOracle\.Database\b",
     r"\bPostgreSQL\.Database\b",
     r"\bMySQL\.Database\b",
+    r"\bTeradata\.Database\b",
+    r"\bSybase\.Database\b",
+    r"\bIbmDb2\.Database\b",
+    r"\bInformix\.Database\b",
+    r"\bSnowflake\.Databases?\b",
+    r"\bGoogleBigQuery\.\w+",
+    r"\bBigQuery\.\w+",
+    r"\bAmazonRedshift\.\w+",
+    r"\bAzureSql\w*\.\w+",
+    r"\bAzureSynapse\w*\.\w+",
+    # Generic providers
     r"\bOdbc\.DataSource\b",
     r"\bOdbc\.Query\b",
     r"\bOleDb\.DataSource\b",
     r"\bOleDb\.Query\b",
+    # SaaS connectors
     r"\bSharePoint\.\w+",
     r"\bActiveDirectory\.\w+",
+    r"\bExchange\.\w+",
+    r"\bSalesforce\.\w+",
+    r"\bGoogleSheets\.\w+",
+    r"\bGoogleAnalytics\.\w+",
+    r"\bDynamics\w*\.\w+",
+    # Azure / cloud storage
     r"\bAzureStorage\.\w+",
+    r"\bAzureBlob\w*\.\w+",
+    r"\bAzureDataLakeStorage\.\w+",
+    r"\bAdlsGen2\.\w+",
+    r"\bAmazonS3\.\w+",
+    r"\bHdfs\.\w+",
+    # Analysis Services / cubes (could exfiltrate other models)
+    r"\bAnalysisServices\.\w+",
+    r"\bCube\.\w+",
+    # Cross-workbook context exfiltration
+    r"\bExcel\.CurrentWorkbook\b",
+    # Reflection / dynamic call surface
     r"#shared\b",
 )
 M_BLOCKED_FUNCTIONS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in _M_BLOCKED_FUNCTION_PATTERNS)

@@ -50,15 +50,48 @@ def _run(tool_name: str, callback: Any, *args: Any, **kwargs: Any) -> dict[str, 
     }
     logger.info("TOOL_CALL tool=%s params=%s", tool_name, safe_kwargs)
     try:
-        SECURITY.validate_tool_call(tool_name, kwargs)
+        policy = SECURITY.validate_tool_call(tool_name, kwargs)
         result = callback(*args, **kwargs)
         status = result.get("status", "unknown") if isinstance(result, dict) else "ok"
         logger.info("TOOL_OK tool=%s status=%s", tool_name, status)
-        return result
+        return _enforce_response_size(tool_name, result, policy)
     except Exception as exc:
         logger.warning("TOOL_FAIL tool=%s error=%s", tool_name, str(exc)[:300])
         logger.exception("Tool '%s' failed", tool_name)
         return error_payload(exc)
+
+
+def _enforce_response_size(tool_name: str, result: Any, policy: Any) -> Any:
+    """Reject responses larger than ``policy.max_response_bytes``.
+
+    The runaway case is ``pbi_export_model`` against a multi-GB model, or
+    a DAX query that bypassed ``max_rows_for_dax`` via metadata side-loads.
+    A hard cap protects the LLM client process from OOM.
+    """
+    cap = getattr(policy, "max_response_bytes", 0) or 0
+    if cap <= 0 or not isinstance(result, dict):
+        return result
+    try:
+        import json as _json
+
+        size = len(_json.dumps(result, ensure_ascii=False, default=str).encode("utf-8"))
+    except Exception:
+        return result
+    if size <= cap:
+        return result
+    logger.warning("TOOL_TRUNCATED tool=%s response_bytes=%d cap=%d", tool_name, size, cap)
+    return {
+        "status": "error",
+        "error": {
+            "code": "response_too_large",
+            "message": (
+                f"Tool '{tool_name}' response is {size} bytes, exceeding the "
+                f"configured cap of {cap} bytes. Narrow the query or set "
+                f"max_response_bytes higher in security_policy.json."
+            ),
+            "details": {"response_bytes": size, "limit": cap},
+        },
+    }
 
 
 # --------------------------------------------------------------------------- #

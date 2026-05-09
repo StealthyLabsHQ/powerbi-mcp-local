@@ -163,9 +163,13 @@ def _bring_to_foreground(hwnd: int) -> int | None:
     return int(previous) if success else None
 
 
-def _send_ctrl_s(hwnd: int) -> None:
-    """Inject Ctrl+S via SendInput. Targets the focused window — caller must
-    have brought the desired window to foreground first.
+def _send_ctrl_s_via_sendinput(hwnd: int) -> None:
+    """Legacy fallback: inject Ctrl+S into the global input queue.
+
+    Some hosts (notably WPF) only respond to translated keyboard input.
+    Operators can opt back into this path with
+    ``PBI_MCP_PERSIST_USE_SENDINPUT=1`` if the safer PostMessage variant
+    fails to trigger a save on their build of Power BI Desktop.
     """
     import ctypes
     from ctypes import wintypes
@@ -215,6 +219,79 @@ def _send_ctrl_s(hwnd: int) -> None:
             f"SendInput injected {sent}/4 events — keyboard layer rejected the call.",
             details={"hwnd": hwnd, "sent": sent},
         )
+
+
+def _send_ctrl_s(hwnd: int) -> None:
+    """Inject Ctrl+S to the specific Power BI Desktop ``hwnd``.
+
+    Default path uses ``PostMessage`` against the focused descendant of
+    ``hwnd`` instead of ``SendInput``. ``SendInput`` injects key events
+    into the global input queue, which routes to whichever window happens
+    to own the foreground when the events are processed — meaning a focus
+    race between ``SetForegroundWindow`` and event processing could
+    deliver Ctrl+S to an unrelated app. ``PostMessage`` posts directly to
+    a window handle so the chord stays bound to PBI Desktop even if focus
+    moves.
+
+    Set ``PBI_MCP_PERSIST_USE_SENDINPUT=1`` to fall back to the legacy
+    SendInput path on builds where WPF's input pipeline ignores posted
+    keyboard messages.
+    """
+    if os.environ.get("PBI_MCP_PERSIST_USE_SENDINPUT", "0") == "1":
+        _send_ctrl_s_via_sendinput(hwnd)
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+
+    WM_KEYDOWN = 0x0100
+    WM_KEYUP = 0x0101
+    VK_CONTROL = 0x11
+    VK_S = 0x53
+
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.PostMessageW.restype = wintypes.BOOL
+    user32.GetGUIThreadInfo.restype = wintypes.BOOL
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+
+    # Resolve the focused descendant of hwnd through GetGUIThreadInfo so the
+    # chord lands on the actual edit-control / canvas owning input focus.
+    class GUITHREADINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("flags", wintypes.DWORD),
+            ("hwndActive", wintypes.HWND),
+            ("hwndFocus", wintypes.HWND),
+            ("hwndCapture", wintypes.HWND),
+            ("hwndMenuOwner", wintypes.HWND),
+            ("hwndMoveSize", wintypes.HWND),
+            ("hwndCaret", wintypes.HWND),
+            ("rcCaret", wintypes.RECT),
+        ]
+
+    info = GUITHREADINFO()
+    info.cbSize = ctypes.sizeof(GUITHREADINFO)
+    user32.GetGUIThreadInfo.argtypes = [wintypes.DWORD, ctypes.POINTER(GUITHREADINFO)]
+    target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+    target_hwnd = hwnd
+    if user32.GetGUIThreadInfo(target_thread, ctypes.byref(info)) and info.hwndFocus:
+        target_hwnd = info.hwndFocus
+
+    posts = [
+        (WM_KEYDOWN, VK_CONTROL),
+        (WM_KEYDOWN, VK_S),
+        (WM_KEYUP, VK_S),
+        (WM_KEYUP, VK_CONTROL),
+    ]
+    for msg, vk in posts:
+        if not user32.PostMessageW(target_hwnd, msg, vk, 0):
+            raise PowerBIValidationError(
+                "PostMessage failed — Power BI Desktop rejected the key chord.",
+                details={"hwnd": int(target_hwnd), "msg": msg, "vk": vk},
+            )
 
 
 def pbi_persist_now_tool(

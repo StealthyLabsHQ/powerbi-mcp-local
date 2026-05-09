@@ -14,6 +14,18 @@ from pbi_connection import PowerBIValidationError, dax_quote_table_name, ok
 from security import resolve_local_path
 
 LAYOUT_RELATIVE_PATH = Path("Report") / "Layout"
+
+# Force UTF-8 I/O on Windows PowerShell 5.1. Default Out-File encoding is
+# UTF-16 LE and the host codepage drives stdout — both can mangle paths /
+# JSON when piped back through subprocess + json.loads on Python's side.
+_PS_UTF8_PRELUDE = (
+    "$OutputEncoding = [System.Text.UTF8Encoding]::new($false);"
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);"
+    "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false);"
+    "$PSDefaultParameterValues['Out-File:Encoding']='utf8';"
+    "$PSDefaultParameterValues['*:Encoding']='utf8';\n"
+)
+
 MIN_VISUAL_WIDTH = 120
 MIN_VISUAL_HEIGHT = 80
 MAX_VISUALS_PER_PAGE = 12
@@ -1381,7 +1393,15 @@ foreach ($signal in $signals) {
 """
     )
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            _PS_UTF8_PRELUDE + script,
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -1433,7 +1453,15 @@ $tealRatio = if ($samples -gt 0) { $teal / $samples } else { 0 }
 """
     )
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            _PS_UTF8_PRELUDE + script,
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -1494,7 +1522,15 @@ foreach ($signal in $signals) {
 """
     )
     result = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            _PS_UTF8_PRELUDE + script,
+        ],
         capture_output=True,
         text=True,
         check=False,

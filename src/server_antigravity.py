@@ -56,12 +56,17 @@ def _harden_stdio() -> None:
 
 
 def _silence_loggers() -> None:
-    """Route every log record to stderr at ERROR level.
+    """Route every log record to stderr at WARNING level.
 
     FastMCP and pythonnet both attach handlers at import time. Without
     this, an ``INFO`` message printed during startup would land on
     stdout (FastMCP's default in some configurations) and corrupt the
     JSON-RPC stream.
+
+    We keep one stderr handler at WARNING (not ERROR) so legitimate
+    startup problems — capability mismatches, bind failures, missing
+    dependencies — still surface in the Antigravity client's MCP
+    diagnostics view. Anything below WARNING stays muted.
     """
     root = logging.getLogger()
     for handler in list(root.handlers):
@@ -69,10 +74,11 @@ def _silence_loggers() -> None:
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
     root.addHandler(handler)
-    root.setLevel(logging.ERROR)
-    # Known noisy library loggers:
+    root.setLevel(logging.WARNING)
+    # Known noisy library loggers — keep at WARNING so misconfiguration
+    # signals reach stderr without polluting stdout with INFO chatter.
     for name in ("FastMCP", "mcp", "uvicorn", "asyncio", "pythonnet", "powerbi_mcp"):
-        logging.getLogger(name).setLevel(logging.ERROR)
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def _parse_args(argv: list[str] | None = None) -> object:

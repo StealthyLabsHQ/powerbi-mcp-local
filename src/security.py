@@ -309,7 +309,14 @@ class SecurityPolicy:
     max_excel_zip_compression_ratio: float = 250.0
     max_excel_cells_scanned: int = 200000
     warn_after_calls_per_minute: int = 120
-    rate_limit_calls_per_minute: int | None = None
+    # Default cap so a runaway LLM agent cannot melt local Power BI Desktop.
+    # Operators can raise / disable via ``rate_limit_calls_per_minute`` in
+    # security_policy.json (set to null/0 for unlimited).
+    rate_limit_calls_per_minute: int | None = 600
+    # Bound on the JSON-serialized response body returned by a single tool
+    # call. Prevents a 20GB ``pbi_export_model`` (or pathological DAX) from
+    # hard-OOMing the LLM client process. ``0`` disables the check.
+    max_response_bytes: int = 16 * 1024 * 1024
     allowed_base_dirs: list[str] = field(default_factory=list)
 
     @classmethod
@@ -343,9 +350,15 @@ class SecurityPolicy:
             max_excel_zip_compression_ratio=float(data.get("max_excel_zip_compression_ratio", 250.0)),
             max_excel_cells_scanned=int(data.get("max_excel_cells_scanned", 200000)),
             warn_after_calls_per_minute=int(data.get("warn_after_calls_per_minute", 120)),
-            rate_limit_calls_per_minute=int(data["rate_limit_calls_per_minute"])
-            if data.get("rate_limit_calls_per_minute") is not None
-            else None,
+            # Treat 0 as "unlimited" so operators can opt out of the safety
+            # default without having to write JSON null. Anything else is
+            # taken at face value.
+            rate_limit_calls_per_minute=(
+                None
+                if data.get("rate_limit_calls_per_minute", 600) in (None, 0)
+                else int(data.get("rate_limit_calls_per_minute", 600))
+            ),
+            max_response_bytes=int(data.get("max_response_bytes", 16 * 1024 * 1024)),
             allowed_base_dirs=[str(item) for item in data.get("allowed_base_dirs", [])],
         )
 
@@ -377,15 +390,40 @@ class SecurityManager:
         self._lock = threading.RLock()
         self._policy: SecurityPolicy | None = None
         self._policy_cwd: Path | None = None
+        self._policy_file_mtime: float | None = None
         self._runtime_readonly: bool | None = None
         self._allowed_dirs_override: list[Path] = []
         self._calls: deque[float] = deque()
 
+    def _policy_file_path(self, cwd: Path) -> Path | None:
+        env_value = os.getenv("PBI_MCP_SECURITY_POLICY", "").strip()
+        if env_value and not env_value.startswith("{"):
+            candidate = Path(env_value).expanduser()
+            return candidate if candidate.exists() else None
+        candidate = cwd / "security_policy.json"
+        return candidate if candidate.exists() else None
+
+    def _policy_file_mtime_now(self, cwd: Path) -> float | None:
+        path = self._policy_file_path(cwd)
+        if path is None:
+            return None
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return None
+
     def policy(self, *, reload: bool = False, cwd: Path | None = None) -> SecurityPolicy:
         with self._lock:
-            if reload or self._policy is None or (cwd is not None and cwd != self._policy_cwd):
-                self._policy_cwd = cwd or Path.cwd()
+            target_cwd = cwd or self._policy_cwd or Path.cwd()
+            current_mtime = self._policy_file_mtime_now(target_cwd)
+            mtime_changed = self._policy is not None and self._policy_file_mtime != current_mtime
+            cwd_changed = cwd is not None and cwd != self._policy_cwd
+            if reload or self._policy is None or cwd_changed or mtime_changed:
+                self._policy_cwd = target_cwd
                 self._policy = SecurityPolicy.from_mapping(_load_policy_mapping(self._policy_cwd))
+                self._policy_file_mtime = current_mtime
+                if mtime_changed:
+                    self._logger.info("SECURITY: policy reloaded after security_policy.json change.")
             if self._runtime_readonly is not None and self._policy is not None:
                 self._policy.readonly = self._runtime_readonly
             return self._policy

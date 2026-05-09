@@ -214,6 +214,8 @@ def _is_loopback(host: str) -> bool:
 
 def _bearer_auth_middleware(app: Any, token: str) -> Any:
     """ASGI middleware that requires Authorization: Bearer <token> on HTTP requests."""
+    import hmac
+
     expected = f"Bearer {token}".encode()
 
     async def wrapped(scope: dict, receive: Any, send: Any) -> None:
@@ -222,7 +224,10 @@ def _bearer_auth_middleware(app: Any, token: str) -> Any:
             return
         headers = dict(scope.get("headers") or [])
         provided = headers.get(b"authorization", b"")
-        if provided != expected:
+        # Constant-time comparison so attackers can't probe the token byte-by-byte
+        # via response-time differences. compare_digest needs equal-length inputs
+        # to be fully constant-time, but it tolerates mismatched lengths safely.
+        if not hmac.compare_digest(provided, expected):
             await send(
                 {
                     "type": "http.response.start",
@@ -301,6 +306,12 @@ async def _run_sse_with_auth(host: str, port: int) -> None:
     mcp.settings.port = port
 
     token = os.getenv("PBI_MCP_AUTH_TOKEN", "").strip()
+    if token and len(token) < 32:
+        raise SecurityPolicyError(
+            "PBI_MCP_AUTH_TOKEN is too short (minimum 32 characters). "
+            'Use a high-entropy token (e.g., `python -c "import secrets; print(secrets.token_urlsafe(32))"`).',
+            details={"token_length": len(token), "minimum": 32},
+        )
     if not _is_loopback(host) and not token:
         if os.environ.get("PBI_MCP_ALLOW_UNAUTHENTICATED_SSE", "0") != "1":
             raise SecurityPolicyError(
@@ -387,9 +398,19 @@ def main() -> None:
 
     # Pre-flight: detect registration drift between tools/__all__ and @mcp.tool()
     # wrappers. Opt-in via env var so production servers skip the introspection
-    # cost at every startup. Strict mode (CI) fails on missing wrappers.
+    # cost at every startup. Strict mode (CI) fails on missing wrappers, but a
+    # bare RuntimeError out of the audit would crash the stdio server before
+    # it could emit a JSON-RPC error frame — wrap and let the operator see the
+    # diagnostic on stderr instead.
     if os.environ.get("PBI_MCP_AUDIT", "0") == "1" or os.environ.get("PBI_MCP_STRICT_REGISTRY", "0") == "1":
-        _audit_tool_registry(strict=os.environ.get("PBI_MCP_STRICT_REGISTRY", "0") == "1")
+        strict = os.environ.get("PBI_MCP_STRICT_REGISTRY", "0") == "1"
+        try:
+            _audit_tool_registry(strict=strict)
+        except RuntimeError as exc:
+            if strict:
+                # In CI we want the failure to surface as a non-zero exit.
+                raise
+            logger.warning("SECURITY: tool registry audit failed: %s", exc)
 
     _apply_profile(args.profile)
 

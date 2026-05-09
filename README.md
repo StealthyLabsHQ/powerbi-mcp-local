@@ -12,6 +12,8 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tools 147](https://img.shields.io/badge/tools-147-orange)](#tool-catalog)
+<!-- Update the badge above by running `python scripts/tool_count.py` from the repo root. -->
+
 [![CI](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml/badge.svg)](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml)
 
 </div>

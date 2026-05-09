@@ -3,6 +3,100 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.12.3] — 2026-05-09 — Hardening sweep
+
+A focused robustness pass across security, stdio I/O, and observability.
+No tool surface changes, no breaking changes; defaults move toward
+fail-safe.
+
+### Security
+
+1. **Bearer auth now uses `hmac.compare_digest`** (`src/server.py`).
+   The previous byte-equality check leaked timing information; an
+   attacker on the SSE endpoint could probe the token byte-by-byte
+   through response-time deltas. The new path is constant-time.
+2. **`PBI_MCP_AUTH_TOKEN` enforces a 32-character minimum** when set,
+   raising `SecurityPolicyError` at startup. The README's recommended
+   `secrets.token_urlsafe(32)` already meets this; short or
+   placeholder tokens now fail loud instead of silently accepting
+   weak credentials.
+3. **Power Query M blocklist widened** (`src/m_expression_security.py`).
+   Added Snowflake, BigQuery, Redshift, Azure SQL/Synapse, AWS S3,
+   ADLS Gen2, SaaS connectors (Salesforce, Dynamics, Google Sheets,
+   Exchange), AnalysisServices.Database, Cube.\*, Excel.CurrentWorkbook,
+   and `WebAction.*`. The previous list missed every modern cloud
+   connector; an LLM-authored M expression could exfiltrate to a
+   Snowflake account or a public S3 bucket without tripping the gate.
+4. **`pbi-tools` subprocess gets a 300 s timeout**
+   (`src/tools/visuals/_io.py`). A hostile or extremely large PBIX could
+   stall the server indefinitely under the previous unbounded
+   `subprocess.run`. Tunable via `PBI_MCP_PBI_TOOLS_TIMEOUT`.
+5. **`pbi_persist_now` switched from `SendInput` to `PostMessage`**
+   (`src/tools/ui_automation.py`). `SendInput` injects into the global
+   keyboard queue, which routes to whichever window owns the
+   foreground when the events are processed — a focus race could
+   deliver the Ctrl+S to an unrelated app. `PostMessage` posts
+   directly to the resolved focused descendant of the PBI Desktop
+   HWND. Operators can fall back to the legacy path with
+   `PBI_MCP_PERSIST_USE_SENDINPUT=1` on builds where WPF input
+   processing ignores posted messages.
+6. **`SecurityPolicy.rate_limit_calls_per_minute` defaults to 600**
+   (`src/security.py`). Previously `None` (unlimited), so a runaway
+   LLM agent could melt local Power BI Desktop with a measure-creation
+   loop. Set to `0`/`null` in `security_policy.json` to opt out.
+7. **`SecurityPolicy.max_response_bytes` defaults to 16 MiB**
+   (`src/security.py`, `src/mcp_core.py`). `pbi_export_model` against
+   a multi-GB model — or a DAX query that side-loaded metadata —
+   could OOM the LLM client process. Oversized responses now return
+   a structured `response_too_large` error.
+
+### Bugs / robustness
+
+8. **Native PBIX zip extraction surfaces zip-slip skips**
+   (`src/tools/visuals/_io.py`). Traversal members were silently
+   ignored; the call now logs an aggregate warning and reports
+   `skipped_traversal_count` in the response so operators can
+   investigate hostile PBIX inputs.
+9. **Antigravity adapter keeps a stderr handler at WARNING**
+   (`src/server_antigravity.py`). The previous `_silence_loggers()`
+   set `ERROR` and would have hidden capability mismatches and bind
+   failures from the Antigravity diagnostics view.
+10. **PowerShell helpers force UTF-8 I/O**
+    (`src/tools/quality.py`, `src/tools/visuals/_io.py`). PS 5.1
+    defaults `Out-File` to UTF-16 LE and stdout to the host codepage,
+    which silently mangles non-ASCII paths round-tripped through
+    `json.dumps` + `ConvertFrom-Json`. A small prelude pins the
+    encoding for every script we run.
+11. **Tool registry audit no longer crashes stdio in non-strict mode**
+    (`src/server.py`). A bare `RuntimeError` from
+    `_audit_tool_registry` would terminate the server before it could
+    emit a JSON-RPC error frame; CI strict mode still raises so the
+    failure surfaces as a non-zero exit.
+12. **`security_policy.json` hot-reloads on mtime change**
+    (`src/security.py`). Operators can edit policy without restarting
+    the server; the next `policy()` call re-reads the file and logs a
+    `policy reloaded` line.
+
+### Tests / DX
+
+13. **`tests/test_server_antigravity.py`** — new coverage for the
+    Antigravity adapter: argparse defaults + `--profile` validation,
+    `_silence_loggers` keeps a single WARNING-level stderr handler,
+    `_harden_stdio` sets the expected env vars and tolerates
+    non-reconfigurable streams.
+14. **`scripts/tool_count.py`** — programmatic tool count for the
+    README badge. Importing `server` triggers every wrapper-side
+    registration, then the script reads `mcp._tool_manager._tools`.
+    No more drift between the badge and reality.
+15. **CI coverage floor bumped 54 → 55**
+    (`.github/workflows/ci.yml`). Conservative bump to lock in the
+    Antigravity-adapter coverage; further rises tracked separately.
+
+### Test coverage
+
+`pytest -q` → 206 passed, 2 skipped (was 198 in v0.12.2; +8 from the
+new Antigravity adapter test file).
+
 ## [0.12.2] — 2026-05-09 — Antigravity adapter polish
 
 ### Changed

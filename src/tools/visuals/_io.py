@@ -58,6 +58,9 @@ def _find_pbi_tools() -> str:
     )
 
 
+_PBI_TOOLS_TIMEOUT_SECONDS = int(os.environ.get("PBI_MCP_PBI_TOOLS_TIMEOUT", "300"))
+
+
 def _run_pbi_tools(arguments: list[str]) -> dict[str, Any]:
     executable = _find_pbi_tools()
     try:
@@ -67,7 +70,13 @@ def _run_pbi_tools(arguments: list[str]) -> dict[str, Any]:
             text=True,
             check=False,
             shell=False,
+            timeout=_PBI_TOOLS_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise VisualToolError(
+            f"pbi-tools command timed out after {_PBI_TOOLS_TIMEOUT_SECONDS}s.",
+            details={"command": [executable, *arguments], "timeout_seconds": _PBI_TOOLS_TIMEOUT_SECONDS},
+        ) from exc
     except FileNotFoundError as exc:
         raise PBIToolsNotInstalledError("pbi-tools executable could not be launched.") from exc
     if completed.returncode != 0:
@@ -125,6 +134,7 @@ def _extract_pbix_zip_natively(pbix: Path, target: Path) -> dict[str, Any]:
             return None
         return dest
 
+    skipped_traversal = 0
     with zipfile.ZipFile(pbix, "r") as zf:
         names = set(zf.namelist())
         if "Report/Layout" in names:
@@ -135,13 +145,25 @@ def _extract_pbix_zip_natively(pbix: Path, target: Path) -> dict[str, Any]:
                 continue
             dest = _safe_dest(name)
             if dest is None:
-                # Path-traversal attempt (zip-slip) — skip silently and
-                # do not surface the malicious member name in extracted[].
+                # Path-traversal attempt (zip-slip) — skip without surfacing
+                # the malicious member name in extracted[]. Count for one
+                # aggregate warning so the operator can investigate.
+                skipped_traversal += 1
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(zf.read(name))
             extracted.append(name)
-    return {"method": "zip_native", "extracted_entries": extracted}
+    if skipped_traversal:
+        logger.warning(
+            "PBIX %s contained %d zip-slip member(s); they were skipped during native extraction.",
+            pbix.name,
+            skipped_traversal,
+        )
+    return {
+        "method": "zip_native",
+        "extracted_entries": extracted,
+        "skipped_traversal_count": skipped_traversal,
+    }
 
 
 def pbi_extract_report_tool(pbix_path: str, extract_folder: str | None = None) -> dict[str, Any]:
@@ -185,9 +207,30 @@ def pbi_extract_report_tool(pbix_path: str, extract_folder: str | None = None) -
     return _run(_impl)
 
 
+# Force UTF-8 I/O on Windows PowerShell 5.1 (default is UTF-16 LE for Out-File
+# and the locale codepage for stdout). Without this, paths or output text
+# containing non-ASCII characters can be silently mangled when round-tripped
+# through json.dumps + ConvertFrom-Json on the Python side.
+_PS_UTF8_PRELUDE = (
+    "$OutputEncoding = [System.Text.UTF8Encoding]::new($false);"
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false);"
+    "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false);"
+    "$PSDefaultParameterValues['Out-File:Encoding']='utf8';"
+    "$PSDefaultParameterValues['*:Encoding']='utf8';\n"
+)
+
+
 def _run_powershell(script: str, *, timeout: float = 20.0) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            _PS_UTF8_PRELUDE + script,
+        ],
         capture_output=True,
         text=True,
         check=False,
