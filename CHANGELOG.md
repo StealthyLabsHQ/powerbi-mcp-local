@@ -3,6 +3,73 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.12.6] — 2026-05-09 — Hot-reload bypass fix + chart-family pack
+
+Closes the high-severity Codex finding on the v0.12.3 hot-reload feature
+and fills the biggest gaps versus Power BI's native visual palette.
+
+### Security
+
+1. **Hot-reload policy bypass** (Codex finding `f7b1de6e`,
+   `src/security.py`). With hot-reload enabled (v0.12.3), a write-capable
+   tool (`pbi_export_model` is the obvious one) targeting the active
+   `security_policy.json` could overwrite it with valid JSON whose
+   missing keys default to `allow_categories = read/write/destructive`
+   and `enabled_tools = None`. The next `policy()` call then dropped the
+   prior allowlist / `disabled_tools`, elevating any previously-denied
+   tool. The path validator now resolves the active policy file (env
+   `PBI_MCP_SECURITY_POLICY`, the manager's `_policy_cwd`, and the
+   process cwd's `security_policy.json`) and rejects any
+   `WRITE_TOOLS`/`DESTRUCTIVE_TOOLS` call whose path resolves to it.
+   `tests/test_security.py` adds two regressions:
+   `test_export_model_cannot_overwrite_active_policy_file` and
+   `test_destructive_tool_cannot_overwrite_policy_file`.
+
+### Visual surface — 13 new chart types
+
+Brings the native chart coverage up to PBI Desktop parity.
+`src/tools/visuals/_charts.py` + `src/tools/visuals/_base.py`:
+
+2. **Pie chart** — `pbi_add_pie_chart`. Sibling of donut.
+3. **Stacked + clustered column / bar variants** —
+   `pbi_add_stacked_bar_chart`, `pbi_add_stacked_column_chart`,
+   `pbi_add_clustered_column_chart`,
+   `pbi_add_hundred_percent_stacked_bar_chart`,
+   `pbi_add_hundred_percent_stacked_column_chart`. Existing
+   `pbi_add_bar_chart` stays clustered-bar; the new tools cover the
+   remaining quadrants of the bar/column matrix.
+4. **Area family** — `pbi_add_area_chart`,
+   `pbi_add_stacked_area_chart`,
+   `pbi_add_hundred_percent_stacked_area_chart`. Same projection shape
+   as `pbi_add_line_chart` (multiple Y measures + optional Series).
+5. **Ribbon chart** — `pbi_add_ribbon_chart`. Series ranking over time.
+6. **Treemap** — `pbi_add_treemap`. Hierarchical alternative to donut /
+   pie for many categories.
+7. **Funnel** — `pbi_add_funnel`. Pipeline / conversion. Uses the
+   `Group` / `Values` projection roles instead of `Category` / `Y`.
+8. **Multi-row card** — `pbi_add_multi_row_card`. Vertical stack of KPI
+   rows; with or without a category column.
+
+A small `_add_categorical_chart` / `_add_axis_chart` helper backs the
+new bar+column / area variants so the wrappers stay one-call thin and
+share validation + measure-home resolution with the existing tools.
+`VISUAL_FIELD_ROLES` and `VISUAL_ROLE_KINDS` updated for every new
+`visualType` so `pbi_convert_visual_type` and the role-binding
+validator know about the additions.
+
+### Tests
+
+9. **`tests/test_v0_12_6_charts.py`** — 5 new tests: every new
+   categorical variant emits its expected `visualType`, the area family
+   accepts multiple Y measures, funnel uses `Group`/`Values`,
+   multi-row card works with and without a category and rejects empty
+   measure lists.
+
+### Tool count
+
+Registered `@mcp.tool()` handlers: 149 → 162 (+13). README badge
+updated.
+
 ## [0.12.5] — 2026-05-09 — Visual ops bugfixes + per-series colour
 
 Field-tested against an LLM client driving layout patches: 4 bugs closed,

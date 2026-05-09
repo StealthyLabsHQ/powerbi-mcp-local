@@ -165,8 +165,21 @@ WRITE_TOOLS = {
     "pbi_add_card",
     "pbi_add_labelled_card",
     "pbi_add_bar_chart",
+    "pbi_add_clustered_column_chart",
+    "pbi_add_stacked_bar_chart",
+    "pbi_add_stacked_column_chart",
+    "pbi_add_hundred_percent_stacked_bar_chart",
+    "pbi_add_hundred_percent_stacked_column_chart",
+    "pbi_add_ribbon_chart",
     "pbi_add_line_chart",
+    "pbi_add_area_chart",
+    "pbi_add_stacked_area_chart",
+    "pbi_add_hundred_percent_stacked_area_chart",
     "pbi_add_donut_chart",
+    "pbi_add_pie_chart",
+    "pbi_add_treemap",
+    "pbi_add_funnel",
+    "pbi_add_multi_row_card",
     "pbi_add_table_visual",
     "pbi_add_waterfall",
     "pbi_add_slicer",
@@ -363,6 +376,42 @@ class SecurityPolicy:
             max_response_bytes=int(data.get("max_response_bytes", 16 * 1024 * 1024)),
             allowed_base_dirs=[str(item) for item in data.get("allowed_base_dirs", [])],
         )
+
+
+def _active_policy_paths() -> list[Path]:
+    """Return every filesystem path the SecurityManager could load policy
+    from on the next ``policy()`` call.
+
+    Used to block write tools from overwriting the live policy file. The
+    list covers both the env-pointed location (``PBI_MCP_SECURITY_POLICY``
+    when it points to a path, not an inline JSON object) and the
+    cwd-relative ``security_policy.json`` for the manager's current
+    working directory plus the process cwd.
+    """
+    paths: list[Path] = []
+    env_value = os.getenv("PBI_MCP_SECURITY_POLICY", "").strip()
+    if env_value and not env_value.startswith("{"):
+        try:
+            paths.append(Path(env_value).expanduser().resolve())
+        except OSError:
+            pass
+    candidates = [SECURITY._policy_cwd, Path.cwd()]
+    for candidate_cwd in candidates:
+        if candidate_cwd is None:
+            continue
+        try:
+            paths.append((candidate_cwd / "security_policy.json").resolve())
+        except OSError:
+            continue
+    # Dedupe while preserving order.
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
 
 
 def _load_policy_mapping(cwd: Path | None = None) -> dict[str, Any]:
@@ -580,7 +629,21 @@ def _validate_string(tool_name: str, key: str, value: str, policy: SecurityPolic
             allowed_extensions = PBIX_FILE_EXTENSIONS
         elif lowered == "theme_json_path":
             allowed_extensions = JSON_EXPORT_EXTENSIONS
-        resolve_local_path(value, must_exist=False, allowed_extensions=allowed_extensions, policy=policy)
+        resolved = resolve_local_path(value, must_exist=False, allowed_extensions=allowed_extensions, policy=policy)
+        # Block writing to the active security_policy.json. Hot-reload would
+        # otherwise let any write-capable tool (e.g. ``pbi_export_model``)
+        # overwrite the policy with a permissive JSON body — its missing
+        # keys default to allow read/write/destructive — and the next
+        # ``policy()`` call would silently elevate every tool. Cover both
+        # ``WRITE_TOOLS`` and ``DESTRUCTIVE_TOOLS`` so the gate cannot be
+        # squeezed through a delete-or-rename tool either.
+        if tool_name in WRITE_TOOLS or tool_name in DESTRUCTIVE_TOOLS:
+            for candidate in _active_policy_paths():
+                if candidate is not None and resolved == candidate:
+                    raise SecurityPolicyError(
+                        "Writing to the active security policy file is blocked.",
+                        details={"path": str(resolved), "tool": tool_name},
+                    )
     if lowered in MODEL_NAME_PARAM_KEYS:
         validate_model_object_name(value, max_length=policy.max_name_length)
     if lowered in MEASURE_NAME_PARAM_KEYS and tool_name in {"pbi_create_measure"}:

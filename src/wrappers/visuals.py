@@ -3,21 +3,34 @@
 from __future__ import annotations
 
 from tools import (
+    pbi_add_area_chart_tool,
     pbi_add_bar_chart_tool,
     pbi_add_card_tool,
+    pbi_add_clustered_column_chart_tool,
     pbi_add_combo_chart_tool,
     pbi_add_conditional_formatting_tool,
     pbi_add_donut_chart_tool,
+    pbi_add_funnel_tool,
     pbi_add_gauge_tool,
+    pbi_add_hundred_percent_stacked_area_chart_tool,
+    pbi_add_hundred_percent_stacked_bar_chart_tool,
+    pbi_add_hundred_percent_stacked_column_chart_tool,
     pbi_add_kpi_tool,
     pbi_add_labelled_card_tool,
     pbi_add_line_chart_tool,
     pbi_add_map_tool,
     pbi_add_matrix_tool,
+    pbi_add_multi_row_card_tool,
+    pbi_add_pie_chart_tool,
+    pbi_add_ribbon_chart_tool,
     pbi_add_scatter_chart_tool,
     pbi_add_slicer_tool,
+    pbi_add_stacked_area_chart_tool,
+    pbi_add_stacked_bar_chart_tool,
+    pbi_add_stacked_column_chart_tool,
     pbi_add_table_visual_tool,
     pbi_add_text_box_tool,
+    pbi_add_treemap_tool,
     pbi_add_visual_tool,
     pbi_add_waterfall_tool,
     pbi_apply_design_tool,
@@ -63,8 +76,21 @@ register_tool(pbi_delete_page_tool)
 register_tool(pbi_set_page_size_tool)
 register_tool(pbi_add_card_tool)
 register_tool(pbi_add_bar_chart_tool)
+register_tool(pbi_add_clustered_column_chart_tool)
+register_tool(pbi_add_stacked_bar_chart_tool)
+register_tool(pbi_add_stacked_column_chart_tool)
+register_tool(pbi_add_hundred_percent_stacked_bar_chart_tool)
+register_tool(pbi_add_hundred_percent_stacked_column_chart_tool)
+register_tool(pbi_add_ribbon_chart_tool)
 register_tool(pbi_add_line_chart_tool)
+register_tool(pbi_add_area_chart_tool)
+register_tool(pbi_add_stacked_area_chart_tool)
+register_tool(pbi_add_hundred_percent_stacked_area_chart_tool)
 register_tool(pbi_add_donut_chart_tool)
+register_tool(pbi_add_pie_chart_tool)
+register_tool(pbi_add_treemap_tool)
+register_tool(pbi_add_funnel_tool)
+register_tool(pbi_add_multi_row_card_tool)
 register_tool(pbi_add_table_visual_tool)
 register_tool(pbi_add_scatter_chart_tool)
 register_tool(pbi_add_combo_chart_tool)

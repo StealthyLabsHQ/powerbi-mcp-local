@@ -837,6 +837,46 @@ class V0124RegressionTests(unittest.TestCase):
         reloaded = SECURITY.policy()
         self.assertEqual(reloaded.max_name_length, 128)
 
+    def test_export_model_cannot_overwrite_active_policy_file(self) -> None:
+        """Hot-reload bypass regression (Codex finding f7b1de6e).
+
+        With hot-reload enabled, a write-capable tool that targets the
+        active ``security_policy.json`` could overwrite the policy with a
+        body whose missing keys default to allow-read/write/destructive,
+        elevating every previously-disabled tool on the next
+        ``policy()`` call. The path validator must reject any write to
+        that file regardless of the tool.
+        """
+        policy_path = self.root / "security_policy.json"
+        policy_path.write_text(
+            json.dumps({"enabled_tools": ["pbi_export_model"], "allow_categories": ["write"]}),
+            encoding="utf-8",
+        )
+        SECURITY.policy(reload=True, cwd=self.root)
+        with self.assertRaises(SecurityPolicyError):
+            SECURITY.validate_tool_call("pbi_export_model", {"path": str(policy_path)})
+        # Read-tool variants (the export tool with no path falls through
+        # to read; an explicit benign sibling .json must still be allowed).
+        SECURITY.validate_tool_call(
+            "pbi_export_model",
+            {"path": str(self.root / "model.json")},
+        )
+
+    def test_destructive_tool_cannot_overwrite_policy_file(self) -> None:
+        """Cover the gate on the destructive side too — even though no
+        destructive tool currently writes JSON, the registry can grow.
+        """
+        policy_path = self.root / "security_policy.json"
+        policy_path.write_text(json.dumps({"max_name_length": 64}), encoding="utf-8")
+        SECURITY.policy(reload=True, cwd=self.root)
+        # Pick any destructive tool name with a path param; the validator
+        # must short-circuit on the path check before tool dispatch.
+        with self.assertRaises(SecurityPolicyError):
+            SECURITY.validate_tool_call(
+                "pbi_export_correction_report",
+                {"path": str(policy_path)},
+            )
+
     def test_m_blocklist_rejects_modern_cloud_connectors(self) -> None:
         for source in (
             'Snowflake.Databases("acct", "wh")',
