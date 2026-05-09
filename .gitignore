@@ -20,3 +20,11 @@ REMNANT.md
 tests/demo_*.py
 tests/smoke_e2e.py
 tests/test_*_local.py
+
+# Sister projects that live alongside this repo on disk but ship from
+# their own repositories.
+remotion-powerbi-mcp/
+
+# Local-only design prompts and ad-hoc scratch notes. Audit outputs that
+# are worth keeping go under docs/security-audit/ instead.
+prompt_*.md

@@ -311,6 +311,13 @@ python server.py --transport stdio
 - SSE has no built-in authentication. Localhost binding is the primary protection.
 - Secrets already loaded into a live Power BI Desktop process are outside the scope of this server. The server can redact obvious secrets in exports, but cannot prove a model contains none.
 
+## Audit Archive
+
+Past third-party audit findings (Codex security scanner, v0.10.x → v0.12.x)
+along with their remediation status live in
+[`docs/security-audit/`](docs/security-audit/README.md). All 14 findings
+in that archive are fixed; the folder is kept for public traceability.
+
 ## Reporting Vulnerabilities
 
 If you find a security issue, report it privately to the maintainer.
