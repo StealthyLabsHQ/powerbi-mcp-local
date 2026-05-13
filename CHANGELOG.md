@@ -3,6 +3,117 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.13.0] — 2026-05-13 — Major: PBIX scaffold, theme validation, security + test sweep
+
+Major release. Four orthogonal blocks:
+
+### 1. PBIX scaffold (new feature)
+
+1. **`pbi_scaffold_pbix_tool`** (`src/tools/scaffold.py`). One-call
+   creation of a starter `.pbix` from a named template:
+   - `blank` — date table only.
+   - `finance` — date + GL fact + baseline KPI pack (Total, Total YTD,
+     Total MTD, Total YoY %).
+   - `sales` — date + sales fact + product dim + baseline KPIs, with
+     two relationships pre-wired.
+   - `analytics` — date + events fact + user dim + baseline KPIs.
+   Accepts optional `theme_json_path` (validated against the v0.13
+   theme schema below) and `extra_measures` for callers that want to
+   layer custom measures on top of the template's baseline.
+
+2. **`pbi_list_scaffold_templates_tool`**. Returns the catalogue with
+   per-template description + table/measure counts so an LLM can pick
+   the right scaffold without trial-and-error.
+
+3. The scaffold delegates the actual `.pbix` write to
+   `pbi_create_persistent_report_tool` (the v0.10 builder) so all the
+   existing validation + name guards still apply.
+
+### 2. Theme JSON validation (new feature + hardening)
+
+4. **`pbi_validate_theme_tool`** (`src/tools/visuals/_design.py`).
+   Dry-run validation of a user-supplied theme JSON without touching
+   the report. Returns issue list, size, and the boolean `valid`.
+
+5. **`pbi_export_active_theme_tool`**. Captures the currently active
+   theme from an extracted report folder into a `.json` file the
+   caller can edit and re-apply.
+
+6. **Schema validator** (`src/tools/visuals/_themes.py`). Enforced on
+   every apply / scaffold path:
+   - **Size cap**: 256 KB (`MAX_THEME_BYTES`).
+   - **Top-level key allowlist**: 20 keys from the report-theme schema
+     (`name`, `dataColors`, `foreground`, `background`, …,
+     `visualStyles`). Unknown top-level keys are rejected; deep
+     `visualStyles.*` keys stay open since visuals carry extension
+     properties there.
+   - **Colour shape**: `dataColors[]` and `#`-prefixed string values
+     under colour-named keys must match `#RRGGBB` or `#RRGGBBAA`.
+   - **URL-bearing values rejected** (CWE-20): any string value that
+     starts with `javascript:`, `data:`, `vbscript:`, `file://`, or
+     `https?://`. Themes describe colours and typography, not
+     behaviour — a URL in a value is treated as smuggling.
+   - **`pbi_apply_theme_tool`** now refuses to write a theme that
+     fails this schema. Previously it accepted any well-formed JSON.
+
+### 3. Security hardening sweep
+
+7. **DAX guard widened** (`src/tools/query.py`). The DMV/system
+   blocklist for `pbi_execute_dax` now also rejects:
+   - `INFO.<NAME>(…)` — DAX INFO functions surface server metadata
+     (tables, measures, relationships) the same way DMVs do.
+   - `EVALUATEANDLOG(…)` — writes side-channel debug output to the
+     server log directory.
+   Both join the existing `$SYSTEM.*` / `DISCOVER_*` / `DBSCHEMA_*` /
+   `MDSCHEMA_*` set. `PBI_MCP_ALLOW_DMV=1` still acts as the explicit
+   opt-out, matching the legacy DMV behaviour.
+
+8. **Theme path is policy-aware**. The new theme tools resolve every
+   incoming path through `resolve_local_path()` with extension
+   allowlist + symlink rejection, matching the rest of the file
+   surface. There's no separate "themes are special" path now.
+
+9. **Tool catalogue updated** (`src/security.py`). New READ entries
+   (`pbi_validate_theme`, `pbi_list_scaffold_templates`) and new
+   WRITE entries (`pbi_scaffold_pbix`, `pbi_export_active_theme`) so
+   `--profile readonly` and the `disabled_tools` allowlist see the
+   v0.13 surface correctly.
+
+### 4. Test sweep (+71 tests)
+
+`pytest -q` → **308 passed**, 2 skipped (was 237 in v0.12.8).
+
+New test files:
+
+- `tests/test_v0_13_theme_validator.py` — 25 tests pinning the schema
+  validator (top-level allowlist, colour format, URL guard, size cap,
+  end-to-end apply / export integration).
+- `tests/test_v0_13_dax_guards.py` — 11 tests pinning the DMV /
+  INFO.* / EVALUATEANDLOG blocklist + the `PBI_MCP_ALLOW_DMV` opt-out.
+- `tests/test_v0_13_scaffold.py` — 14 tests pinning template catalogue
+  (`blank` / `finance` / `sales` / `analytics`), template execution
+  through a fake `PBIXBuilder`, extra-measure injection, and theme
+  rejection on the scaffold path.
+- `tests/test_v0_13_visual_roles_matrix.py` — 4 sub-tested matrix
+  tests pinning every entry of `VISUAL_FIELD_ROLES` /
+  `VISUAL_ROLE_KINDS` and the dispatcher coverage so a future
+  refactor can't silently drop a chart family.
+- `tests/test_v0_13_dax_generators.py` — 17 tests pinning the
+  time-intelligence template catalogue (YTD/MTD/QTD/SPY/YOY/YOY%/MA3)
+  and the pattern resolver (dependency expansion, dedup, case-fold,
+  rejection of unknown patterns).
+
+### Tool surface
+
+Public surface grows by 4 MCP tools:
+
+- `pbi_scaffold_pbix` (write)
+- `pbi_list_scaffold_templates` (read)
+- `pbi_validate_theme` (read)
+- `pbi_export_active_theme` (write)
+
+No breaking changes to existing tool signatures.
+
 ## [0.12.8] — 2026-05-09 — Treemap role-name fix
 
 Field report on top of v0.12.7: treemaps still rendered empty in PBI

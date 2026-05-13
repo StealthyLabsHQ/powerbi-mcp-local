@@ -44,6 +44,7 @@ from tools import (
     pbi_describe_page_tool,
     pbi_diagnose_render_risks_tool,
     pbi_disable_card_autoscale_tool,
+    pbi_export_active_theme_tool,
     pbi_extract_report_tool,
     pbi_get_page_tool,
     pbi_list_pages_tool,
@@ -56,6 +57,7 @@ from tools import (
     pbi_set_visual_format_property_tool,
     pbi_update_visual_bindings_tool,
     pbi_validate_report_fields_tool,
+    pbi_validate_theme_tool,
 )
 
 from ._helpers import register_tool
@@ -110,6 +112,8 @@ register_tool(pbi_set_series_color_tool)
 register_tool(pbi_add_conditional_formatting_tool)
 register_tool(pbi_disable_card_autoscale_tool)
 register_tool(pbi_apply_theme_tool)
+register_tool(pbi_validate_theme_tool)
+register_tool(pbi_export_active_theme_tool)
 register_tool(pbi_apply_design_tool)
 register_tool(pbi_add_visual_tool)
 register_tool(pbi_build_dashboard_tool)

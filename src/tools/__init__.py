@@ -65,6 +65,10 @@ from .model import (
     pbi_validate_model_tool,
 )
 from .persistent_report import pbi_create_persistent_report_tool
+from .scaffold import (
+    pbi_list_scaffold_templates_tool,
+    pbi_scaffold_pbix_tool,
+)
 from .power_query import (
     pbi_bulk_import_excel_tool,
     pbi_create_csv_import_query_tool,
@@ -173,6 +177,7 @@ from .visuals import (
     pbi_describe_page_tool,
     pbi_diagnose_render_risks_tool,
     pbi_disable_card_autoscale_tool,
+    pbi_export_active_theme_tool,
     pbi_extract_report_tool,
     pbi_get_page_tool,
     pbi_list_pages_tool,
@@ -185,6 +190,7 @@ from .visuals import (
     pbi_set_visual_format_property_tool,
     pbi_update_visual_bindings_tool,
     pbi_validate_report_fields_tool,
+    pbi_validate_theme_tool,
 )
 from .workflows import (
     pbi_excel_import_workflow_tool,
@@ -299,6 +305,8 @@ __all__ = [
     "pbi_read_tmdl_file_tool",
     "pbi_write_tmdl_file_tool",
     "pbi_create_persistent_report_tool",
+    "pbi_scaffold_pbix_tool",
+    "pbi_list_scaffold_templates_tool",
     "pbi_persist_now_tool",
     "pbi_extract_report_tool",
     "pbi_compile_report_tool",
@@ -351,6 +359,8 @@ __all__ = [
     "pbi_remove_visual_tool",
     "pbi_move_visual_tool",
     "pbi_apply_theme_tool",
+    "pbi_validate_theme_tool",
+    "pbi_export_active_theme_tool",
     "pbi_build_dashboard_tool",
     "pbi_model_audit_workflow_tool",
     "pbi_excel_import_workflow_tool",

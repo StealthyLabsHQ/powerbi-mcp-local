@@ -149,6 +149,8 @@ from ._design import (
     pbi_apply_design_tool,
     pbi_apply_theme_tool,
     pbi_build_dashboard_tool,
+    pbi_export_active_theme_tool,
+    pbi_validate_theme_tool,
 )
 from ._dispatcher import (
     _VISUAL_TYPE_DISPATCH,
@@ -250,6 +252,8 @@ __all__ = [
     "pbi_apply_design_tool",
     "pbi_apply_theme_tool",
     "pbi_build_dashboard_tool",
+    "pbi_export_active_theme_tool",
+    "pbi_validate_theme_tool",
     "pbi_compile_report_tool",
     "pbi_create_page_tool",
     "pbi_delete_page_tool",

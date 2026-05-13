@@ -73,6 +73,8 @@ READ_TOOLS = {
     "pbi_describe_page",
     "pbi_system_health",
     "pbi_operation_history",
+    "pbi_validate_theme",
+    "pbi_list_scaffold_templates",
 }
 
 
@@ -198,6 +200,8 @@ WRITE_TOOLS = {
     "pbi_disable_card_autoscale",
     "pbi_apply_design",
     "pbi_apply_theme",
+    "pbi_export_active_theme",
+    "pbi_scaffold_pbix",
     "pbi_build_dashboard",
     "pbi_excel_import_workflow",
     "pbi_measure_workflow",

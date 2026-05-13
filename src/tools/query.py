@@ -27,12 +27,16 @@ from security import (
 
 # ── DAX safety ───────────────────────────────────────────────────────
 
-# DMV queries that expose server internals — blocked by default
+# DMV / debug queries that expose server internals — blocked by default.
+# Extended in v0.13: ``INFO.*`` (DAX INFO functions surface server metadata
+# similar to DMVs) and ``EVALUATEANDLOG`` (writes side-channel debug output).
 _DMV_BLOCKED_PATTERNS = [
     re.compile(r"\$SYSTEM\.", re.IGNORECASE),
     re.compile(r"DISCOVER_", re.IGNORECASE),
     re.compile(r"DBSCHEMA_", re.IGNORECASE),
     re.compile(r"MDSCHEMA_", re.IGNORECASE),
+    re.compile(r"\bINFO\.[A-Z_]+\s*\(", re.IGNORECASE),
+    re.compile(r"\bEVALUATEANDLOG\s*\(", re.IGNORECASE),
 ]
 
 

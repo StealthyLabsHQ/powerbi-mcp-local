@@ -32,8 +32,14 @@ from ._layout import (
     _parse_embedded_json,
     _save_layout,
 )
-from ._paths import _resolve_theme_path
+from ._paths import _resolve_extract_folder, _resolve_theme_path
 from ._refs import _projection
+from ._themes import (
+    MAX_THEME_BYTES,
+    ThemeValidationError,
+    assert_theme_within_size_limit,
+    validate_theme_payload,
+)
 
 DESIGN_PRESETS: dict[str, dict[str, Any]] = {
     "powerbi-navy-pro": {
@@ -203,12 +209,21 @@ def pbi_apply_theme_tool(extract_folder: str, theme_json_path: str) -> dict[str,
     def _impl() -> dict[str, Any]:
         folder, layout = _load_layout(extract_folder)
         theme_path = _resolve_theme_path(theme_json_path)
+        raw = theme_path.read_bytes()
+        assert_theme_within_size_limit(len(raw))
         try:
-            theme_payload = json.loads(theme_path.read_text(encoding="utf-8"))
+            theme_payload = json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError as exc:
             raise PowerBIValidationError(
                 "Theme JSON is invalid.", details={"path": str(theme_path), "line": exc.lineno}
             ) from exc
+        issues = validate_theme_payload(theme_payload)
+        errors = [issue for issue in issues if issue.get("level") == "error"]
+        if errors:
+            raise ThemeValidationError(
+                "Theme JSON failed schema validation.",
+                details={"path": str(theme_path), "errors": errors[:20]},
+            )
         target = folder / THEMES_RELATIVE_DIR / theme_path.name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(theme_payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -219,7 +234,96 @@ def pbi_apply_theme_tool(extract_folder: str, theme_json_path: str) -> dict[str,
             themes.append(theme_entry)
         layout["activeTheme"] = theme_entry
         _save_layout(folder, layout)
-        return ok("Theme applied successfully.", extract_folder=str(folder), theme=theme_entry)
+        return ok(
+            "Theme applied successfully.",
+            extract_folder=str(folder),
+            theme=theme_entry,
+            warnings=[issue for issue in issues if issue.get("level") != "error"],
+        )
+
+    return _run(_impl)
+
+
+def pbi_validate_theme_tool(theme_json_path: str) -> dict[str, Any]:
+    """Dry-run validation of a user-supplied theme JSON file.
+
+    Returns the parsed payload size, any schema issues (errors +
+    warnings), and the list of allowed top-level keys for reference.
+    Performs no disk write and does not require an extract folder.
+    """
+
+    def _impl() -> dict[str, Any]:
+        theme_path = _resolve_theme_path(theme_json_path)
+        raw = theme_path.read_bytes()
+        size_bytes = len(raw)
+        try:
+            assert_theme_within_size_limit(size_bytes)
+            theme_payload = json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise PowerBIValidationError(
+                "Theme JSON is invalid.", details={"path": str(theme_path), "line": exc.lineno}
+            ) from exc
+        issues = validate_theme_payload(theme_payload)
+        errors = [issue for issue in issues if issue.get("level") == "error"]
+        return ok(
+            "Theme validation complete.",
+            path=str(theme_path),
+            size_bytes=size_bytes,
+            size_limit_bytes=MAX_THEME_BYTES,
+            valid=not errors,
+            error_count=len(errors),
+            warning_count=len(issues) - len(errors),
+            issues=issues,
+        )
+
+    return _run(_impl)
+
+
+def pbi_export_active_theme_tool(extract_folder: str, output_path: str) -> dict[str, Any]:
+    """Export the currently active theme JSON from an extracted report.
+
+    Writes a copy of the theme referenced by ``activeTheme`` (or the
+    last entry in ``themeCollection``) to ``output_path``. Useful for
+    capturing the baseline theme before customising it.
+    """
+
+    def _impl() -> dict[str, Any]:
+        from security import resolve_local_path
+
+        folder, layout = _load_layout(extract_folder)
+        active = layout.get("activeTheme") or {}
+        if not isinstance(active, dict):
+            active = {}
+        relative_path = active.get("path")
+        if not relative_path:
+            themes = layout.get("themeCollection") or []
+            if isinstance(themes, list):
+                for entry in reversed(themes):
+                    if isinstance(entry, dict) and entry.get("path"):
+                        relative_path = entry["path"]
+                        break
+        if not relative_path:
+            raise PowerBIValidationError(
+                "No active theme is referenced by the report layout.",
+                details={"extract_folder": str(folder)},
+            )
+        theme_file = folder / str(relative_path).replace("/", "\\")
+        if not theme_file.exists():
+            raise PowerBIValidationError(
+                "Active theme file is missing from the extract folder.",
+                details={"theme_path": str(theme_file)},
+            )
+        destination = resolve_local_path(output_path, must_exist=False, allowed_extensions={".json"})
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        raw = theme_file.read_bytes()
+        destination.write_bytes(raw)
+        return ok(
+            "Active theme exported.",
+            source=str(theme_file),
+            output_path=str(destination),
+            size_bytes=len(raw),
+            theme_name=str(active.get("name") or destination.stem),
+        )
 
     return _run(_impl)
 
