@@ -3,6 +3,74 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.13.2] — 2026-05-13 — pbix-mcp 0.9.2 upstream patches (5 bugs)
+
+In-tree patches against the vendored `pbix-mcp` 0.9.2 dependency
+(`.venv/Lib/site-packages/pbix_mcp/`). Documented in detail in
+[UPSTREAM_PATCHES.md](UPSTREAM_PATCHES.md). Re-applied on a fresh
+install by re-running `tests/test_v0_13_2_pbix_mcp_patches.py`.
+
+### Bug #1 — `Measure.FormatString` persistence
+
+Already fixed in the published 0.9.2 SQL INSERT. Pinned with a
+regression test that fails if the literal `NULL` ever returns.
+
+### Bug #2 — DBCC string-store corruption on `HASONEVALUE+VALUES`
+
+Power BI Desktop refused to open a PBIX with:
+
+> PFE_XM_DBCC_STRINGSTORE_CORRUPT,
+> PFE_XM_ERROR_WHILE_PARALLEL_LOADING_IMBI_TABLE_DATA
+
+Root cause is in the upstream Vertipaq dictionary encoder — not
+addressable from a Python-side patch alone. Mitigation shipped:
+
+- **New `pbix_mcp/dbcc_guard.py`** with a pattern catalogue
+  (`hasonevalue_values_string`, `selectedvalue_string_default`,
+  `treatas_string`) and a `DBCCRiskWarning` category.
+- `PBIXBuilder.save()` and `_pre_build_checks()` now scan the
+  measure list against the catalogue and surface findings as
+  structured warnings instead of silently producing a corrupt
+  `.pbix`.
+- Mitigation suggestions are embedded in the warning message:
+  source the affected table from CSV/DB, swap to an Int64 surrogate
+  key, or run `pbi-tools roundtrip` after build.
+
+### Bug #3 — Visual config pass-throughs
+
+Already shipped in 0.9.2: `series` projection, visual `objects` /
+`vcObjects`, page-level `config`. Pinned with three regression tests
+that assert the rendered Layout JSON carries each key.
+
+### Bug #4 — Clean `add_measure(format_string=…)` signature
+
+Added the keyword-only `format_string: str | None = None` parameter
+to `PBIXBuilder.add_measure` and propagated to `self._measures` so
+the upstream INSERT (Bug #1) consumes it directly.
+`src/tools/persistent_report.py` migrated to the clean signature
+with a `TypeError`-guarded legacy fallback (the post-hoc
+`_measures[-1]["format_string"] = …` mutation) for older
+deployments.
+
+### Bug #5 — Row-shape validation
+
+`PBIXBuilder.add_table` now raises a `TypeError` at the call site
+when a row is anything other than a dict, with the offending row
+index and an example payload. Previously failed deep in `save()`
+with a cryptic `'list' object has no attribute 'keys'`.
+
+### Tests
+
+`tests/test_v0_13_2_pbix_mcp_patches.py` — 15 regressions, one
+class per bug. Full suite: **341 passed**, 2 skipped (was 326 in
+v0.13.1; +15).
+
+### Documentation
+
+New top-level [UPSTREAM_PATCHES.md](UPSTREAM_PATCHES.md) describes
+every modification with the bug catalogue, file-by-file diff
+summary, and a checklist for re-applying after a fresh install.
+
 ## [0.13.1] — 2026-05-13 — DBCC string-store hardening (post-build dialog fix)
 
 Field report on v0.13.0: after a `pbi_scaffold_pbix` / `pbi_create_persistent_report` build, Power BI Desktop reopened the file with a modal dialog:

@@ -238,10 +238,22 @@ def pbi_create_persistent_report_tool(
             mode=table.get("mode", "import"),
         )
     for measure in normalized_measures:
-        builder.add_measure(measure["table"], measure["name"], measure["expression"])
-        builder_measures = getattr(builder, "_measures", None)
-        if isinstance(builder_measures, list) and builder_measures:
-            builder_measures[-1]["format_string"] = measure.get("format_string")
+        # Prefer the clean keyword-only ``format_string`` parameter when
+        # the installed pbix-mcp build supports it (≥0.9.3 / upstream
+        # patched 0.9.2). Fall back to the legacy post-hoc dict mutation
+        # so older deployments still pick up the format string.
+        try:
+            builder.add_measure(
+                measure["table"],
+                measure["name"],
+                measure["expression"],
+                format_string=measure.get("format_string"),
+            )
+        except TypeError:
+            builder.add_measure(measure["table"], measure["name"], measure["expression"])
+            builder_measures = getattr(builder, "_measures", None)
+            if isinstance(builder_measures, list) and builder_measures:
+                builder_measures[-1]["format_string"] = measure.get("format_string")
     for relationship in normalized_relationships:
         builder.add_relationship(
             relationship["from_table"],
