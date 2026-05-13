@@ -33,7 +33,6 @@ This module provides two diagnostics:
 from __future__ import annotations
 
 import zipfile
-from pathlib import Path
 from typing import Any
 
 from pbi_connection import PowerBIValidationError, ok
@@ -229,9 +228,7 @@ def pbi_check_scaffold_spec_dbcc_risks_tool(tables: list[dict[str, Any]]) -> dic
     warnings: list[dict[str, Any]] = []
     for index, table in enumerate(tables):
         if not isinstance(table, dict):
-            issues.append(
-                {"type": "invalid_table_entry", "index": index, "message": "Table spec must be an object."}
-            )
+            issues.append({"type": "invalid_table_entry", "index": index, "message": "Table spec must be an object."})
             continue
         for risk in _spec_table_risks(table, index):
             if risk.get("severity") == "warning":

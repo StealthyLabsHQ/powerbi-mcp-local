@@ -27,8 +27,8 @@ from tools import (
     pbi_check_scaffold_spec_dbcc_risks_tool,
     pbi_diagnose_pbix_dbcc_tool,
 )
-from tools.dbcc import MIN_DATA_MODEL_BYTES, DBCC_KNOWN_SIGNALS
-from tools.persistent_report import _prime_string_store, _SENTINEL_VALUES_BY_TYPE
+from tools.dbcc import DBCC_KNOWN_SIGNALS, MIN_DATA_MODEL_BYTES
+from tools.persistent_report import _SENTINEL_VALUES_BY_TYPE, _prime_string_store
 
 
 class SpecRiskCheckerTests(unittest.TestCase):
@@ -110,7 +110,7 @@ class PrimeStringStoreTests(unittest.TestCase):
         primed = _prime_string_store(table)
         self.assertTrue(primed.get("__primed_string_store__"))
         self.assertEqual(len(primed["rows"]), 1)
-        self.assertEqual(primed["rows"][0][0], 0)        # Int64 sentinel
+        self.assertEqual(primed["rows"][0][0], 0)  # Int64 sentinel
         self.assertEqual(primed["rows"][0][1], "_seed_")  # String sentinel
 
     def test_priming_no_op_when_rows_present(self) -> None:

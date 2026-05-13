@@ -13,7 +13,12 @@ import re
 
 # Substrings → accent key. The first matching rule wins.
 ACCENT_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"croissance|growth|marge brute|gross\s*margin|ebe|ebit|marge nette|net\s*margin|profit", re.IGNORECASE), "positive"),
+    (
+        re.compile(
+            r"croissance|growth|marge brute|gross\s*margin|ebe|ebit|marge nette|net\s*margin|profit", re.IGNORECASE
+        ),
+        "positive",
+    ),
     (re.compile(r"endettement|debt|leverage|bfr|wcr|charge|expense|frais|cost", re.IGNORECASE), "warning"),
     (re.compile(r"\bvar\b|variance|geo|atelier|workshop|store", re.IGNORECASE), "info"),
 ]

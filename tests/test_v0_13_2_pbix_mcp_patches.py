@@ -21,7 +21,19 @@ import warnings
 import zipfile
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+# ``pbix-mcp`` is an optional Windows-only dependency loaded lazily by
+# ``pbi_create_persistent_report``. The upstream-patch regression suite
+# exercises ``pbix_mcp.*`` directly — when the library is not installed
+# (Linux CI, minimal venvs) skip the whole module rather than reporting
+# every test as ModuleNotFoundError.
+pytest.importorskip(
+    "pbix_mcp",
+    reason="pbix-mcp not installed; upstream patch regressions skipped",
+)
 
 
 def _layout_dict(pbix_bytes_or_path) -> dict:
@@ -83,7 +95,7 @@ class Bug2_DBCCRiskScanner(unittest.TestCase):
                 "table": "F",
                 "name": "Apport CP",
                 "expression": (
-                    "VAR sel = IF(HASONEVALUE(T[Scenario]), VALUES(T[Scenario]), \"default\") "
+                    'VAR sel = IF(HASONEVALUE(T[Scenario]), VALUES(T[Scenario]), "default") '
                     "RETURN CALCULATE(SUM(T[Amount]), T[Source] = sel)"
                 ),
             }
@@ -105,7 +117,7 @@ class Bug2_DBCCRiskScanner(unittest.TestCase):
             {
                 "table": "F",
                 "name": "Safe",
-                "expression": "IF(HASONEVALUE(T[Scenario]), VALUES(T[Scenario]), \"x\")",
+                "expression": 'IF(HASONEVALUE(T[Scenario]), VALUES(T[Scenario]), "x")',
             }
         ]
         tables = [
@@ -141,7 +153,7 @@ class Bug2_DBCCRiskScanner(unittest.TestCase):
             {
                 "table": "F",
                 "name": "Risky",
-                "expression": "IF(HASONEVALUE(T[Scenario]), VALUES(T[Scenario]), \"x\")",
+                "expression": 'IF(HASONEVALUE(T[Scenario]), VALUES(T[Scenario]), "x")',
             }
         ]
         tables = [{"name": "T", "rows": [{"Scenario": "A"}], "columns": []}, {"name": "F", "rows": [], "columns": []}]
@@ -290,7 +302,7 @@ class Bug4_AddMeasureFormatStringSignature(unittest.TestCase):
 
         instance = _FakeBuilder()
         original_loader = persistent_report._load_pbix_builder
-        persistent_report._load_pbix_builder = lambda: (lambda: instance)
+        persistent_report._load_pbix_builder = lambda: lambda: instance
         try:
             from security import SECURITY, configure_allowed_dirs
 
@@ -391,7 +403,7 @@ class Bug2_DBCCWarningOnSave(unittest.TestCase):
             "T",
             "Apport CP",
             (
-                "VAR sel = IF(HASONEVALUE(T[Scenario]), VALUES(T[Scenario]), \"default\") "
+                'VAR sel = IF(HASONEVALUE(T[Scenario]), VALUES(T[Scenario]), "default") '
                 "RETURN CALCULATE(SUM(T[Amount]), T[Source] = sel)"
             ),
         )

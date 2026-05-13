@@ -128,9 +128,7 @@ def patch_layout_for_wallpaper(
     list of page display names that were touched.
     """
     if fit not in WALLPAPER_SCALING_ENUM:
-        raise ValueError(
-            f"fit must be one of {WALLPAPER_SCALING_ENUM}, got '{fit}'"
-        )
+        raise ValueError(f"fit must be one of {WALLPAPER_SCALING_ENUM}, got '{fit}'")
 
     touched: list[str] = []
     for section in layout.get("sections", []) or []:
@@ -153,9 +151,7 @@ def patch_layout_for_wallpaper(
                     "properties": {
                         "show": {"expr": {"Literal": {"Value": "true"}}},
                         "image": _image_block(resource_name, fit),
-                        "transparency": {
-                            "expr": {"Literal": {"Value": f"{transparency}D"}}
-                        },
+                        "transparency": {"expr": {"Literal": {"Value": f"{transparency}D"}}},
                     }
                 }
             ]
@@ -163,14 +159,8 @@ def patch_layout_for_wallpaper(
             objects["outspace"] = [
                 {
                     "properties": {
-                        "color": {
-                            "solid": {
-                                "color": {"expr": {"Literal": {"Value": f"'{page_background_color}'"}}}
-                            }
-                        },
-                        "transparency": {
-                            "expr": {"Literal": {"Value": f"{page_background_transparency}D"}}
-                        },
+                        "color": {"solid": {"color": {"expr": {"Literal": {"Value": f"'{page_background_color}'"}}}}},
+                        "transparency": {"expr": {"Literal": {"Value": f"{page_background_transparency}D"}}},
                     }
                 }
             ]
@@ -192,9 +182,7 @@ def _solid_color(hex_color: str) -> dict[str, Any]:
     return {"solid": {"color": _literal(hex_color)}}
 
 
-def _vc_objects_for_card(
-    cards_spec: dict[str, Any], accent_color: str | None
-) -> dict[str, Any]:
+def _vc_objects_for_card(cards_spec: dict[str, Any], accent_color: str | None) -> dict[str, Any]:
     """Compose vcObjects (container chrome) for a card-like visual."""
     bg = cards_spec.get("background", {})
     border = cards_spec.get("border", {})
@@ -373,7 +361,7 @@ def patch_content_types(
         )
         for ext in sorted(required_extensions):
             content_type = _DEFAULT_CONTENT_TYPES.get(ext, "application/octet-stream")
-            body += f'<Default Extension="{ext}" ContentType="{content_type}"/>'.encode("utf-8")
+            body += f'<Default Extension="{ext}" ContentType="{content_type}"/>'.encode()
             added.append(ext)
         body += b"</Types>"
         return body, added
@@ -420,9 +408,7 @@ def validate_content_types_declarations(
     text = raw_xml.decode("utf-8", errors="ignore")
     declared = {
         match.group(1).lower()
-        for match in re.finditer(
-            r'<Default\s+[^>]*?Extension\s*=\s*"([^"]+)"', text, re.IGNORECASE
-        )
+        for match in re.finditer(r'<Default\s+[^>]*?Extension\s*=\s*"([^"]+)"', text, re.IGNORECASE)
     }
     return sorted(required_extensions - declared)
 
@@ -458,9 +444,10 @@ def repack_pbix(
     required_exts = _required_extensions(final_part_names)
     new_content_types, _ = patch_content_types(existing_content_types, required_exts)
 
-    with zipfile.ZipFile(io.BytesIO(source_pbix), "r") as src, zipfile.ZipFile(
-        out_buf, "w", zipfile.ZIP_DEFLATED
-    ) as dst:
+    with (
+        zipfile.ZipFile(io.BytesIO(source_pbix), "r") as src,
+        zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as dst,
+    ):
         replaced = {LAYOUT_PART, CONTENT_TYPES_PART, *new_resources.keys()}
         for info in src.infolist():
             if info.filename in replaced:

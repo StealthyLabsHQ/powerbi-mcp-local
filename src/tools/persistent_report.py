@@ -181,9 +181,7 @@ def _prime_string_store(table: dict[str, Any]) -> dict[str, Any]:
     if table.get("source_csv") or table.get("source_db"):
         return table
     columns = table.get("columns") or []
-    has_string = any(
-        isinstance(col, dict) and str(col.get("data_type", "")) == "String" for col in columns
-    )
+    has_string = any(isinstance(col, dict) and str(col.get("data_type", "")) == "String" for col in columns)
     if not has_string:
         return table
     sentinel_row: list[Any] = []

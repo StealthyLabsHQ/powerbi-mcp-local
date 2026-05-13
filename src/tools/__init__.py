@@ -5,6 +5,10 @@ from .calc_groups import (
     pbi_delete_calc_group_tool,
     pbi_list_calc_groups_tool,
 )
+from .dbcc import (
+    pbi_check_scaffold_spec_dbcc_risks_tool,
+    pbi_diagnose_pbix_dbcc_tool,
+)
 from .excel import (
     excel_auto_width_tool,
     excel_create_sheet_tool,
@@ -64,19 +68,7 @@ from .model import (
     pbi_system_health_tool,
     pbi_validate_model_tool,
 )
-from .dbcc import (
-    pbi_check_scaffold_spec_dbcc_risks_tool,
-    pbi_diagnose_pbix_dbcc_tool,
-)
 from .persistent_report import pbi_create_persistent_report_tool
-from .scaffold import (
-    pbi_list_scaffold_templates_tool,
-    pbi_scaffold_pbix_tool,
-)
-from .styling import (
-    pbi_apply_style_preset_tool,
-    pbi_list_style_presets_tool,
-)
 from .power_query import (
     pbi_bulk_import_excel_tool,
     pbi_create_csv_import_query_tool,
@@ -141,6 +133,14 @@ from .rls import (
     pbi_list_roles_tool,
     pbi_remove_role_member_tool,
     pbi_set_role_filter_tool,
+)
+from .scaffold import (
+    pbi_list_scaffold_templates_tool,
+    pbi_scaffold_pbix_tool,
+)
+from .styling import (
+    pbi_apply_style_preset_tool,
+    pbi_list_style_presets_tool,
 )
 from .ui_automation import pbi_persist_now_tool
 from .visuals import (

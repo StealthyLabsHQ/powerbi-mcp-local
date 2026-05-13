@@ -43,9 +43,7 @@ def _make_pbix(tmp: Path, name: str, *, with_content_types: bool = True) -> Path
                                 "name": "card1",
                                 "singleVisual": {
                                     "visualType": "card",
-                                    "projections": {
-                                        "Values": [{"queryRef": "F.Marge brute"}]
-                                    },
+                                    "projections": {"Values": [{"queryRef": "F.Marge brute"}]},
                                 },
                             }
                         )
@@ -125,11 +123,7 @@ class ContentTypesPatchTests(unittest.TestCase):
         self.assertTrue(patched.endswith(b"</Types>"))
 
     def test_validate_reports_missing_declarations(self) -> None:
-        xml = (
-            b'<?xml version="1.0"?><Types xmlns="x">'
-            b'<Default Extension="xml" ContentType="application/xml"/>'
-            b"</Types>"
-        )
+        xml = b'<?xml version="1.0"?><Types xmlns="x"><Default Extension="xml" ContentType="application/xml"/></Types>'
         self.assertEqual(
             validate_content_types_declarations(xml, {"xml", "png", "json"}),
             ["json", "png"],

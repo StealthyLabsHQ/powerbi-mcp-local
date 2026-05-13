@@ -39,7 +39,6 @@ from tools.styling._embed import (
 )
 from tools.visuals._themes import validate_theme_payload
 
-
 _HEX_RE = __import__("re").compile(r"^#[0-9A-Fa-f]{6}$")
 
 
@@ -83,20 +82,14 @@ class PresetCatalogueTests(unittest.TestCase):
 
     def test_each_preset_theme_passes_schema(self) -> None:
         for name, spec in PRESETS.items():
-            errors = [
-                issue
-                for issue in validate_theme_payload(spec["theme"])
-                if issue.get("level") == "error"
-            ]
+            errors = [issue for issue in validate_theme_payload(spec["theme"]) if issue.get("level") == "error"]
             self.assertEqual(errors, [], f"{name} theme errors: {errors}")
 
     def test_each_preset_has_accent_map_with_four_keys(self) -> None:
         for name, spec in PRESETS.items():
             with self.subTest(preset=name):
                 accent_map = spec.get("cards", {}).get("accentMap", {})
-                self.assertEqual(
-                    set(accent_map.keys()), {"positive", "warning", "info", "neutral"}
-                )
+                self.assertEqual(set(accent_map.keys()), {"positive", "warning", "info", "neutral"})
 
     def test_list_tool_exposes_palette(self) -> None:
         result = pbi_list_style_presets_tool()
@@ -180,9 +173,7 @@ class EmbedHelperTests(unittest.TestCase):
                 {"displayName": "P2", "name": "s2"},
             ]
         }
-        patched, touched = patch_layout_for_wallpaper(
-            layout, resource_name="bg.png", fit="Fit", transparency=0
-        )
+        patched, touched = patch_layout_for_wallpaper(layout, resource_name="bg.png", fit="Fit", transparency=0)
         self.assertEqual(sorted(touched), ["P1", "P2"])
         cfg = json.loads(patched["sections"][0]["config"])
         self.assertIn("objects", cfg)
@@ -204,9 +195,7 @@ class EmbedHelperTests(unittest.TestCase):
                 {"displayName": "P2", "name": "s2"},
             ]
         }
-        _, touched = patch_layout_for_wallpaper(
-            layout, resource_name="bg.png", page_filter={"P2"}
-        )
+        _, touched = patch_layout_for_wallpaper(layout, resource_name="bg.png", page_filter={"P2"})
         self.assertEqual(touched, ["P2"])
         self.assertNotIn("config", layout["sections"][0])
 
@@ -221,16 +210,12 @@ class EmbedHelperTests(unittest.TestCase):
                 {
                     "displayName": "P1",
                     "name": "s1",
-                    "visualContainers": [
-                        {"config": json.dumps({"name": "v1", "singleVisual": single_visual})}
-                    ],
+                    "visualContainers": [{"config": json.dumps({"name": "v1", "singleVisual": single_visual})}],
                 }
             ]
         }
         preset = PRESETS["glassmorph_dark"]
-        patched, counts = patch_layout_visuals(
-            layout, preset=preset, accent_picker=pick_accent
-        )
+        patched, counts = patch_layout_visuals(layout, preset=preset, accent_picker=pick_accent)
         self.assertEqual(counts["cards_styled"], 1)
         cfg = json.loads(patched["sections"][0]["visualContainers"][0]["config"])
         vc = cfg["singleVisual"]["vcObjects"]
@@ -273,9 +258,7 @@ class ApplyToolEndToEndTests(unittest.TestCase):
                                     "name": "card1",
                                     "singleVisual": {
                                         "visualType": "card",
-                                        "projections": {
-                                            "Values": [{"queryRef": "F.Marge brute"}]
-                                        },
+                                        "projections": {"Values": [{"queryRef": "F.Marge brute"}]},
                                     },
                                 }
                             )
@@ -328,9 +311,7 @@ class ApplyToolEndToEndTests(unittest.TestCase):
 
     def test_pages_filter_applies_to_named_pages_only(self) -> None:
         pbix = self._fixture_pbix()
-        result = pbi_apply_style_preset_tool(
-            str(pbix), "minimal_corporate", pages=["Detail"]
-        )
+        result = pbi_apply_style_preset_tool(str(pbix), "minimal_corporate", pages=["Detail"])
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["applied_pages"], ["Detail"])
 
@@ -358,9 +339,7 @@ class ApplyToolEndToEndTests(unittest.TestCase):
         pbix = self._fixture_pbix()
         custom = dict(PRESETS["dark_pro"])
         custom["name"] = "custom"
-        result = pbi_apply_style_preset_tool(
-            str(pbix), "custom", custom_spec=custom
-        )
+        result = pbi_apply_style_preset_tool(str(pbix), "custom", custom_spec=custom)
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["preset"], "custom")
 

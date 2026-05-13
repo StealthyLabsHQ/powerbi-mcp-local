@@ -87,7 +87,14 @@ def write_gradient_png(
 
     idat = zlib.compress(bytes(rows), level=6)
     ihdr_data = struct.pack(
-        ">IIBBBBB", width, height, 8, 2, 0, 0, 0  # bit_depth=8, color_type=2 (RGB)
+        ">IIBBBBB",
+        width,
+        height,
+        8,
+        2,
+        0,
+        0,
+        0,  # bit_depth=8, color_type=2 (RGB)
     )
 
     buf = bytearray(PNG_SIGNATURE)

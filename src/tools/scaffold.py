@@ -12,7 +12,6 @@ caller to assemble the spec by hand.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 from pbi_connection import PowerBIValidationError, ok
@@ -54,13 +53,13 @@ def _baseline_measures(fact_table: str, amount_column: str) -> list[dict[str, An
         {
             "table": fact,
             "name": "Total YTD",
-            "expression": f"TOTALYTD([Total], 'DateTable'[Date])",
+            "expression": "TOTALYTD([Total], 'DateTable'[Date])",
             "format_string": "#,##0",
         },
         {
             "table": fact,
             "name": "Total MTD",
-            "expression": f"TOTALMTD([Total], 'DateTable'[Date])",
+            "expression": "TOTALMTD([Total], 'DateTable'[Date])",
             "format_string": "#,##0",
         },
         {

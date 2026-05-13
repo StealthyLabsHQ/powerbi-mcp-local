@@ -107,9 +107,7 @@ class ThemeSchemaTests(unittest.TestCase):
 
     def test_strict_top_level_can_be_disabled(self) -> None:
         # When strict_top_level=False, unknown keys do not yield errors.
-        issues = validate_theme_payload(
-            {"name": "x", "extraKey": True}, strict_top_level=False
-        )
+        issues = validate_theme_payload({"name": "x", "extraKey": True}, strict_top_level=False)
         errors = [i for i in issues if i["level"] == "error"]
         self.assertEqual(errors, [])
 
@@ -134,9 +132,7 @@ class ApplyThemeIntegrationTests(unittest.TestCase):
         # minimal extract folder
         layout = {"id": 0, "sections": [], "resourcePackages": []}
         (self.root / "Report").mkdir(parents=True, exist_ok=True)
-        (self.root / "Report" / "Layout").write_bytes(
-            json.dumps(layout).encode("utf-16-le")
-        )
+        (self.root / "Report" / "Layout").write_bytes(json.dumps(layout).encode("utf-16-le"))
 
     def tearDown(self) -> None:
         from security import SECURITY, configure_allowed_dirs
@@ -171,9 +167,7 @@ class ApplyThemeIntegrationTests(unittest.TestCase):
     def test_apply_theme_blocks_bad_schema(self) -> None:
         from tools.visuals._design import pbi_apply_theme_tool
 
-        theme = self._write_theme(
-            "evil", {"name": "x", "good": "javascript:alert('xss')"}
-        )
+        theme = self._write_theme("evil", {"name": "x", "good": "javascript:alert('xss')"})
         result = pbi_apply_theme_tool(str(self.root), str(theme))
         self.assertFalse(result.get("ok", True), result)
         self.assertEqual(result["error"]["code"], "theme_validation_error")
@@ -209,9 +203,7 @@ class ApplyThemeIntegrationTests(unittest.TestCase):
     def test_export_active_theme_returns_file(self) -> None:
         from tools.visuals._design import pbi_apply_theme_tool, pbi_export_active_theme_tool
 
-        theme = self._write_theme(
-            "ok", {"name": "Clean", "dataColors": ["#001122"]}
-        )
+        theme = self._write_theme("ok", {"name": "Clean", "dataColors": ["#001122"]})
         apply = pbi_apply_theme_tool(str(self.root), str(theme))
         self.assertTrue(apply["ok"], apply)
         out = self.root / "exported.json"

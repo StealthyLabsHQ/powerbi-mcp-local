@@ -38,17 +38,13 @@ class TimeIntelligenceTemplateTests(unittest.TestCase):
                 self.assertIn("description", tmpl)
 
     def test_ytd_template_uses_datesytd(self) -> None:
-        rendered = _TIME_INTELLIGENCE_TEMPLATES["YTD"]["template"].format(
-            base="Sales", date_ref="'Date'[Date]"
-        )
+        rendered = _TIME_INTELLIGENCE_TEMPLATES["YTD"]["template"].format(base="Sales", date_ref="'Date'[Date]")
         self.assertIn("DATESYTD", rendered)
         self.assertIn("[Sales]", rendered)
         self.assertIn("'Date'[Date]", rendered)
 
     def test_spy_template_uses_sameperiodlastyear(self) -> None:
-        rendered = _TIME_INTELLIGENCE_TEMPLATES["SPY"]["template"].format(
-            base="Sales", date_ref="'Date'[Date]"
-        )
+        rendered = _TIME_INTELLIGENCE_TEMPLATES["SPY"]["template"].format(base="Sales", date_ref="'Date'[Date]")
         self.assertIn("SAMEPERIODLASTYEAR", rendered)
 
     def test_yoy_depends_on_spy(self) -> None:
@@ -64,9 +60,7 @@ class TimeIntelligenceTemplateTests(unittest.TestCase):
         self.assertEqual(_TIME_INTELLIGENCE_TEMPLATES["YOY%"]["format_hint"], "0.00%")
 
     def test_ma3_uses_datesinperiod(self) -> None:
-        rendered = _TIME_INTELLIGENCE_TEMPLATES["MA3"]["template"].format(
-            base="Sales", date_ref="'Date'[Date]"
-        )
+        rendered = _TIME_INTELLIGENCE_TEMPLATES["MA3"]["template"].format(base="Sales", date_ref="'Date'[Date]")
         self.assertIn("DATESINPERIOD", rendered)
         self.assertIn("-3", rendered)
 

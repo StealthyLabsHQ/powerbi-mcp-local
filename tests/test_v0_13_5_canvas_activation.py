@@ -77,20 +77,10 @@ def _fixture_sections() -> list[dict]:
                             "name": "card1",
                             "singleVisual": {
                                 "visualType": "card",
-                                "projections": {
-                                    "Values": [{"queryRef": "F.Marge brute"}]
-                                },
+                                "projections": {"Values": [{"queryRef": "F.Marge brute"}]},
                                 "objects": {
                                     "title": [
-                                        {
-                                            "properties": {
-                                                "text": {
-                                                    "expr": {
-                                                        "Literal": {"Value": "'KPI principal'"}
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        {"properties": {"text": {"expr": {"Literal": {"Value": "'KPI principal'"}}}}}
                                     ]
                                 },
                             },
@@ -105,9 +95,7 @@ def _fixture_sections() -> list[dict]:
 class WallpaperSchemaTests(unittest.TestCase):
     def test_image_block_uses_bare_strings(self) -> None:
         layout = {"sections": [{"displayName": "P1", "name": "s1"}]}
-        patched, _ = patch_layout_for_wallpaper(
-            layout, resource_name="bg.png", fit="Stretch"
-        )
+        patched, _ = patch_layout_for_wallpaper(layout, resource_name="bg.png", fit="Stretch")
         cfg = json.loads(patched["sections"][0]["config"])
         bg = cfg["objects"]["background"][0]["properties"]
         # Bare-string contract: the v0.13.3 Literal-wrapped variant left
@@ -129,9 +117,7 @@ class WallpaperSchemaTests(unittest.TestCase):
 
     def test_wallpaper_layer_skipped_when_disabled(self) -> None:
         layout = {"sections": [{"displayName": "P1", "name": "s1"}]}
-        patched, _ = patch_layout_for_wallpaper(
-            layout, resource_name="bg.png", apply_wallpaper_layer=False
-        )
+        patched, _ = patch_layout_for_wallpaper(layout, resource_name="bg.png", apply_wallpaper_layer=False)
         cfg = json.loads(patched["sections"][0]["config"])
         self.assertNotIn("wallpaper", cfg["objects"])
 
@@ -142,9 +128,7 @@ class WallpaperSchemaTests(unittest.TestCase):
 
     def test_glassmorph_presets_default_to_stretch(self) -> None:
         for name in ("glassmorph_dark", "glassmorph_light"):
-            self.assertEqual(
-                PRESETS[name]["page"]["wallpaper"]["fit"], "Stretch", name
-            )
+            self.assertEqual(PRESETS[name]["page"]["wallpaper"]["fit"], "Stretch", name)
 
 
 class CustomTitlePreservationTests(unittest.TestCase):
@@ -157,9 +141,7 @@ class CustomTitlePreservationTests(unittest.TestCase):
         )
         self.assertGreaterEqual(counts["titles_preserved"], 1)
         cfg = json.loads(patched["sections"][0]["visualContainers"][0]["config"])
-        title_text = cfg["singleVisual"]["objects"]["title"][0]["properties"]["text"][
-            "expr"
-        ]["Literal"]["Value"]
+        title_text = cfg["singleVisual"]["objects"]["title"][0]["properties"]["text"]["expr"]["Literal"]["Value"]
         self.assertIn("KPI principal", title_text)
 
     def test_empty_title_is_not_counted_as_preserved(self) -> None:
@@ -176,15 +158,7 @@ class CustomTitlePreservationTests(unittest.TestCase):
                                     "visualType": "card",
                                     "projections": {"Values": [{"queryRef": "F.X"}]},
                                     "objects": {
-                                        "title": [
-                                            {
-                                                "properties": {
-                                                    "text": {
-                                                        "expr": {"Literal": {"Value": "''"}}
-                                                    }
-                                                }
-                                            }
-                                        ]
+                                        "title": [{"properties": {"text": {"expr": {"Literal": {"Value": "''"}}}}}]
                                     },
                                 },
                             }
@@ -243,9 +217,7 @@ class ApplyToolEndToEndTests(unittest.TestCase):
         layout = _read_layout(Path(result["output_path"]))
         self.assertIn("activeTheme", layout)
         active = layout["activeTheme"]
-        self.assertTrue(
-            active["path"].startswith("StaticResources/SharedResources/BaseThemes/")
-        )
+        self.assertTrue(active["path"].startswith("StaticResources/SharedResources/BaseThemes/"))
         # Also expose it via reportSettings.activeTheme for newer
         # Power BI builds that read the theme from that key.
         self.assertIn("reportSettings", layout)
@@ -257,34 +229,24 @@ class ApplyToolEndToEndTests(unittest.TestCase):
         self.assertGreaterEqual(result["custom_titles_preserved"], 1)
 
         layout = _read_layout(Path(result["output_path"]))
-        container_cfg = json.loads(
-            layout["sections"][0]["visualContainers"][0]["config"]
-        )
-        title = container_cfg["singleVisual"]["objects"]["title"][0]["properties"][
-            "text"
-        ]["expr"]["Literal"]["Value"]
+        container_cfg = json.loads(layout["sections"][0]["visualContainers"][0]["config"])
+        title = container_cfg["singleVisual"]["objects"]["title"][0]["properties"]["text"]["expr"]["Literal"]["Value"]
         self.assertIn("KPI principal", title)
 
     def test_wallpaper_fit_override(self) -> None:
         pbix = _make_pbix(self.root, "in.pbix", _fixture_sections())
-        result = pbi_apply_style_preset_tool(
-            str(pbix), "minimal_corporate", wallpaper_fit="Fill"
-        )
+        result = pbi_apply_style_preset_tool(str(pbix), "minimal_corporate", wallpaper_fit="Fill")
         self.assertEqual(result["wallpaper_fit"], "Fill")
         layout = _read_layout(Path(result["output_path"]))
         cfg = json.loads(layout["sections"][0]["config"])
-        self.assertEqual(
-            cfg["objects"]["background"][0]["properties"]["image"]["scaling"], "Fill"
-        )
+        self.assertEqual(cfg["objects"]["background"][0]["properties"]["image"]["scaling"], "Fill")
 
     def test_wallpaper_fit_rejects_bad_value(self) -> None:
         from pbi_connection import PowerBIValidationError
 
         pbix = _make_pbix(self.root, "in.pbix", _fixture_sections())
         with self.assertRaises(PowerBIValidationError):
-            pbi_apply_style_preset_tool(
-                str(pbix), "dark_pro", wallpaper_fit="Cover"
-            )
+            pbi_apply_style_preset_tool(str(pbix), "dark_pro", wallpaper_fit="Cover")
 
     def test_validation_gate_fires_when_layout_lacks_wallpaper(self) -> None:
         # Simulate a corrupted apply by patching out the wallpaper

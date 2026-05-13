@@ -31,11 +31,11 @@ Each submodule exports a single ``PRESET`` dict with the shape
 
 from __future__ import annotations
 
+from .dark_pro import PRESET as DARK_PRO
 from .glassmorph_dark import PRESET as GLASSMORPH_DARK
 from .glassmorph_light import PRESET as GLASSMORPH_LIGHT
-from .neon_cyber import PRESET as NEON_CYBER
 from .minimal_corporate import PRESET as MINIMAL_CORPORATE
-from .dark_pro import PRESET as DARK_PRO
+from .neon_cyber import PRESET as NEON_CYBER
 
 PRESETS: dict[str, dict] = {
     GLASSMORPH_DARK["name"]: GLASSMORPH_DARK,

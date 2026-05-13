@@ -67,9 +67,7 @@ class ScaffoldTemplateListingTests(unittest.TestCase):
     def test_list_helper_summarises_each_template(self) -> None:
         templates = list_scaffold_templates()
         keys = {entry["key"] for entry in templates}
-        self.assertEqual(
-            keys, {"blank", "finance", "sales", "analytics"}
-        )
+        self.assertEqual(keys, {"blank", "finance", "sales", "analytics"})
         for entry in templates:
             self.assertIn("description", entry)
             self.assertIn("table_count", entry)
@@ -158,9 +156,7 @@ class ScaffoldExecutionTests(unittest.TestCase):
         result = pbi_scaffold_pbix_tool(
             str(out),
             template="finance",
-            extra_measures=[
-                {"table": "GL", "name": "Custom", "expression": "SUM(GL[Amount])"}
-            ],
+            extra_measures=[{"table": "GL", "name": "Custom", "expression": "SUM(GL[Amount])"}],
         )
         self.assertTrue(result["ok"], result)
         # baseline 4 + 1 custom = 5
@@ -189,9 +185,7 @@ class ScaffoldExecutionTests(unittest.TestCase):
     def test_valid_theme_is_accepted(self) -> None:
         out = self.root / "fin.pbix"
         good_theme = self.root / "good-theme.json"
-        good_theme.write_text(
-            json.dumps({"name": "Clean", "dataColors": ["#001122"]}), encoding="utf-8"
-        )
+        good_theme.write_text(json.dumps({"name": "Clean", "dataColors": ["#001122"]}), encoding="utf-8")
         result = pbi_scaffold_pbix_tool(
             str(out),
             template="finance",

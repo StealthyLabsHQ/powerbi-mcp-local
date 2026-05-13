@@ -44,7 +44,6 @@ from security import resolve_local_path
 
 from ..dbcc import pbi_diagnose_pbix_dbcc_tool
 from ..visuals._themes import (
-    MAX_THEME_BYTES,
     ThemeValidationError,
     assert_theme_within_size_limit,
     validate_theme_payload,
@@ -171,9 +170,7 @@ def pbi_apply_style_preset_tool(
         )
     pbix_in = resolve_local_path(pbix_path, must_exist=True, allowed_extensions={".pbix"})
     pbix_out_path = (
-        resolve_local_path(output_path, must_exist=False, allowed_extensions={".pbix"})
-        if output_path
-        else pbix_in
+        resolve_local_path(output_path, must_exist=False, allowed_extensions={".pbix"}) if output_path else pbix_in
     )
 
     spec = _resolve_preset(preset, custom_spec)
@@ -204,12 +201,11 @@ def pbi_apply_style_preset_tool(
     wallpaper_info = _validate_wallpaper(wallpaper_file)
 
     pbix_bytes = pbix_in.read_bytes()
-    import zipfile, io
+    import io
+    import zipfile
 
     if not zipfile.is_zipfile(io.BytesIO(pbix_bytes)):
-        raise PowerBIValidationError(
-            "PBIX is not a valid zip archive.", details={"pbix_path": str(pbix_in)}
-        )
+        raise PowerBIValidationError("PBIX is not a valid zip archive.", details={"pbix_path": str(pbix_in)})
     with zipfile.ZipFile(io.BytesIO(pbix_bytes), "r") as zf:
         try:
             layout_raw = zf.read(LAYOUT_PART)
@@ -270,10 +266,7 @@ def pbi_apply_style_preset_tool(
         "version": "1.0",
     }
     themes = layout.setdefault("themeCollection", [])
-    themes[:] = [
-        t for t in themes
-        if not (isinstance(t, dict) and t.get("path") == theme_relpath)
-    ]
+    themes[:] = [t for t in themes if not (isinstance(t, dict) and t.get("path") == theme_relpath)]
     themes.append(theme_entry)
     layout["activeTheme"] = theme_entry
     report_settings = layout.setdefault("reportSettings", {})
@@ -358,18 +351,14 @@ def pbi_apply_style_preset_tool(
             cfg = json.loads(cfg_raw) if isinstance(cfg_raw, str) else (cfg_raw or {})
         except json.JSONDecodeError:
             cfg = {}
-        background = (
-            (cfg.get("objects") or {}).get("background") or []
-        )
+        background = (cfg.get("objects") or {}).get("background") or []
         image_url = None
         if isinstance(background, list) and background:
             props = (background[0] or {}).get("properties") or {}
             image = props.get("image") or {}
             image_url = image.get("url")
         if not isinstance(image_url, str) or not image_url:
-            validation_errors.append(
-                {"type": "wallpaper_missing", "page": display}
-            )
+            validation_errors.append({"type": "wallpaper_missing", "page": display})
             continue
         # The url is stored as ``RegisteredResources/<filename>``; the
         # actual archive part lives at
@@ -392,17 +381,13 @@ def pbi_apply_style_preset_tool(
     if isinstance(active_theme, dict) and active_theme.get("path") == theme_relpath:
         theme_activated = True
     if theme_relpath not in out_part_set:
-        validation_errors.append(
-            {"type": "theme_part_missing", "expected_part": theme_relpath}
-        )
+        validation_errors.append({"type": "theme_part_missing", "expected_part": theme_relpath})
         theme_activated = False
     if not theme_activated:
         validation_errors.append({"type": "theme_not_activated"})
 
     if not dbcc_valid:
-        validation_errors.append(
-            {"type": "dbcc_invalid", "issues": dbcc.get("issues")}
-        )
+        validation_errors.append({"type": "dbcc_invalid", "issues": dbcc.get("issues")})
 
     if validation_errors:
         raise PowerBIValidationError(

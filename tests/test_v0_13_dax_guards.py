@@ -64,14 +64,12 @@ class DAXGuardTests(unittest.TestCase):
 
     def test_evaluateandlog_inline_blocked(self) -> None:
         with self.assertRaises(PowerBIValidationError):
-            _validate_dax_query(
-                "EVALUATE ADDCOLUMNS('Date', \"x\", EVALUATEANDLOG([Total Sales]))"
-            )
+            _validate_dax_query("EVALUATE ADDCOLUMNS('Date', \"x\", EVALUATEANDLOG([Total Sales]))")
 
     def test_normal_function_named_like_info_is_not_blocked(self) -> None:
         # "INFO" alone (no dot-call) is not the blocked pattern. The guard
         # specifically targets the dotted callable form ``INFO.NAME(``.
-        _validate_dax_query("EVALUATE FILTER(Customer, Customer[INFO] = \"x\")")
+        _validate_dax_query('EVALUATE FILTER(Customer, Customer[INFO] = "x")')
 
     def test_opt_in_env_var_bypasses_guard(self) -> None:
         os.environ["PBI_MCP_ALLOW_DMV"] = "1"

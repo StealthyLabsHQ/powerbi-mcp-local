@@ -32,7 +32,7 @@ from ._layout import (
     _parse_embedded_json,
     _save_layout,
 )
-from ._paths import _resolve_extract_folder, _resolve_theme_path
+from ._paths import _resolve_theme_path
 from ._refs import _projection
 from ._themes import (
     MAX_THEME_BYTES,
