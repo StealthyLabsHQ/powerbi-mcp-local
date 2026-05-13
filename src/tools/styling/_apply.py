@@ -148,14 +148,27 @@ def pbi_apply_style_preset_tool(
     preset: str,
     *,
     wallpaper_path: str | None = None,
+    wallpaper_fit: str | None = None,
     output_path: str | None = None,
     pages: list[str] | None = None,
     custom_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Apply a one-shot visual style preset to an existing ``.pbix``.
 
+    ``wallpaper_fit`` (optional) overrides the preset's default canvas
+    image scaling. Must be one of ``Fit``, ``Fill``, ``Normal``,
+    ``Stretch`` (Power BI's enum). When omitted the preset's
+    ``page.wallpaper.fit`` is used.
+
     See module docstring for the full flow.
     """
+    from ._embed import WALLPAPER_SCALING_ENUM
+
+    if wallpaper_fit is not None and wallpaper_fit not in WALLPAPER_SCALING_ENUM:
+        raise PowerBIValidationError(
+            f"wallpaper_fit must be one of {WALLPAPER_SCALING_ENUM}.",
+            details={"wallpaper_fit": wallpaper_fit},
+        )
     pbix_in = resolve_local_path(pbix_path, must_exist=True, allowed_extensions={".pbix"})
     pbix_out_path = (
         resolve_local_path(output_path, must_exist=False, allowed_extensions={".pbix"})
@@ -220,7 +233,7 @@ def pbi_apply_style_preset_tool(
 
     page_filter = set(pages) if pages else None
     page_spec = spec.get("page", {}) or {}
-    fit = (page_spec.get("wallpaper") or {}).get("fit", "Fit")
+    fit = wallpaper_fit or (page_spec.get("wallpaper") or {}).get("fit", "Fit")
     wallpaper_transparency = (page_spec.get("wallpaper") or {}).get("transparency", 0)
     page_bg_color = (page_spec.get("background") or {}).get("color")
     page_bg_transparency = (page_spec.get("background") or {}).get("transparency", 0)
@@ -242,16 +255,32 @@ def pbi_apply_style_preset_tool(
         page_filter=page_filter,
     )
 
-    # Theme: register under SharedResources/BaseThemes and update the
-    # layout's activeTheme / themeCollection. The theme is shipped as a
-    # ``.json`` resource so Power BI Desktop sees it on open.
+    # Theme activation. Power BI registers the active report theme in
+    # three places — set all of them so any PBI Desktop build picks it
+    # up without manual View → Themes → Browse:
+    #   * ``layout.themeCollection``        (the catalogue, list of dicts)
+    #   * ``layout.activeTheme``            (legacy key, kept for compat)
+    #   * ``layout.reportSettings.activeTheme`` (current schema)
     theme_name = sanitize_resource_name(str(theme_payload.get("name") or spec.get("name")))
     theme_relpath = f"{THEMES_DIR}/{theme_name}.json"
-    theme_entry = {"name": theme_name, "path": theme_relpath}
+    theme_entry = {
+        "name": theme_name,
+        "path": theme_relpath,
+        "type": "CustomTheme",
+        "version": "1.0",
+    }
     themes = layout.setdefault("themeCollection", [])
-    if not any(isinstance(t, dict) and t.get("path") == theme_relpath for t in themes):
-        themes.append(theme_entry)
+    themes[:] = [
+        t for t in themes
+        if not (isinstance(t, dict) and t.get("path") == theme_relpath)
+    ]
+    themes.append(theme_entry)
     layout["activeTheme"] = theme_entry
+    report_settings = layout.setdefault("reportSettings", {})
+    if not isinstance(report_settings, dict):
+        report_settings = {}
+        layout["reportSettings"] = report_settings
+    report_settings["activeTheme"] = theme_entry
 
     new_layout = json.dumps(layout, ensure_ascii=False).encode("utf-16-le")
     new_resources = {
@@ -298,6 +327,94 @@ def pbi_apply_style_preset_tool(
     dbcc = pbi_diagnose_pbix_dbcc_tool(str(pbix_out_path))
     dbcc_valid = bool(dbcc.get("valid"))
 
+    # Validation gate — re-extract the written PBIX and confirm:
+    #  * each targeted section has a real wallpaper image reference
+    #    pointing at an embedded part,
+    #  * the theme is registered in the layout root,
+    #  * DBCC passes.
+    validation_errors: list[dict[str, Any]] = []
+    wallpaper_applied_pages: list[str] = []
+    theme_activated = False
+
+    with _zf.ZipFile(pbix_out_path, "r") as out_zip:
+        out_part_set = set(out_zip.namelist())
+        out_layout_raw = out_zip.read(LAYOUT_PART)
+    try:
+        out_layout = json.loads(out_layout_raw.decode("utf-16-le"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PowerBIValidationError(
+            "Output PBIX layout is not valid UTF-16-LE JSON after repack.",
+            details={"output_path": str(pbix_out_path), "reason": str(exc)},
+        ) from exc
+
+    for section in out_layout.get("sections", []) or []:
+        if not isinstance(section, dict):
+            continue
+        display = str(section.get("displayName") or section.get("name") or "")
+        if page_filter and display not in page_filter:
+            continue
+        cfg_raw = section.get("config")
+        try:
+            cfg = json.loads(cfg_raw) if isinstance(cfg_raw, str) else (cfg_raw or {})
+        except json.JSONDecodeError:
+            cfg = {}
+        background = (
+            (cfg.get("objects") or {}).get("background") or []
+        )
+        image_url = None
+        if isinstance(background, list) and background:
+            props = (background[0] or {}).get("properties") or {}
+            image = props.get("image") or {}
+            image_url = image.get("url")
+        if not isinstance(image_url, str) or not image_url:
+            validation_errors.append(
+                {"type": "wallpaper_missing", "page": display}
+            )
+            continue
+        # The url is stored as ``RegisteredResources/<filename>``; the
+        # actual archive part lives at
+        # ``StaticResources/RegisteredResources/<filename>``.
+        url_filename = image_url.rsplit("/", 1)[-1]
+        expected_part = f"{WALLPAPER_DIR}/{url_filename}"
+        if expected_part not in out_part_set:
+            validation_errors.append(
+                {
+                    "type": "wallpaper_resource_missing",
+                    "page": display,
+                    "expected_part": expected_part,
+                }
+            )
+            continue
+        wallpaper_applied_pages.append(display)
+
+    # Theme registration. ``activeTheme`` must point at the theme part.
+    active_theme = out_layout.get("activeTheme")
+    if isinstance(active_theme, dict) and active_theme.get("path") == theme_relpath:
+        theme_activated = True
+    if theme_relpath not in out_part_set:
+        validation_errors.append(
+            {"type": "theme_part_missing", "expected_part": theme_relpath}
+        )
+        theme_activated = False
+    if not theme_activated:
+        validation_errors.append({"type": "theme_not_activated"})
+
+    if not dbcc_valid:
+        validation_errors.append(
+            {"type": "dbcc_invalid", "issues": dbcc.get("issues")}
+        )
+
+    if validation_errors:
+        raise PowerBIValidationError(
+            "Style preset post-write validation failed.",
+            details={
+                "output_path": str(pbix_out_path),
+                "errors": validation_errors,
+                "wallpaper_applied_pages": wallpaper_applied_pages,
+                "theme_activated": theme_activated,
+            },
+        )
+
     return ok(
         f"Style preset '{spec.get('name')}' applied to {len(applied_pages)} page(s).",
         preset=spec.get("name"),
@@ -305,6 +422,11 @@ def pbi_apply_style_preset_tool(
         applied_visuals=visual_counts,
         embedded_resources=[resource_relpath, theme_relpath],
         wallpaper_info=wallpaper_info,
+        wallpaper_fit=fit,
+        wallpaper_applied_pages=wallpaper_applied_pages,
+        theme_activated=theme_activated,
+        custom_titles_preserved=visual_counts.get("titles_preserved", 0),
+        validation_errors=validation_errors,
         output_path=str(pbix_out_path),
         dbcc_valid=dbcc_valid,
         dbcc=dbcc,

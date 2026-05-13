@@ -187,10 +187,15 @@ class EmbedHelperTests(unittest.TestCase):
         cfg = json.loads(patched["sections"][0]["config"])
         self.assertIn("objects", cfg)
         self.assertEqual(len(cfg["objects"]["background"]), 1)
-        # The wallpaper reference must include the resource_name.
+        # Power BI requires image.name / url / scaling as bare strings;
+        # the Literal-wrapped form was the v0.13.3 bug that left the
+        # canvas blank on reopen.
         bg = cfg["objects"]["background"][0]["properties"]
-        url_literal = bg["image"]["url"]["expr"]["Literal"]["Value"]
-        self.assertIn("bg.png", url_literal)
+        self.assertEqual(bg["image"]["name"], "bg.png")
+        self.assertEqual(bg["image"]["url"], "RegisteredResources/bg.png")
+        self.assertEqual(bg["image"]["scaling"], "Fit")
+        # show / transparency stay Literal-wrapped.
+        self.assertEqual(bg["show"]["expr"]["Literal"]["Value"], "true")
 
     def test_patch_layout_for_wallpaper_respects_page_filter(self) -> None:
         layout = {

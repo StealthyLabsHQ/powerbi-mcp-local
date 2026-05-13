@@ -42,7 +42,7 @@ PRESET: dict = {
     },
     "page": {
         "background": {"color": "#0F2235", "transparency": 0},
-        "wallpaper": {"fit": "Fit", "transparency": 0},
+        "wallpaper": {"fit": "Stretch", "transparency": 0},
     },
     "cards": {
         "background": {"color": "#1F4E78", "transparency": 50},

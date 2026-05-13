@@ -85,6 +85,26 @@ def _encode_section_config(cfg: dict[str, Any]) -> str:
     return json.dumps(cfg, ensure_ascii=False)
 
 
+WALLPAPER_SCALING_ENUM = ("Fit", "Fill", "Normal", "Stretch")
+WALLPAPER_URL_PREFIX = "RegisteredResources"
+
+
+def _image_block(resource_name: str, fit: str) -> dict[str, Any]:
+    """Canonical Power BI canvas-image block.
+
+    The image sub-object uses **bare strings**, not Literal-wrapped
+    expressions. Power BI Desktop silently ignores image references
+    that wrap ``name`` / ``url`` / ``scaling`` in ``{"expr": {"Literal":
+    ...}}`` — the canvas opens blank. Only ``show`` and ``transparency``
+    are Literal-wrapped.
+    """
+    return {
+        "name": resource_name,
+        "url": f"{WALLPAPER_URL_PREFIX}/{resource_name}",
+        "scaling": fit,
+    }
+
+
 def patch_layout_for_wallpaper(
     layout: dict[str, Any],
     *,
@@ -94,17 +114,23 @@ def patch_layout_for_wallpaper(
     page_filter: set[str] | None = None,
     page_background_color: str | None = None,
     page_background_transparency: int = 0,
+    apply_wallpaper_layer: bool = True,
 ) -> tuple[dict[str, Any], list[str]]:
     """Inject the canonical ``objects.background`` block into every
     targeted section's config.
 
-    ``resource_name`` is the relative path under
-    ``StaticResources/RegisteredResources``. Returns the patched layout
-    and the list of page display names that were touched (so the caller
-    can report which pages received the wallpaper).
+    ``resource_name`` is the bare filename under
+    ``StaticResources/RegisteredResources``. ``fit`` must be one of
+    ``Fit``, ``Fill``, ``Normal``, ``Stretch`` (Power BI's enum). When
+    ``apply_wallpaper_layer`` is True the same image is also written to
+    ``objects.wallpaper`` (the chrome around the canvas) so the page
+    has no white halo around it. Returns the patched layout and the
+    list of page display names that were touched.
     """
-    if fit not in ("Fit", "Fill", "Normal"):
-        raise ValueError(f"fit must be Fit / Fill / Normal, got '{fit}'")
+    if fit not in WALLPAPER_SCALING_ENUM:
+        raise ValueError(
+            f"fit must be one of {WALLPAPER_SCALING_ENUM}, got '{fit}'"
+        )
 
     touched: list[str] = []
     for section in layout.get("sections", []) or []:
@@ -115,17 +141,24 @@ def patch_layout_for_wallpaper(
             continue
         cfg = _decode_section_config(section)
         objects = cfg.setdefault("objects", {})
-        background_entry: dict[str, Any] = {
-            "properties": {
-                "image": {
-                    "name": {"expr": {"Literal": {"Value": f"'{resource_name}'"}}},
-                    "url": {"expr": {"Literal": {"Value": f"'{resource_name}'"}}},
-                    "scaling": {"expr": {"Literal": {"Value": f"'{fit}'"}}},
-                },
-                "transparency": {"expr": {"Literal": {"Value": f"{transparency}D"}}},
-            }
+        background_props: dict[str, Any] = {
+            "show": {"expr": {"Literal": {"Value": "true"}}},
+            "image": _image_block(resource_name, fit),
+            "transparency": {"expr": {"Literal": {"Value": f"{transparency}D"}}},
         }
-        objects["background"] = [background_entry]
+        objects["background"] = [{"properties": background_props}]
+        if apply_wallpaper_layer:
+            objects["wallpaper"] = [
+                {
+                    "properties": {
+                        "show": {"expr": {"Literal": {"Value": "true"}}},
+                        "image": _image_block(resource_name, fit),
+                        "transparency": {
+                            "expr": {"Literal": {"Value": f"{transparency}D"}}
+                        },
+                    }
+                }
+            ]
         if page_background_color:
             objects["outspace"] = [
                 {
@@ -220,7 +253,7 @@ def patch_layout_visuals(
     charts_spec = preset.get("charts", {})
     accent_map = cards_spec.get("accentMap", {})
 
-    counts = {"cards_styled": 0, "charts_styled": 0}
+    counts = {"cards_styled": 0, "charts_styled": 0, "titles_preserved": 0}
     for section in layout.get("sections", []) or []:
         if not isinstance(section, dict):
             continue
@@ -238,6 +271,11 @@ def patch_layout_visuals(
             sv = cfg.get("singleVisual")
             if not isinstance(sv, dict):
                 continue
+            # Snapshot any custom title BEFORE we replace vcObjects so it
+            # can be carried forward. Power BI stores the user-set title
+            # under ``objects.title`` (visual-level) — never overwrite a
+            # non-empty value with the preset's default chrome.
+            preserved_title = _extract_visual_title(sv)
             visual_type = str(sv.get("visualType", "")).lower()
             if visual_type in ("card", "multirowcard", "kpi", "labelledcard"):
                 measure_name = _first_measure_name(sv)
@@ -248,8 +286,44 @@ def patch_layout_visuals(
                 # Apply chart chrome (background + border) without accent.
                 sv["vcObjects"] = _vc_objects_for_card(charts_spec, None)
                 counts["charts_styled"] += 1
+            if preserved_title:
+                _reinstate_visual_title(sv, preserved_title)
+                counts["titles_preserved"] += 1
             container["config"] = json.dumps(cfg, ensure_ascii=False)
     return layout, counts
+
+
+def _extract_visual_title(single_visual: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the existing ``objects.title`` block when it carries a
+    non-empty text — used to round-trip user-set titles through the
+    styling pass.
+    """
+    objects = single_visual.get("objects")
+    if not isinstance(objects, dict):
+        return None
+    titles = objects.get("title")
+    if not isinstance(titles, list) or not titles:
+        return None
+    for entry in titles:
+        if not isinstance(entry, dict):
+            continue
+        props = entry.get("properties") or {}
+        text_node = props.get("text")
+        if not isinstance(text_node, dict):
+            continue
+        try:
+            value = text_node["expr"]["Literal"]["Value"]
+        except (KeyError, TypeError):
+            continue
+        if isinstance(value, str) and value.strip("'\" "):
+            return {"title": titles}
+    return None
+
+
+def _reinstate_visual_title(single_visual: dict[str, Any], block: dict[str, Any]) -> None:
+    objects = single_visual.setdefault("objects", {})
+    if "title" in block:
+        objects["title"] = block["title"]
 
 
 def _first_measure_name(single_visual: dict[str, Any]) -> str | None:

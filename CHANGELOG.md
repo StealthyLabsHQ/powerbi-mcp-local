@@ -3,6 +3,124 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.13.5] — 2026-05-13 — Styling canvas wallpaper + theme activation
+
+Field report on v0.13.3 / v0.13.4: PBIX files produced by
+`pbi_apply_style_preset` embedded the PNG + theme JSON + OPC manifest
+correctly, but Power BI Desktop opened with a blank canvas — the
+wallpaper was never wired into the Layout's canvas-background block,
+and the theme was never registered as active.
+
+### Causes
+
+1. `image.name` / `image.url` / `image.scaling` were emitted as
+   `{"expr": {"Literal": {"Value": "'…'"}}}` instead of bare strings.
+   Power BI silently drops canvas image references that wrap those
+   properties in Literal expressions — the binding mechanism only
+   accepts bare strings under `image.*`. The Literal wrapper still
+   applies to `show` / `transparency` (which *are* expression
+   evaluable).
+2. `image.url` had no `RegisteredResources/` prefix. PBI Desktop
+   resolves the URL relative to `StaticResources/`, so without the
+   prefix the lookup fails and the canvas falls back to blank.
+3. `objects.wallpaper` (the chrome layer around the canvas) was never
+   written, leaving a white halo around the styled canvas.
+4. The theme was set on `layout.activeTheme` only. Newer Power BI
+   builds read `layout.reportSettings.activeTheme`; both keys now get
+   the theme entry.
+5. Visual titles got overwritten whenever the preset pass re-built
+   `vcObjects`. The original user-set title was lost.
+
+### Fix
+
+1. **Bare-string image block** (`_embed.py::_image_block`). The
+   wallpaper entry is now:
+
+   ```json
+   "image": {
+     "name": "<filename>",
+     "url": "RegisteredResources/<filename>",
+     "scaling": "Stretch"
+   }
+   ```
+
+   while `show` and `transparency` keep their `Literal` expressions.
+   `scaling` enum extended to include `Stretch` (PBI default for
+   full-bleed wallpapers).
+
+2. **Wallpaper layer** also written to `objects.wallpaper`
+   (`apply_wallpaper_layer=True` by default) so the area surrounding
+   the canvas matches the canvas itself.
+
+3. **`wallpaper_fit` parameter** on
+   `pbi_apply_style_preset_tool`. Overrides the preset's
+   `page.wallpaper.fit`. Validated against the
+   `Fit / Fill / Normal / Stretch` enum at the boundary. Defaults of
+   `glassmorph_dark` and `glassmorph_light` switched to `Stretch`.
+
+4. **Theme activation in three places**: `layout.themeCollection`,
+   `layout.activeTheme`, and `layout.reportSettings.activeTheme`.
+   Duplicate entries in `themeCollection` are collapsed so a repeated
+   apply doesn't grow the list.
+
+5. **Custom title preservation**
+   (`_embed.py::_extract_visual_title`). Before the preset pass
+   rebuilds `vcObjects`, any non-empty
+   `objects.title[*].properties.text` is snapshotted and re-inserted
+   after styling. Empty titles are not counted as "preserved" so the
+   metric tracks real user-set titles.
+
+6. **Post-write validation gate**. The styling tool now re-extracts
+   the written PBIX and asserts:
+   - every targeted page has a wallpaper image reference that
+     resolves to a real archive part;
+   - the theme part exists and `layout.activeTheme` points at it;
+   - DBCC remains valid.
+   A failed assertion raises `PowerBIValidationError` with the
+   per-page error list so a half-applied style never returns ok=True.
+
+### New return-payload fields
+
+`pbi_apply_style_preset_tool` now returns, in addition to the
+existing keys:
+
+- `wallpaper_applied_pages: list[str]` — pages whose Layout now
+  references a real wallpaper part.
+- `theme_activated: bool` — true when the embedded theme path is
+  present at `layout.activeTheme` and the archive carries the part.
+- `custom_titles_preserved: int` — count of visuals whose user-set
+  title survived the styling pass.
+- `validation_errors: list[dict]` — empty when the file is ready to
+  open; the gate raises before this line if anything fails.
+- `wallpaper_fit: str` — the actual scaling used (after override
+  resolution).
+
+### Tests (+13)
+
+`tests/test_v0_13_5_canvas_activation.py`:
+
+- 5 schema tests (bare-string image block, wallpaper layer, fit
+  enum, glassmorph default `Stretch`).
+- 2 title-preservation tests (non-empty title kept, empty title not
+  counted).
+- 6 end-to-end apply tests (wallpaper reference + part exists, theme
+  in both layout roots, custom titles round-trip, `wallpaper_fit`
+  override, bad-fit rejection, validation gate fires when wallpaper
+  is missing).
+
+Plus the v0.13.3 schema test updated to assert the bare-string
+contract instead of the legacy Literal-wrapped form.
+
+Full suite: **387 passed**, 2 skipped (was 374 in v0.13.4; +13).
+
+### Demo
+
+`scripts/demo_glassmorph.py` generates a fixture PBIX with a
+custom-titled card, applies `glassmorph_dark`, and prints the full
+return payload (wallpaper pages, theme activation, preserved title,
+DBCC). Useful as the local "zero-click" smoke check before opening
+the file in Power BI Desktop.
+
 ## [0.13.4] — 2026-05-13 — Styling OPC manifest fix
 
 Field report on v0.13.3: PBIX files produced by `pbi_apply_style_preset`
