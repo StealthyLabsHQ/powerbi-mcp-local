@@ -75,6 +75,8 @@ READ_TOOLS = {
     "pbi_operation_history",
     "pbi_validate_theme",
     "pbi_list_scaffold_templates",
+    "pbi_diagnose_pbix_dbcc",
+    "pbi_check_scaffold_spec_dbcc_risks",
 }
 
 

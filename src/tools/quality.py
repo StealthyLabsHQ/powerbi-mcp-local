@@ -1376,7 +1376,20 @@ if ($proc -ne $null) {
 }
 
 $uniqueTexts = @($texts | Select-Object -Unique | Select-Object -First 200)
-$signals = @('Fix this', "Something's wrong with one or more fields", 'See details')
+$signals = @(
+    'Fix this',
+    "Something's wrong with one or more fields",
+    'See details',
+    'Something went wrong',
+    'Database consistency checks',
+    'DBCC',
+    'Vertipaq',
+    'string store',
+    'An error occurred while loading',
+    'Report this issue',
+    'Copy details to clipboard',
+    'multiple tables'
+)
 $matches = @()
 foreach ($signal in $signals) {
     if (($uniqueTexts -join "`n") -like "*$signal*") { $matches += $signal }

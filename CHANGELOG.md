@@ -3,6 +3,75 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.13.1] — 2026-05-13 — DBCC string-store hardening (post-build dialog fix)
+
+Field report on v0.13.0: after a `pbi_scaffold_pbix` / `pbi_create_persistent_report` build, Power BI Desktop reopened the file with a modal dialog:
+
+> Database consistency checks (DBCC) failed while checking the string
+> store. An error occurred while loading Vertipaq data objects for
+> multiple tables.
+
+### Cause
+
+`pbi_create_persistent_report` (and the v0.13 scaffold templates) generated tables with `rows=[]` whose schema declared at least one `String` column. The resulting `.pbix` had a Vertipaq dictionary referenced by metadata but never primed by data segments. On reopen, DBCC's dict ↔ segment consistency pass rejects the model.
+
+### Fix
+
+1. **Sentinel-row priming** (`src/tools/persistent_report.py`,
+   `src/tools/scaffold.py`). New `prime_string_store` parameter
+   (default `True`) on both tools. When enabled, every Import table
+   with `rows=[]`, no `source_csv` / `source_db`, and at least one
+   `String` column receives a single typed sentinel row before the
+   PBIX is written. The Vertipaq dictionary gets primed and DBCC
+   passes on reopen. Opt out via `prime_string_store=False` when the
+   table will be populated by the first Power BI refresh after open.
+   The tool response now includes
+   `primed_string_store_tables: [<table-name>, …]` so the caller can
+   see exactly which tables received the sentinel.
+
+2. **Static DBCC diagnostics** (`src/tools/dbcc.py`, new module).
+   - `pbi_diagnose_pbix_dbcc` — opens the `.pbix` zip, inventories
+     the DataModel / Report/Layout / Connections / Metadata parts,
+     and flags `no_data_model` or `undersized_data_model`
+     (≤ 4 KB ⇒ Vertipaq is empty ⇒ DBCC will fail). Static — no need
+     to open the file in Power BI Desktop.
+   - `pbi_check_scaffold_spec_dbcc_risks` — pre-build risk check on
+     the same `tables` shape that the scaffold/persistent_report
+     tools take. Flags `empty_string_table` (issue) and
+     `empty_import_table` (warning) so an LLM can correct the spec
+     before calling the builder.
+
+3. **Reopen probe signal list extended** (`src/tools/quality.py`).
+   `pbi_validate_pbix_reopen` now matches `Database consistency
+   checks`, `DBCC`, `Vertipaq`, `string store`, `An error occurred
+   while loading`, `Report this issue`, `Something went wrong`,
+   `Copy details to clipboard`, and `multiple tables` against the
+   UIAutomation tree. The next time this dialog appears the probe
+   surfaces a structured `powerbi_fix_this_signal` match instead of
+   only the screenshot.
+
+### Tests
+
+`tests/test_v0_13_1_dbcc.py` — 18 tests:
+- Spec-risk checker: empty-String flagged, numeric-only is warning,
+  rows present / `source_csv` / DirectQuery / invalid entries.
+- `_prime_string_store`: every type has a sentinel, no-op when rows
+  exist or no String columns, primed table flag set.
+- Static PBIX diagnoser: non-zip, no DataModel, undersized DataModel,
+  healthy model passes, `known_signals` exposed.
+- Reopen probe signal list contains every DBCC needle.
+
+### Test coverage
+
+`pytest -q` → **326 passed**, 2 skipped (was 308 in v0.13.0; +18).
+
+### Tool surface
+
+`+2` tools, no breaking signatures:
+
+- `pbi_diagnose_pbix_dbcc` (read)
+- `pbi_check_scaffold_spec_dbcc_risks` (read)
+
 ## [0.13.0] — 2026-05-13 — Major: PBIX scaffold, theme validation, security + test sweep
 
 Major release. Four orthogonal blocks:

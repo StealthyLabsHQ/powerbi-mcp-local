@@ -210,6 +210,7 @@ def pbi_scaffold_pbix_tool(
     theme_json_path: str | None = None,
     extra_measures: list[dict[str, Any]] | None = None,
     open_after_create: bool = False,
+    prime_string_store: bool = True,
 ) -> dict[str, Any]:
     """Create a starter PBIX from a named template.
 
@@ -249,6 +250,7 @@ def pbi_scaffold_pbix_tool(
         relationships=relationships,
         pages=pages,
         open_after_create=open_after_create,
+        prime_string_store=prime_string_store,
     )
 
     return ok(
@@ -265,6 +267,7 @@ def pbi_scaffold_pbix_tool(
         opened=creation.get("opened", False),
         pre_build_issues=creation.get("pre_build_issues", []),
         validation_issues=creation.get("validation_issues", []),
+        primed_string_store_tables=creation.get("primed_string_store_tables", []),
     )
 
 

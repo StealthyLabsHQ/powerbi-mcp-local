@@ -28,6 +28,20 @@ DATA_TYPE_ALIASES = {
 }
 PBIX_DATA_TYPES = {"String", "Int64", "Double", "DateTime", "Decimal", "Boolean"}
 
+# v0.13.1: Vertipaq DBCC string-store hardening. Empty Import tables with
+# String columns leave the dictionary un-primed on disk → DBCC fails on
+# reopen with "Database consistency checks failed while checking the
+# string store". A single sentinel row per affected table primes the
+# dictionary and the segments so DBCC's dict ↔ segment check passes.
+_SENTINEL_VALUES_BY_TYPE: dict[str, Any] = {
+    "String": "_seed_",
+    "Int64": 0,
+    "Double": 0.0,
+    "Decimal": 0.0,
+    "DateTime": "1899-12-30T00:00:00",
+    "Boolean": False,
+}
+
 
 def _load_pbix_builder() -> Any:
     try:
@@ -150,6 +164,38 @@ def _validation_issue_dict(issue: Any) -> dict[str, Any]:
     return {"level": str(level or ""), "message": str(message or issue)}
 
 
+def _prime_string_store(table: dict[str, Any]) -> dict[str, Any]:
+    """Inject a single sentinel row when a table is at DBCC risk.
+
+    The risk is: ``mode='import'`` + ``rows=[]`` + no ``source_csv`` /
+    ``source_db`` + at least one ``String`` column. Vertipaq's
+    consistency check rejects the resulting un-primed dictionary on
+    reopen. Adding one typed sentinel row is the minimal mutation that
+    primes the dictionary while leaving the column count, names, and
+    types intact.
+    """
+    if table.get("rows"):
+        return table
+    if str(table.get("mode", "import")).lower() != "import":
+        return table
+    if table.get("source_csv") or table.get("source_db"):
+        return table
+    columns = table.get("columns") or []
+    has_string = any(
+        isinstance(col, dict) and str(col.get("data_type", "")) == "String" for col in columns
+    )
+    if not has_string:
+        return table
+    sentinel_row: list[Any] = []
+    for col in columns:
+        data_type = str(col.get("data_type", "")) if isinstance(col, dict) else ""
+        sentinel_row.append(_SENTINEL_VALUES_BY_TYPE.get(data_type, None))
+    primed = dict(table)
+    primed["rows"] = [sentinel_row]
+    primed["__primed_string_store__"] = True
+    return primed
+
+
 def pbi_create_persistent_report_tool(
     output_path: str,
     tables: list[dict[str, Any]],
@@ -157,12 +203,24 @@ def pbi_create_persistent_report_tool(
     relationships: list[dict[str, Any]] | None = None,
     pages: list[dict[str, Any]] | None = None,
     open_after_create: bool = False,
+    prime_string_store: bool = True,
 ) -> dict[str, Any]:
-    """Create a persistent PBIX with DataModel, DAX measures, relationships, pages, and native visuals."""
+    """Create a persistent PBIX with DataModel, DAX measures, relationships, pages, and native visuals.
+
+    ``prime_string_store`` (default ``True``) injects a one-row sentinel
+    into every empty Import table whose schema declares a String column,
+    so Vertipaq's DBCC string-store consistency check passes on reopen.
+    Disable only when you know the table will be populated by Power BI
+    Desktop's first refresh (e.g. via a DirectQuery binding or a Power
+    Query expression set after the PBIX is created).
+    """
     output = resolve_local_path(output_path, must_exist=False, allowed_extensions={".pbix"})
     output.parent.mkdir(parents=True, exist_ok=True)
 
     normalized_tables = _validate_tables(tables)
+    if prime_string_store:
+        normalized_tables = [_prime_string_store(table) for table in normalized_tables]
+    primed_table_names = [t["name"] for t in normalized_tables if t.get("__primed_string_store__")]
     normalized_measures = _validate_measures(measures)
     normalized_relationships = _validate_relationships(relationships)
     normalized_pages = _validate_pages(pages)
@@ -230,6 +288,7 @@ def pbi_create_persistent_report_tool(
         pre_build_issues=pre_build_issues,
         validation_issues=validation_issues,
         opened=opened,
+        primed_string_store_tables=primed_table_names,
     )
 
 

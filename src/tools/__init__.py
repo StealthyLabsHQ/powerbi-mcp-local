@@ -64,6 +64,10 @@ from .model import (
     pbi_system_health_tool,
     pbi_validate_model_tool,
 )
+from .dbcc import (
+    pbi_check_scaffold_spec_dbcc_risks_tool,
+    pbi_diagnose_pbix_dbcc_tool,
+)
 from .persistent_report import pbi_create_persistent_report_tool
 from .scaffold import (
     pbi_list_scaffold_templates_tool,
@@ -307,6 +311,8 @@ __all__ = [
     "pbi_create_persistent_report_tool",
     "pbi_scaffold_pbix_tool",
     "pbi_list_scaffold_templates_tool",
+    "pbi_diagnose_pbix_dbcc_tool",
+    "pbi_check_scaffold_spec_dbcc_risks_tool",
     "pbi_persist_now_tool",
     "pbi_extract_report_tool",
     "pbi_compile_report_tool",
