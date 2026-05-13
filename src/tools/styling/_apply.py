@@ -51,6 +51,7 @@ from ..visuals._themes import (
 )
 from ._accent import pick_accent
 from ._embed import (
+    CONTENT_TYPES_PART,
     LAYOUT_PART,
     THEMES_DIR,
     WALLPAPER_DIR,
@@ -59,6 +60,7 @@ from ._embed import (
     repack_pbix,
     sanitize_resource_name,
     sha1_short,
+    validate_content_types_declarations,
 )
 from ._png import inspect_png, write_gradient_png
 from ._presets import PRESETS
@@ -261,6 +263,36 @@ def pbi_apply_style_preset_tool(
     pbix_out_path.parent.mkdir(parents=True, exist_ok=True)
     pbix_out_path.write_bytes(new_pbix)
 
+    # Post-write Content-Types validation. The OPC manifest must declare
+    # a ``Default`` entry for every extension among the archive's parts;
+    # Power BI rejects PBIX files with ``MashupValidationError`` ("This
+    # file is corrupted or was created by an unrecognized version of
+    # Power BI Desktop") when a part's extension has no Default
+    # Content-Type declaration. ``repack_pbix`` writes the patched
+    # manifest — this re-read is the fail-loud safety net.
+    import zipfile as _zf
+
+    with _zf.ZipFile(pbix_out_path, "r") as out_zip:
+        out_names = out_zip.namelist()
+        try:
+            out_content_types = out_zip.read(CONTENT_TYPES_PART)
+        except KeyError:
+            out_content_types = b""
+    required_exts = {
+        Path(name).suffix.lstrip(".").lower()
+        for name in out_names
+        if name not in {CONTENT_TYPES_PART, ""} and "." in Path(name).name
+    }
+    missing_declarations = validate_content_types_declarations(out_content_types, required_exts)
+    if missing_declarations:
+        raise PowerBIValidationError(
+            "Output PBIX [Content_Types].xml is missing Default entries for embedded parts.",
+            details={
+                "output_path": str(pbix_out_path),
+                "missing_extensions": missing_declarations,
+            },
+        )
+
     # Post-write DBCC diagnostic — the round-trip should never regress
     # the string-store. If it does, surface that loudly.
     dbcc = pbi_diagnose_pbix_dbcc_tool(str(pbix_out_path))
@@ -276,6 +308,8 @@ def pbi_apply_style_preset_tool(
         output_path=str(pbix_out_path),
         dbcc_valid=dbcc_valid,
         dbcc=dbcc,
+        content_types_required=sorted(required_exts),
+        content_types_missing=missing_declarations,
     )
 
 

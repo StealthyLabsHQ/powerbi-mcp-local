@@ -26,6 +26,23 @@ from typing import Any
 LAYOUT_PART = "Report/Layout"
 WALLPAPER_DIR = "StaticResources/RegisteredResources"
 THEMES_DIR = "StaticResources/SharedResources/BaseThemes"
+CONTENT_TYPES_PART = "[Content_Types].xml"
+
+# Maps lowercase file extension → OPC Default ContentType. A PBIX is an
+# OPC package; Power BI rejects the file with MashupValidationError
+# ("This file is corrupted or was created by an unrecognized version of
+# Power BI Desktop") if a part is present whose extension has no Default
+# entry in ``[Content_Types].xml``.
+_DEFAULT_CONTENT_TYPES: dict[str, str] = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "bmp": "image/bmp",
+    "svg": "image/svg+xml",
+    "json": "application/json",
+    "xml": "application/xml",
+}
 
 
 _SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -249,6 +266,93 @@ def _first_measure_name(single_visual: dict[str, Any]) -> str | None:
     return None
 
 
+def _required_extensions(part_names: list[str]) -> set[str]:
+    """Return the lowercase extension set across ``part_names``."""
+    extensions: set[str] = set()
+    for name in part_names:
+        ext = Path(name).suffix.lstrip(".").lower()
+        if ext:
+            extensions.add(ext)
+    return extensions
+
+
+def patch_content_types(
+    raw_xml: bytes,
+    required_extensions: set[str],
+) -> tuple[bytes, list[str]]:
+    """Ensure ``[Content_Types].xml`` declares a ``Default`` entry for
+    every extension in ``required_extensions``.
+
+    Returns the (possibly unchanged) XML bytes plus the list of
+    extensions that were newly added. Preserves the original document's
+    UTF-8 declaration when present. ``raw_xml`` may be empty when the
+    source PBIX has no ``[Content_Types].xml`` yet (rare — older
+    builders sometimes skip it). In that case a minimal document with
+    every known extension is written from scratch.
+    """
+    added: list[str] = []
+
+    if not raw_xml.strip():
+        body = (
+            b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            b'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        )
+        for ext in sorted(required_extensions):
+            content_type = _DEFAULT_CONTENT_TYPES.get(ext, "application/octet-stream")
+            body += f'<Default Extension="{ext}" ContentType="{content_type}"/>'.encode("utf-8")
+            added.append(ext)
+        body += b"</Types>"
+        return body, added
+
+    text = raw_xml.decode("utf-8")
+    declared: set[str] = set()
+    declared_re = re.compile(
+        r'<Default\s+[^>]*?Extension\s*=\s*"([^"]+)"',
+        re.IGNORECASE,
+    )
+    for match in declared_re.finditer(text):
+        declared.add(match.group(1).lower())
+
+    missing = required_extensions - declared
+    if not missing:
+        return raw_xml, added
+
+    # Insert the new Default elements right before ``</Types>``. The OPC
+    # spec allows any order; the closing tag is the only stable anchor
+    # we need. Fallback: append before the document's end if the closing
+    # tag is missing for any reason.
+    inserts = "".join(
+        f'<Default Extension="{ext}" ContentType="{_DEFAULT_CONTENT_TYPES.get(ext, "application/octet-stream")}"/>'
+        for ext in sorted(missing)
+    )
+    if "</Types>" in text:
+        patched = text.replace("</Types>", inserts + "</Types>", 1)
+    else:
+        patched = text.rstrip() + inserts
+
+    added = sorted(missing)
+    return patched.encode("utf-8"), added
+
+
+def validate_content_types_declarations(
+    raw_xml: bytes,
+    required_extensions: set[str],
+) -> list[str]:
+    """Return the list of extensions present in part list but missing
+    from ``[Content_Types].xml``. Empty list ⇒ everything declared.
+    """
+    if not raw_xml.strip():
+        return sorted(required_extensions)
+    text = raw_xml.decode("utf-8", errors="ignore")
+    declared = {
+        match.group(1).lower()
+        for match in re.finditer(
+            r'<Default\s+[^>]*?Extension\s*=\s*"([^"]+)"', text, re.IGNORECASE
+        )
+    }
+    return sorted(required_extensions - declared)
+
+
 def repack_pbix(
     source_pbix: bytes,
     *,
@@ -257,16 +361,38 @@ def repack_pbix(
 ) -> bytes:
     """Return a new PBIX zip with the patched ``Report/Layout`` and any
     extra resources merged in. Original parts are copied verbatim.
+
+    The ``[Content_Types].xml`` part is rewritten so every extension
+    used by an embedded resource has a matching ``Default`` entry. Power
+    BI rejects PBIX files with ``MashupValidationError`` when a part's
+    extension has no Default Content-Type declaration — embedding a PNG
+    without updating the manifest is a hard fail on reopen.
     """
+    # Build the set of every extension referenced by the resulting
+    # archive (original parts kept verbatim plus the new resources).
     out_buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(source_pbix), "r") as src:
+        existing_names = src.namelist()
+        try:
+            existing_content_types = src.read(CONTENT_TYPES_PART)
+        except KeyError:
+            existing_content_types = b""
+
+    final_part_names = [n for n in existing_names if n not in {LAYOUT_PART, CONTENT_TYPES_PART}]
+    final_part_names.append(LAYOUT_PART)
+    final_part_names.extend(new_resources.keys())
+    required_exts = _required_extensions(final_part_names)
+    new_content_types, _ = patch_content_types(existing_content_types, required_exts)
+
     with zipfile.ZipFile(io.BytesIO(source_pbix), "r") as src, zipfile.ZipFile(
         out_buf, "w", zipfile.ZIP_DEFLATED
     ) as dst:
-        replaced = {LAYOUT_PART, *new_resources.keys()}
+        replaced = {LAYOUT_PART, CONTENT_TYPES_PART, *new_resources.keys()}
         for info in src.infolist():
             if info.filename in replaced:
                 continue
             dst.writestr(info, src.read(info.filename))
+        dst.writestr(CONTENT_TYPES_PART, new_content_types)
         dst.writestr(LAYOUT_PART, new_layout)
         for name, data in new_resources.items():
             dst.writestr(name, data)
@@ -274,12 +400,15 @@ def repack_pbix(
 
 
 __all__ = [
+    "CONTENT_TYPES_PART",
     "LAYOUT_PART",
     "WALLPAPER_DIR",
     "THEMES_DIR",
+    "patch_content_types",
     "patch_layout_for_wallpaper",
     "patch_layout_visuals",
     "repack_pbix",
     "sanitize_resource_name",
     "sha1_short",
+    "validate_content_types_declarations",
 ]

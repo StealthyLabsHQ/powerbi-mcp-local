@@ -3,6 +3,70 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.13.4] — 2026-05-13 — Styling OPC manifest fix
+
+Field report on v0.13.3: PBIX files produced by `pbi_apply_style_preset`
+opened with:
+
+> MashupValidationError: This file is corrupted or was created by an
+> unrecognized version of Power BI Desktop.
+
+### Cause
+
+A PBIX is an OPC (Open Packaging Conventions) package. Every part's
+extension must be declared in `[Content_Types].xml` via a `Default`
+entry. The v0.13.3 repacker embedded
+`StaticResources/RegisteredResources/<name>.png` without touching the
+manifest, so the PBIX had a PNG part whose extension wasn't declared
+→ hard fail on reopen.
+
+### Fix
+
+1. **`patch_content_types(raw_xml, required_extensions)`** in
+   `src/tools/styling/_embed.py`. Reads the existing
+   `[Content_Types].xml`, parses every declared `Default Extension="…"`,
+   and adds the missing entries before `</Types>`. Catalogue:
+   `png → image/png`, `jpg/jpeg → image/jpeg`, `gif → image/gif`,
+   `bmp → image/bmp`, `svg → image/svg+xml`, `json → application/json`,
+   `xml → application/xml`. Returns the patched bytes plus the list
+   of extensions that were added. Handles the rare case where
+   `[Content_Types].xml` is absent by writing a minimal document with
+   every required `Default`.
+
+2. **`repack_pbix` rewrites the manifest** on every apply. Builds the
+   final part-name list, derives the required extension set, and
+   writes the patched `[Content_Types].xml` alongside the new layout
+   and resources.
+
+3. **Post-write fail-loud validation**
+   (`validate_content_types_declarations` + apply-tool re-read). The
+   styling tool now opens the freshly-written PBIX, reads
+   `[Content_Types].xml`, and asserts every extension among the parts
+   has a matching `Default`. A missing declaration raises
+   `PowerBIValidationError` with the offending extension list so the
+   caller never ships a broken file silently. Response carries
+   `content_types_required: [...]` and `content_types_missing: [...]`
+   for downstream inspection.
+
+### Tests
+
+`tests/test_v0_13_4_content_types.py` — 11 tests:
+
+- Catalogue + extension extraction.
+- Patch adds missing PNG entry, preserves existing XML entry.
+- Patch is a no-op when everything is already declared.
+- Patch handles a missing `[Content_Types].xml` (writes a fresh one).
+- Validator lists missing extensions / returns empty when complete /
+  treats missing XML as fully-missing.
+- Apply tool writes the PNG + JSON Default entries on a real PBIX
+  round-trip.
+- Apply tool synthesises `[Content_Types].xml` when the source PBIX
+  lacks one.
+- Repeated apply is idempotent — each extension appears exactly once
+  in the manifest, no duplicates accumulate.
+
+Full suite: **374 passed**, 2 skipped (was 363 in v0.13.3; +11).
+
 ## [0.13.3] — 2026-05-13 — One-shot styling presets (wallpaper + chrome + theme)
 
 End goal: a single MCP call configures wallpaper, page background, card
