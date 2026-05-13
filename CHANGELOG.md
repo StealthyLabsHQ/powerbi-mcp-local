@@ -3,6 +3,120 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.13.3] — 2026-05-13 — One-shot styling presets (wallpaper + chrome + theme)
+
+End goal: a single MCP call configures wallpaper, page background, card
+chrome, chart chrome, accent colours, and theme JSON on every page of an
+existing PBIX. Zero manual clicks in Power BI Desktop.
+
+### New tools
+
+1. **`pbi_apply_style_preset`** (`src/tools/styling/_apply.py`). Applies
+   a built-in or custom preset to an existing `.pbix`. Pipeline:
+   - Unzip PBIX in memory.
+   - Embed wallpaper PNG under
+     `StaticResources/RegisteredResources/<sanitized>_<sha1>.png`
+     (SHA-1 dedup; reapplication never bloats the archive).
+   - Patch every `ReportSection.config.objects.background` with the
+     canonical Power BI wallpaper block (image + fit + transparency)
+     plus the page background colour from the preset.
+   - Patch every visual's `vcObjects` with the preset's card / chart
+     chrome (background, border, drop shadow, radius, weight,
+     transparency).
+   - Pick a card border accent per visual from the bound measure name
+     via the heuristic in `_accent.py`
+     (`positive` / `warning` / `info` / `neutral`).
+   - Embed the preset's theme JSON under
+     `StaticResources/SharedResources/BaseThemes/<name>.json` and set
+     `layout.activeTheme` + `layout.themeCollection`.
+   - Repack the PBIX.
+   - Run `pbi_diagnose_pbix_dbcc` on the output — fail loud if the
+     styling round-trip regressed the string store.
+
+2. **`pbi_list_style_presets`**. Returns the catalogue with `name`,
+   `description`, `palette`, and `default_wallpaper` per preset.
+
+### Built-in preset catalogue (5)
+
+- `glassmorph_dark` — frosted navy glass on dark gradient.
+- `glassmorph_light` — translucent white on sky gradient.
+- `neon_cyber` — magenta / cyan / lime on near-black.
+- `minimal_corporate` — white canvas, hairline borders, no shadows.
+- `dark_pro` — saturated dark dashboard, opaque cards, sharp accents.
+
+Each ships a full theme JSON (passes the v0.13 theme validator), a
+palette, card + chart chrome specs, and an `accentMap`. Default
+wallpapers are generated lazily as vertical-gradient PNGs (native
+zlib + PNG chunk writer — no Pillow runtime dep) into
+`src/tools/styling/_wallpapers/` and cached.
+
+### Auto-accent inference
+
+`infer_accent_key(measure_name)` matches against documented
+substrings (case-insensitive):
+
+- `croissance` / `growth` / `marge brute` / `gross margin` / `ebe` /
+  `ebit` / `marge nette` / `net margin` / `profit` → `positive`
+- `endettement` / `debt` / `leverage` / `bfr` / `wcr` / `charge` /
+  `expense` / `frais` / `cost` → `warning`
+- `var` / `variance` / `geo` / `atelier` / `workshop` / `store` →
+  `info`
+- otherwise → `neutral`
+
+Override per measure via `custom_spec`.
+
+### Integration with `pbi_create_persistent_report`
+
+Three new optional parameters on `pbi_create_persistent_report_tool`:
+
+- `style_preset: str | None`
+- `style_wallpaper_path: str | None`
+- `style_custom_spec: dict | None`
+
+When `style_preset` is set, the styling apply step runs immediately
+after save. Single-call path from spec → PBIX + chrome + theme +
+wallpaper.
+
+### Validation
+
+- Wallpaper: native PNG IHDR inspection. Reject > 1920 × 1080 or
+  > 2 MB before embed. No Pillow runtime dependency.
+- Preset palette: every value must match `#RRGGBB`.
+- Preset theme: reuses `validate_theme_payload` (size cap + key
+  allowlist + colour format + URL guard).
+- Output PBIX: `pbi_diagnose_pbix_dbcc` runs post-write — regression
+  on string store fails the call.
+
+### Tests (+22)
+
+`tests/test_v0_13_3_styling.py`:
+
+- 4 preset-catalogue tests (count, palette hex, theme schema, accent
+  map shape).
+- 7 accent-inference tests (positive / warning / info / neutral /
+  fallback chain).
+- 2 native-PNG round-trip tests.
+- 5 embed-helper tests (sanitize, sha1 dedup, wallpaper section
+  patch, page filter, vcObjects emission).
+- 4 end-to-end apply-tool tests on a synthetic PBIX (wallpaper +
+  theme embedded, page filter respected, custom preset path).
+
+Full suite: **363 passed**, 2 skipped (was 341 in v0.13.2; +22).
+
+### Tool surface
+
+`+2` MCP tools, no breaking signatures:
+
+- `pbi_apply_style_preset` (write)
+- `pbi_list_style_presets` (read)
+
+### Out of scope (documented for future work)
+
+- Custom font embedding (Power BI doesn't expose this in the layout).
+- Animated backgrounds.
+- CSS-like blend modes (Power BI limitation).
+- Mobile layout styling.
+
 ## [0.13.2] — 2026-05-13 — pbix-mcp 0.9.2 upstream patches (5 bugs)
 
 In-tree patches against the vendored `pbix-mcp` 0.9.2 dependency

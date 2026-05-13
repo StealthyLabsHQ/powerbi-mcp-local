@@ -16,6 +16,9 @@ tmp_*/
 build/
 REMNANT.md
 
+# Procedurally-generated wallpaper PNGs cached by the styling layer.
+src/tools/styling/_wallpapers/*.png
+
 # Live-only test scripts that need Power BI Desktop running.
 tests/demo_*.py
 tests/smoke_e2e.py

@@ -204,6 +204,9 @@ def pbi_create_persistent_report_tool(
     pages: list[dict[str, Any]] | None = None,
     open_after_create: bool = False,
     prime_string_store: bool = True,
+    style_preset: str | None = None,
+    style_wallpaper_path: str | None = None,
+    style_custom_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a persistent PBIX with DataModel, DAX measures, relationships, pages, and native visuals.
 
@@ -213,6 +216,16 @@ def pbi_create_persistent_report_tool(
     Disable only when you know the table will be populated by Power BI
     Desktop's first refresh (e.g. via a DirectQuery binding or a Power
     Query expression set after the PBIX is created).
+
+    ``style_preset`` (optional) names a built-in styling preset
+    (``glassmorph_dark``, ``glassmorph_light``, ``neon_cyber``,
+    ``minimal_corporate``, ``dark_pro``, or ``custom``). When set, the
+    matching preset is applied to the file via
+    ``pbi_apply_style_preset_tool`` right after save, so the produced
+    PBIX opens with wallpaper, card chrome, accent colours, and the
+    preset's theme already wired up. ``style_wallpaper_path`` overrides
+    the preset's default wallpaper; ``style_custom_spec`` is required
+    when ``style_preset='custom'``.
     """
     output = resolve_local_path(output_path, must_exist=False, allowed_extensions={".pbix"})
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -289,6 +302,19 @@ def pbi_create_persistent_report_tool(
         subprocess.Popen(["cmd", "/c", "start", "", str(output)], shell=False)
         opened = True
 
+    styling_result: dict[str, Any] | None = None
+    if style_preset:
+        # Lazy import to avoid bringing the styling layer into module
+        # import time for callers that don't use it.
+        from .styling import pbi_apply_style_preset_tool
+
+        styling_result = pbi_apply_style_preset_tool(
+            pbix_path=str(output),
+            preset=style_preset,
+            wallpaper_path=style_wallpaper_path,
+            custom_spec=style_custom_spec,
+        )
+
     return ok(
         "Persistent PBIX report created successfully.",
         output_path=str(Path(output)),
@@ -301,6 +327,7 @@ def pbi_create_persistent_report_tool(
         validation_issues=validation_issues,
         opened=opened,
         primed_string_store_tables=primed_table_names,
+        styling=styling_result,
     )
 
 

@@ -77,6 +77,7 @@ READ_TOOLS = {
     "pbi_list_scaffold_templates",
     "pbi_diagnose_pbix_dbcc",
     "pbi_check_scaffold_spec_dbcc_risks",
+    "pbi_list_style_presets",
 }
 
 
@@ -203,6 +204,7 @@ WRITE_TOOLS = {
     "pbi_apply_design",
     "pbi_apply_theme",
     "pbi_export_active_theme",
+    "pbi_apply_style_preset",
     "pbi_scaffold_pbix",
     "pbi_build_dashboard",
     "pbi_excel_import_workflow",
