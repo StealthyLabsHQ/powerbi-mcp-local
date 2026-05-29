@@ -38,8 +38,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/StealthyLabsHQ/powerbi-mcp-local"
-Repository = "https://github.com/StealthyLabsHQ/powerbi-mcp-local"
+Homepage = "https://github.com/stealthsrc/powerbi-mcp-local"
+Repository = "https://github.com/stealthsrc/powerbi-mcp-local"
 
 [project.scripts]
 powerbi-mcp-local = "src.server:main"

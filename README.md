@@ -14,7 +14,7 @@ Automate semantic model changes, DAX, Power Query, Excel, and report layout from
 [![Tools 162](https://img.shields.io/badge/tools-162-orange)](#tool-catalog)
 <!-- Update the badge above by running `python scripts/tool_count.py` from the repo root. -->
 
-[![CI](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml/badge.svg)](https://github.com/StealthyLabsHQ/powerbi-mcp-local/actions/workflows/ci.yml)
+[![CI](https://github.com/stealthsrc/powerbi-mcp-local/actions/workflows/ci.yml/badge.svg)](https://github.com/stealthsrc/powerbi-mcp-local/actions/workflows/ci.yml)
 
 </div>
 
@@ -66,7 +66,7 @@ ADOMD.NET ships with Power BI Desktop. If `pbi-tools` is not on `PATH`, set `PBI
 ## Quick Start
 
 ```powershell
-git clone https://github.com/StealthyLabsHQ/powerbi-mcp-local.git
+git clone https://github.com/stealthsrc/powerbi-mcp-local.git
 cd powerbi-mcp-local
 pip install -r requirements.txt
 ```

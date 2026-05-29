@@ -8,7 +8,7 @@ It supports two transports:
 ## Prerequisites (all platforms)
 
 ```powershell
-git clone https://github.com/StealthyLabsHQ/powerbi-mcp-local.git
+git clone https://github.com/stealthsrc/powerbi-mcp-local.git
 cd powerbi-mcp-local
 pip install -r requirements.txt
 ```
