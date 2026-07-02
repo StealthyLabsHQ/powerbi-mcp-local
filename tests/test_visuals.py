@@ -23,6 +23,7 @@ from tools.formats import (
 )
 from tools.visuals import (
     LAYOUT_RELATIVE_PATH,
+    ReportLayoutError,
     _find_pbi_tools,
     _maybe_force_close_powerbi,
     _query_ref,
@@ -383,7 +384,7 @@ class VisualToolTests(unittest.TestCase):
         ):
             self.assertEqual(_find_pbi_tools(), str(bundled))
 
-    def test_force_close_saves_before_kill_fallback(self) -> None:
+    def test_force_close_refuses_kill_without_verified_save(self) -> None:
         with (
             patch("tools.visuals.os.name", "nt"),
             patch(
@@ -393,7 +394,23 @@ class VisualToolTests(unittest.TestCase):
             patch("tools.visuals._force_kill_powerbi") as force_kill,
             patch("tools.visuals.time.sleep"),
         ):
-            _maybe_force_close_powerbi(True)
+            with self.assertRaisesRegex(ReportLayoutError, "Refusing to force-kill"):
+                _maybe_force_close_powerbi(True)
+
+        graceful.assert_called_once_with(None)
+        force_kill.assert_not_called()
+
+    def test_force_close_kills_after_verified_save(self) -> None:
+        with (
+            patch("tools.visuals.os.name", "nt"),
+            patch(
+                "tools.visuals._save_and_close_powerbi_gracefully",
+                return_value=False,
+            ) as graceful,
+            patch("tools.visuals._force_kill_powerbi") as force_kill,
+            patch("tools.visuals.time.sleep"),
+        ):
+            _maybe_force_close_powerbi(True, save_verified=True)
 
         graceful.assert_called_once_with(None)
         force_kill.assert_called_once_with()

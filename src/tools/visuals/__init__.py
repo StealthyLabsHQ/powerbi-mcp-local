@@ -156,6 +156,11 @@ from ._dispatcher import (
     _VISUAL_TYPE_DISPATCH,
     pbi_add_visual_tool,
 )
+from ._errors import (
+    REPAIRABLE_ERRORS,
+    pbi_list_repairable_errors_tool,
+    pbi_repair_loop_tool,
+)
 from ._formatting import (
     _VISUAL_FORMAT_TYPES,
     _datapoint_fill_objects,
@@ -174,6 +179,10 @@ from ._home_tables import (
     _persistence_risks,
     _resolve_measure_home_map,
     _scan_measure_home_tables,
+)
+from ._intent import (
+    pbi_add_visual_from_intent_tool,
+    pbi_plan_visual_tool,
 )
 from ._io import (
     _extract_pbix_zip_natively,
@@ -220,7 +229,12 @@ from ._structure import (
 )
 
 __all__ = [
+    "REPAIRABLE_ERRORS",
     "pbi_add_visual_tool",
+    "pbi_add_visual_from_intent_tool",
+    "pbi_plan_visual_tool",
+    "pbi_list_repairable_errors_tool",
+    "pbi_repair_loop_tool",
     "pbi_add_area_chart_tool",
     "pbi_add_bar_chart_tool",
     "pbi_add_clustered_column_chart_tool",

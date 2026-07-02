@@ -25,7 +25,7 @@ from mcp_core import (
 from security import SECURITY, SecurityPolicyError
 
 # Imports needed only by the @mcp.resource() handlers below — every other
-# tools.* import has moved into the corresponding wrappers/<domain>.py module.
+# tools.* export is registered automatically via wrappers.register_all().
 from tools import (
     pbi_list_measures_tool,
     pbi_list_relationships_tool,
@@ -46,23 +46,11 @@ def find_pbi_port(preferred_port: int | None = None) -> int:
     raise ValueError(f"No Power BI instance found on port {preferred_port}.")
 
 
-# Side-effect imports: each wrappers module registers its @mcp.tool()
-# wrappers as it loads, populating the FastMCP tool registry.
-from wrappers import calc_groups as _wrappers_calc_groups  # noqa: F401
-from wrappers import connection as _wrappers_connection  # noqa: F401
-from wrappers import excel as _wrappers_excel  # noqa: F401
-from wrappers import measures as _wrappers_measures  # noqa: F401
-from wrappers import model as _wrappers_model  # noqa: F401
-from wrappers import power_query as _wrappers_power_query  # noqa: F401
-from wrappers import project as _wrappers_project  # noqa: F401
-from wrappers import quality as _wrappers_quality  # noqa: F401
-from wrappers import query as _wrappers_query  # noqa: F401
-from wrappers import relationships as _wrappers_relationships  # noqa: F401
-from wrappers import rls as _wrappers_rls  # noqa: F401
-from wrappers import tmdl as _wrappers_tmdl  # noqa: F401
-from wrappers import ui_automation as _wrappers_ui_automation  # noqa: F401
-from wrappers import visuals as _wrappers_visuals  # noqa: F401
-from wrappers import workflows as _wrappers_workflows  # noqa: F401
+# Register every public tools.__all__ ``*_tool`` as an @mcp.tool() wrapper.
+# Single source of truth — replaces the historical per-domain wrapper modules.
+import wrappers
+
+wrappers.register_all()
 
 
 @mcp.resource("powerbi://model/schema")

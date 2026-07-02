@@ -39,6 +39,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from atomic_io import atomic_write_bytes
 from pbi_connection import PowerBIValidationError, ok
 from security import resolve_local_path
 
@@ -282,8 +283,9 @@ def pbi_apply_style_preset_tool(
     }
     new_pbix = repack_pbix(pbix_bytes, new_layout=new_layout, new_resources=new_resources)
 
-    pbix_out_path.parent.mkdir(parents=True, exist_ok=True)
-    pbix_out_path.write_bytes(new_pbix)
+    # Atomic replace + .bak: without output_path the target IS the source
+    # .pbix, so a crash mid-write must never truncate the user's original.
+    backup_path = atomic_write_bytes(pbix_out_path, new_pbix, backup=True)
 
     # Post-write Content-Types validation. The OPC manifest must declare
     # a ``Default`` entry for every extension among the archive's parts;
@@ -413,6 +415,7 @@ def pbi_apply_style_preset_tool(
         custom_titles_preserved=visual_counts.get("titles_preserved", 0),
         validation_errors=validation_errors,
         output_path=str(pbix_out_path),
+        backup_path=str(backup_path) if backup_path else None,
         dbcc_valid=dbcc_valid,
         dbcc=dbcc,
         content_types_required=sorted(required_exts),

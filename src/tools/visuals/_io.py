@@ -469,7 +469,15 @@ def attempt_pbi_save_before_close(pbix_path: Path | None, timeout_seconds: float
     return info
 
 
-def _maybe_force_close_powerbi(force: bool, pbix_path: Path | None = None) -> None:
+def _maybe_force_close_powerbi(force: bool, pbix_path: Path | None = None, *, save_verified: bool = False) -> None:
+    """Close (and if safe, kill) Power BI Desktop when ``force=True``.
+
+    ``taskkill /F`` discards every TOM mutation that has not been flushed
+    to the PBIX (writes commit to the in-memory AS engine only), so the
+    kill is refused unless either the graceful save-and-close succeeded
+    or the caller verified a save beforehand (``save_verified=True``,
+    e.g. via ``attempt_pbi_save_before_close`` observing an mtime change).
+    """
     if not force:
         return
     if os.name != "nt":
@@ -482,6 +490,14 @@ def _maybe_force_close_powerbi(force: bool, pbix_path: Path | None = None) -> No
     from . import _save_and_close_powerbi_gracefully as _graceful
 
     if not _graceful(pbix_path):
+        if not save_verified:
+            raise ReportLayoutError(
+                "Refusing to force-kill Power BI Desktop: the graceful save-and-close "
+                "failed and no prior save was verified, so unsaved model edits would be "
+                "lost. Save manually in Power BI Desktop (Ctrl+S) and retry, or rerun "
+                "with save_before_close=True and confirm save_attempt.mtime_changed.",
+                details={"pbix_path": str(pbix_path) if pbix_path else None},
+            )
         _kill()
     time.sleep(1.5)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -65,6 +66,9 @@ READ_TOOLS = {
     "pbi_get_page",
     "pbi_validate_report_fields",
     "pbi_repair_report_fields",
+    "pbi_repair_loop",
+    "pbi_list_repairable_errors",
+    "pbi_plan_visual",
     "pbi_validate_star_schema",
     "pbi_detect_circular_dependencies",
     "pbi_validate_power_query_steps",
@@ -135,6 +139,7 @@ WRITE_TOOLS = {
     "pbi_remove_role_member",
     "pbi_create_calc_group",
     "pbi_add_visual",
+    "pbi_add_visual_from_intent",
     "pbi_set_power_query",
     "pbi_parameterize_data_source",
     "pbi_relocate_data_source",
@@ -263,7 +268,7 @@ MODEL_NAME_PARAM_KEYS = {
     "sheet_name",
     "sheet",
 }
-MEASURE_NAME_PARAM_KEYS = {"name", "new_name"}
+MEASURE_NAME_PARAM_KEYS = {"name", "new_name", "measure_name"}
 PATH_PARAM_KEYS = {
     "path",
     "file_path",
@@ -654,7 +659,12 @@ def _validate_string(tool_name: str, key: str, value: str, policy: SecurityPolic
                     )
     if lowered in MODEL_NAME_PARAM_KEYS:
         validate_model_object_name(value, max_length=policy.max_name_length)
-    if lowered in MEASURE_NAME_PARAM_KEYS and tool_name in {"pbi_create_measure"}:
+    if lowered in MEASURE_NAME_PARAM_KEYS and tool_name in {
+        "pbi_create_measure",
+        "pbi_create_measures",
+        "pbi_rename_measure",
+        "pbi_patch_tmdl_measure",
+    }:
         validate_measure_name(value, max_length=policy.max_name_length)
     if lowered in QUERY_PARAM_KEYS:
         validate_query_text(value, max_length=policy.max_query_length)
@@ -881,9 +891,21 @@ def redact_sensitive_data(value: Any) -> Any:
 
 def secure_tool(tool_name: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        signature = inspect.signature(func)
+
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            SECURITY.validate_tool_call(tool_name, kwargs)
+            # Bind positional args to their parameter names so they go
+            # through policy validation too — validating kwargs alone
+            # would let any positional call site bypass every check.
+            params: dict[str, Any] = dict(kwargs)
+            if args:
+                try:
+                    bound = signature.bind_partial(*args, **kwargs)
+                    params = dict(bound.arguments)
+                except TypeError:
+                    pass
+            SECURITY.validate_tool_call(tool_name, params)
             return func(*args, **kwargs)
 
         return wrapper

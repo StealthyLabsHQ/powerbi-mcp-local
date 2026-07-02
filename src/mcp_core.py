@@ -52,7 +52,7 @@ def _run(tool_name: str, callback: Any, *args: Any, **kwargs: Any) -> dict[str, 
     try:
         policy = SECURITY.validate_tool_call(tool_name, kwargs)
         result = callback(*args, **kwargs)
-        status = result.get("status", "unknown") if isinstance(result, dict) else "ok"
+        status = ("ok" if result.get("ok") else "error") if isinstance(result, dict) else "ok"
         logger.info("TOOL_OK tool=%s status=%s", tool_name, status)
         return _enforce_response_size(tool_name, result, policy)
     except Exception as exc:
@@ -81,9 +81,10 @@ def _enforce_response_size(tool_name: str, result: Any, policy: Any) -> Any:
         return result
     logger.warning("TOOL_TRUNCATED tool=%s response_bytes=%d cap=%d", tool_name, size, cap)
     return {
-        "status": "error",
+        "ok": False,
         "error": {
             "code": "response_too_large",
+            "retryable": False,
             "message": (
                 f"Tool '{tool_name}' response is {size} bytes, exceeding the "
                 f"configured cap of {cap} bytes. Narrow the query or set "

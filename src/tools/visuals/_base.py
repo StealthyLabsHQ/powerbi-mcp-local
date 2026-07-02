@@ -20,6 +20,11 @@ def _run(callback: Callable[[], dict[str, Any]]) -> dict[str, Any]:
     standard error payload. Each visuals tool wraps its body with this so
     callers always get a well-shaped ``{ok: False, error: …}`` response
     instead of a stack trace.
+
+    Not to be confused with ``mcp_core._run``: only that wrapper applies
+    security policy validation, audit logging, and response-size caps.
+    This one is a bare exception-to-envelope guard for internal or
+    cross-tool calls that never leave the process.
     """
     try:
         return callback()
@@ -47,6 +52,7 @@ DEFAULT_VISUAL_SIZES = {
     "gauge": (280, 220),
     "kpi": (260, 140),
     "map": (420, 320),
+    "matrix": (540, 360),
 }
 
 VISUAL_FIELD_ROLES = {

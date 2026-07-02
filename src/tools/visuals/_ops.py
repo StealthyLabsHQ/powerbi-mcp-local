@@ -5,6 +5,7 @@ patch layout, disable card autoscale, update bindings.
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 import zipfile
 from pathlib import Path
@@ -42,6 +43,8 @@ from ._layout import (
 )
 from ._paths import _layout_path, _resolve_extract_folder, _resolve_pbix_path
 from ._refs import _projection, _query_ref
+
+logger = logging.getLogger("tools.visuals._ops")
 
 
 def pbi_patch_layout_tool(
@@ -98,7 +101,11 @@ def pbi_patch_layout_tool(
         if force and save_before_close:
             save_attempt = attempt_pbi_save_before_close(pbix, timeout_seconds=10.0)
 
-        _maybe_force_close_powerbi(force, pbix)
+        _maybe_force_close_powerbi(
+            force,
+            pbix,
+            save_verified=bool(save_attempt and save_attempt.get("mtime_changed")),
+        )
 
         layout_bytes = layout_path.read_bytes()
         pages = _page_names_from_layout_bytes(layout_bytes)
@@ -134,6 +141,15 @@ def pbi_patch_layout_tool(
                     target_zip.writestr(target_info, layout_bytes)
 
             temp_size = temp_path.stat().st_size
+            # Keep one recoverable generation of the original PBIX: the
+            # replace below is atomic but destroys the pre-patch archive,
+            # and a subtly wrong zip rebuild would otherwise be fatal.
+            bak_path = pbix.with_name(f"{pbix.name}.bak")
+            try:
+                bak_path.write_bytes(pbix.read_bytes())
+            except OSError as exc:
+                logger.warning("PBIX backup failed (%s); proceeding with atomic replace.", exc)
+                bak_path = None
             try:
                 temp_path.replace(pbix)
             except PermissionError as exc:
@@ -149,6 +165,7 @@ def pbi_patch_layout_tool(
             "Layout patched into PBIX successfully.",
             extract_folder=str(folder),
             pbix_path=str(pbix),
+            backup_path=str(bak_path) if bak_path else None,
             bytes_written=temp_size,
             layout_size=len(layout_bytes),
             pages=pages,

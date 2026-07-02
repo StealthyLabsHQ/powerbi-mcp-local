@@ -236,17 +236,17 @@ class SeriesTargetTests(unittest.TestCase):
 
 
 class WrapperImportSmokeTests(unittest.TestCase):
-    """Sanity check: every wrappers/<domain>.py imports without errors."""
+    """Sanity check: importing server registers every tools.__all__ *_tool."""
 
-    def test_all_wrappers_import(self) -> None:
-        # Importing server wires every wrapper module via side-effect imports.
-        import importlib
+    def test_register_all_covers_tools_all(self) -> None:
+        import server  # noqa: F401  — triggers wrappers.register_all()
+        import tools
+        from mcp_core import mcp
 
-        import server  # noqa: F401
-
-        for name in ("connection", "measures", "model", "power_query", "visuals", "quality"):
-            module = importlib.import_module(f"wrappers.{name}")
-            self.assertIsNotNone(module)
+        tools_map = mcp._tool_manager._tools
+        expected = {name[: -len("_tool")] for name in tools.__all__ if name.endswith("_tool")}
+        missing = expected - set(tools_map)
+        self.assertEqual(missing, set(), f"tools.__all__ entries without an MCP wrapper: {sorted(missing)}")
 
 
 if __name__ == "__main__":

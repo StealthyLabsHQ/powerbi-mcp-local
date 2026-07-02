@@ -3,6 +3,136 @@
 Active changelog covers the most recent releases.  
 Older entries (v0.10.11 and earlier — refactor phases, v0.10.x feature drops, v0.8.x and v0.7.x history) live in [CHANGELOG-archive.md](CHANGELOG-archive.md).
 
+## [0.15.0] — 2026-07-02 — Safety hardening + unified contract + tool-surface consolidation
+
+Architecture overhaul in five phases: protect user files first, then make
+every response speak the same envelope, then shrink the tool surface an
+LLM has to reason about.
+
+### Phase 1 — write safety (data-loss fixes)
+
+- **New `atomic_io` module**: shared `atomic_write_bytes` / `atomic_write_text`
+  (temp sibling → `.bak` of previous content → atomic `os.replace`) and
+  `snapshot_once` (pristine `.orig` preserved across multi-round loops).
+- `pbi_apply_style_preset` no longer overwrites the source `.pbix` in place
+  with a raw non-atomic write — a crash mid-write can no longer truncate
+  the original. Response now carries `backup_path`.
+- `pbi_write_tmdl_file` and `pbi_patch_tmdl_measure` write atomically with a
+  `.bak` of the previous TMDL content.
+- `pbi_patch_layout` keeps a `.bak` of the pre-patch PBIX (the zip rebuild
+  was previously unrecoverable if subtly wrong). Response carries
+  `backup_path`.
+- **Force-kill guard**: `force=True` now refuses to `taskkill` Power BI
+  Desktop when the graceful save-and-close failed and no prior save was
+  verified (`save_attempt.mtime_changed`) — unsaved in-memory model edits
+  are no longer silently discarded.
+- `pbi_repair_loop` snapshots the pristine layout once (`Layout.orig`)
+  before its first repair round, so multi-round repairs no longer erode
+  the only backup. Response carries `pristine_snapshot`.
+
+### Phase 2 — unified response contract + error classification
+
+- `_enforce_response_size` now returns the standard `{ok: false, error: …}`
+  envelope (was a `{status: "error"}` dialect that `ok`-keyed clients
+  misread as success); audit logging keys on `ok` too.
+- Connection-loss classification is now locale-independent: .NET exception
+  type names (`AdomdConnectionException`, `SocketException`, …) are checked
+  before English message substrings, so auto-reconnect works on localized
+  Power BI Desktop builds.
+- TMDL structural-injection hardening: multi-line measure expressions are
+  re-indented so they cannot dedent into sibling TMDL blocks;
+  `format_string`/`display_folder` reject line breaks.
+- `validate_measure_name` now also guards `pbi_create_measures` (batch),
+  `pbi_rename_measure`, and `pbi_patch_tmdl_measure` (was only
+  `pbi_create_measure`); `measure_name` params are name-validated.
+- `secure_tool` binds positional arguments to parameter names before
+  policy validation (positional call sites could previously bypass it).
+
+### Phase 3 — tool-surface consolidation (174 → 141 tools)
+
+- **BREAKING**: the 28 per-type `pbi_add_<chart>` MCP tools are demoted to
+  internal builders. Use `pbi_add_visual(visual_type=…, config=…)` (same
+  builders, one entry point, per-type config documented in the tool
+  description) or `pbi_add_visual_from_intent`. The Python implementations
+  remain importable from `tools.visuals`.
+- **BREAKING**: `pbi_create_ytd/mtd/spy/yoy_measure` are demoted — use
+  `pbi_create_time_intelligence_pack(patterns=["YTD"])` etc. (same
+  implementation; the pack auto-resolves dependencies).
+- **BREAKING**: `pbi_validate_dax_semantic` is merged into
+  `pbi_validate_dax(semantic=true)`.
+- **Single-source registration**: `wrappers/<domain>.py` modules are
+  replaced by `wrappers.register_all()`, which derives the MCP registry
+  from `tools.__all__`. Adding a tool = implement + export, nothing else.
+
+### Phase 4 — tests + CI
+
+- New offline unit tests for the previously untested mutating modules:
+  RLS, calc groups, relationships, measures (incl. time-intelligence pack
+  and DAX-file parser); new `tests/test_atomic_io.py`.
+- Live-only scripts moved out of `tests/` (they contributed zero collected
+  tests): `tests/test_connection.py` → `scripts/live_connection_check.py`,
+  `demo_*.py`/`smoke_e2e.py` → `scripts/`.
+- Linux CI now runs the full offline suite instead of a hardcoded 4-file
+  allowlist; new `tool-count` CI job fails when the README badge drifts
+  from the registered tool count.
+
+### Phase 5 — decomposition
+
+- `tools/quality.py` (2170 lines, 7 mixed concerns) → `tools/quality/`
+  package: `_shared` / `_model_audit` / `_dax_lint` / `_layout_lint` /
+  `_persistence` / `_scoring`, with a façade `__init__` preserving every
+  historical import.
+- `tools/measures.py` (1115 lines) → `tools/measures/` package:
+  `_crud` / `_time_intelligence` / `_dax_import`, same façade pattern.
+- Envelope + error surface extracted from `pbi_connection.py` (1362 →
+  1143 lines): new `pbi_errors.py` (exception taxonomy) and
+  `envelopes.py` (`ok`, `error_payload`, `serialize_value`, …), both
+  dependency-free; `pbi_connection` re-exports for compatibility.
+- Coverage 60% → 68%; CI gate raised 55 → 62.
+- README tool badge updated (162 → 141 actual registered tools).
+- Deferred (documented): renaming the installed package off top-level
+  `src` (namespace-collision risk), metadata-cache invalidation on
+  external Desktop edits, refresh timeout/lock scope.
+
+## [0.14.0] — 2026-06-09 — Visual Intent Layer + repairable-error loop
+
+Phase 1 of the LLM-reliability plan: stop asking models to pick visual
+types and roles directly, and return errors they can act on.
+
+### Added
+
+- **Visual Intent Layer** (`visuals/_intent.py`):
+  - `pbi_plan_visual` — pure planner: a constrained business-intent spec
+    (`metric`/`metrics`, `dimension`, `time`, `breakdown`, `target`, plus
+    boolean hints `comparison`, `trend`, `parts_of_whole`, `correlation`,
+    `geographic`, `detail_table`, `many_categories`, `filter_control`)
+    is mapped deterministically to a visual type, dispatcher config, and
+    a rationale. Unknown intent keys and bare (non-`Table.Field`)
+    references are rejected.
+  - `pbi_add_visual_from_intent` — plans then builds through the generic
+    dispatcher (full binding validation, `dry_run` supported); the
+    response carries the `decision` (type, rationale, config).
+- **Repairable-error registry + loop** (`visuals/_errors.py`):
+  - `pbi_list_repairable_errors` — stable error vocabulary; every code
+    carries severity, auto-repairability, and an `llm_action` telling
+    the calling model how to fix its *spec*.
+  - `pbi_repair_loop` — detect → classify → auto-repair → re-verify
+    loop over a report extract. Deterministic fixes (query-ref
+    mismatches, measure home tables) are applied and re-scanned until
+    convergence; residual issues come back classified. New detectors:
+    `gauge_target_invalid` (target outside [min, max], min ≥ max) and
+    `double_display_units` (measure format string already scaled to K/M
+    while the visual also sets `labelDisplayUnits`). Optional
+    `check_empty_visuals=true` folds the live empty-visual probe into
+    the same classified output.
+
+### Fixed
+
+- `pbi_add_visual` docstring promised `kpi` and `matrix` but the
+  dispatcher never routed them — both are now registered (with
+  `indicator_measure`/`trend_column`/`goal_measure` and
+  `rows`/`values`/`columns` configs respectively).
+
 ## [0.13.5] — 2026-05-13 — Styling canvas wallpaper + theme activation
 
 Field report on v0.13.3 / v0.13.4: PBIX files produced by

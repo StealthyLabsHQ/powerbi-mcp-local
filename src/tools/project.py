@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from atomic_io import atomic_write_text
 from pbi_connection import PowerBINotFoundError, PowerBIValidationError, ok
 from security import resolve_local_path
 
@@ -78,14 +79,29 @@ def _validate_measure_name(name: str) -> str:
     return value
 
 
+def _validate_measure_metadata(value: str, *, field: str) -> str:
+    text = str(value)
+    if any(ch in text for ch in "\r\n"):
+        raise PowerBIValidationError(
+            f"{field} cannot contain line breaks (TMDL structural injection).", details={field: value}
+        )
+    return text
+
+
 def _measure_block(name: str, expression: str, format_string: str = "", display_folder: str = "") -> list[str]:
     if not expression.strip():
         raise PowerBIValidationError("expression cannot be empty.")
-    lines = [f"    measure '{name}' = {expression.strip()}"]
+    # Re-indent every continuation line to 8 spaces so a multi-line
+    # expression cannot dedent back to measure level and inject sibling
+    # TMDL blocks. DAX is whitespace-insensitive outside string literals,
+    # and DAX string literals cannot span lines, so this is lossless.
+    expression_lines = expression.strip().splitlines()
+    lines = [f"    measure '{name}' = {expression_lines[0].strip()}"]
+    lines.extend(f"        {cont.strip()}" if cont.strip() else "" for cont in expression_lines[1:])
     if format_string:
-        lines.append(f"        formatString: {format_string!r}")
+        lines.append(f"        formatString: {_validate_measure_metadata(format_string, field='format_string')!r}")
     if display_folder:
-        lines.append(f"        displayFolder: {display_folder!r}")
+        lines.append(f"        displayFolder: {_validate_measure_metadata(display_folder, field='display_folder')!r}")
     return lines
 
 
@@ -156,8 +172,7 @@ def pbi_write_tmdl_file_tool(
     existed = path.exists()
     if not existed and not create:
         raise PowerBINotFoundError("TMDL file was not found.", details={"relative_file": relative_file})
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8", newline="\n")
+    atomic_write_text(path, content, backup=True)
     return ok(
         "TMDL file written successfully.",
         project_path=str(_resolve_project_root(project_path)),
@@ -198,7 +213,7 @@ def pbi_patch_tmdl_measure_tool(
         lines[start:end] = block
         action = "updated"
     new_content = "\n".join(lines).rstrip() + "\n"
-    path.write_text(new_content, encoding="utf-8", newline="\n")
+    atomic_write_text(path, new_content, backup=True)
     return ok(
         "TMDL measure patched successfully.",
         project_path=str(_resolve_project_root(project_path)),

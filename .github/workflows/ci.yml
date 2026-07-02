@@ -54,12 +54,15 @@ jobs:
       - name: Run tests (Windows — full)
         if: matrix.os == 'windows-latest'
         shell: bash
-        run: pytest -q --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=55
+        run: pytest -q --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=62
 
-      - name: Run tests (Linux — offline subset)
+      - name: Run tests (Linux — full offline suite)
         if: matrix.os == 'ubuntu-latest'
         shell: bash
-        run: pytest tests/test_security.py tests/test_security_regressions_local.py tests/test_v0_10_4_analysis.py tests/test_v0_10_5_safety.py -q
+        # pythonnet/pbi-pyadomd are Windows-only but only imported lazily at
+        # connection time; the whole suite is offline-mocked and carries its
+        # own platform guards, so no hardcoded file allowlist is needed.
+        run: pytest -q
 
       - name: Upload coverage XML
         if: matrix.os == 'windows-latest' && matrix.python-version == '3.11'
@@ -84,3 +87,25 @@ jobs:
         run: ruff check src tests
       - name: ruff format --check
         run: ruff format --check src tests
+
+  tool-count:
+    name: README tool-count drift
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package
+        run: pip install -e .
+      - name: Compare registered tool count to README badge
+        shell: bash
+        run: |
+          actual=$(python scripts/tool_count.py | awk '/^total:/ {print $2}')
+          badge=$(grep -oE 'Tools%20[0-9]+|Tools [0-9]+' README.md | head -1 | grep -oE '[0-9]+')
+          echo "registered=$actual readme=$badge"
+          if [ "$actual" != "$badge" ]; then
+            echo "::error::README tool badge ($badge) != registered tools ($actual). Run scripts/tool_count.py and update README.md."
+            exit 1
+          fi

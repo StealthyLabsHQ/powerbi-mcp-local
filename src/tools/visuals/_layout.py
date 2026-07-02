@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+from atomic_io import atomic_write_bytes
 
 from ._base import (
     DEFAULT_PAGE_HEIGHT,
@@ -98,25 +99,8 @@ def _save_layout(extract_folder: Path, layout: dict[str, Any]) -> None:
         _record_dry_run_write(extract_folder, layout)
         return
     layout_path = _layout_path(extract_folder)
-    layout_path.parent.mkdir(parents=True, exist_ok=True)
     encoded = json.dumps(layout, ensure_ascii=False, indent=2).encode("utf-16-le")
-
-    tmp_path = layout_path.with_name(f"{layout_path.name}.tmp.{os.getpid()}")
-    bak_path = layout_path.with_name(f"{layout_path.name}.bak")
-    try:
-        tmp_path.write_bytes(encoded)
-        if layout_path.exists():
-            try:
-                bak_path.write_bytes(layout_path.read_bytes())
-            except OSError as exc:
-                logger.warning("Layout backup failed (%s); proceeding with atomic write.", exc)
-        os.replace(tmp_path, layout_path)
-    finally:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
+    atomic_write_bytes(layout_path, encoded, backup=True)
 
 
 def _parse_embedded_json(value: Any, default: Any) -> Any:

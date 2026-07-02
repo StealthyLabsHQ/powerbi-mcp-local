@@ -11,6 +11,7 @@ from ._base import DEFAULT_VISUAL_SIZES
 from ._cards import (
     pbi_add_card_tool,
     pbi_add_gauge_tool,
+    pbi_add_kpi_tool,
     pbi_add_labelled_card_tool,
     pbi_add_text_box_tool,
 )
@@ -38,6 +39,7 @@ from ._charts import (
 from ._layout import dry_run_layout_writes
 from ._structure import (
     pbi_add_map_tool,
+    pbi_add_matrix_tool,
     pbi_add_slicer_tool,
     pbi_add_table_visual_tool,
 )
@@ -59,12 +61,24 @@ def pbi_add_visual_tool(
     manager: Any | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Generic visual dispatcher. Keeps the per-type tools as stable API surface.
+    """Add any visual to a report page — the single entry point for visual creation.
 
-    visual_type: one of card, bar_chart, line_chart, donut, table, waterfall,
-                 slicer, gauge, kpi, scatter_chart, combo_chart, matrix, map,
-                 text_box, labelled_card.
-    config: per-type keyword arguments.
+    visual_type: card, labelled_card, multi_row_card, bar_chart,
+        stacked_bar_chart, stacked_column_chart, clustered_column_chart,
+        hundred_percent_stacked_bar_chart, hundred_percent_stacked_column_chart,
+        ribbon_chart, line_chart, area_chart, stacked_area_chart,
+        hundred_percent_stacked_area_chart, donut, pie_chart, treemap, funnel,
+        table, waterfall, scatter_chart, combo_chart, slicer, gauge, kpi,
+        matrix, map, text_box.
+    config: per-type keys — categorical charts: category_column +
+        value_measure (+ legend_column); axis charts: axis_column +
+        value_measures (list); card/gauge: measure; table: columns (list);
+        matrix: rows + values (lists); scatter: category_column + x_measure +
+        y_measure; combo: category_column + bar_measures + line_measures;
+        kpi: indicator_measure + trend_column; slicer: column (+ slicer_type);
+        map: location (+ measure); text_box: text. Error messages name any
+        missing key. Prefer ``pbi_add_visual_from_intent`` when you have a
+        business intent rather than an exact type.
     dry_run: when True, run all validation and binding logic but skip the
              layout disk write — response carries ``dry_run=True`` and a
              ``write_log``.
@@ -373,6 +387,55 @@ def _dispatch_scatter(extract, page, x, y, w, h, title, cfg):
     )
 
 
+def _dispatch_kpi(extract, page, x, y, w, h, title, cfg):
+    indicator = cfg.get("indicator_measure") or cfg.get("measure")
+    trend = cfg.get("trend_column") or cfg.get("trend_axis_column")
+    if not indicator or not trend:
+        raise PowerBIValidationError(
+            "kpi requires config.indicator_measure and config.trend_column",
+            details={"visual_type": "kpi"},
+        )
+    return pbi_add_kpi_tool(
+        extract,
+        page,
+        indicator,
+        trend,
+        x,
+        y,
+        w,
+        h,
+        title,
+        cfg.get("goal_measure"),
+        cfg.get("direction", "high_is_good"),
+        manager=cfg.get("__manager__"),
+    )
+
+
+def _dispatch_matrix(extract, page, x, y, w, h, title, cfg):
+    rows = cfg.get("rows") or []
+    values = cfg.get("values") or []
+    if not rows or not values:
+        raise PowerBIValidationError(
+            "matrix requires config.rows (list) and config.values (list)",
+            details={"visual_type": "matrix"},
+        )
+    return pbi_add_matrix_tool(
+        extract,
+        page,
+        rows,
+        values,
+        x,
+        y,
+        cfg.get("columns"),
+        w,
+        h,
+        title,
+        bool(cfg.get("subtotals", True)),
+        str(cfg.get("column_layout", "stepped")),
+        manager=cfg.get("__manager__"),
+    )
+
+
 def _dispatch_combo(extract, page, x, y, w, h, title, cfg):
     cat = cfg.get("category_column")
     bar = cfg.get("bar_measures") or []
@@ -431,6 +494,8 @@ _VISUAL_TYPE_DISPATCH.update(
         "combo_chart": _dispatch_combo,
         "slicer": _dispatch_slicer,
         "gauge": _dispatch_gauge,
+        "kpi": _dispatch_kpi,
+        "matrix": _dispatch_matrix,
         "map": _dispatch_map,
         "text_box": _dispatch_text_box,
         "textbox": _dispatch_text_box,

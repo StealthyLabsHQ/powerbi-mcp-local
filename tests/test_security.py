@@ -802,8 +802,9 @@ class V0124RegressionTests(unittest.TestCase):
         try:
             payload = {"ok": True, "rows": ["x" * 4096]}
             result = _enforce_response_size("pbi_test", payload, policy)
-            self.assertEqual(result["status"], "error")
+            self.assertIs(result["ok"], False)
             self.assertEqual(result["error"]["code"], "response_too_large")
+            self.assertIs(result["error"]["retryable"], False)
             self.assertGreater(result["error"]["details"]["response_bytes"], 1024)
         finally:
             policy.max_response_bytes = 16 * 1024 * 1024

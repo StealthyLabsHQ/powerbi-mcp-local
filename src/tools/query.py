@@ -302,12 +302,29 @@ def pbi_validate_dax_tool(
     *,
     expression: str,
     kind: str = "scalar",
+    semantic: bool = False,
+    format_string: str = "",
+    include_hidden: bool = False,
 ) -> dict[str, Any]:
     """Parse-check a DAX expression by running a zero/one-row probe and catching errors.
 
     kind='scalar' wraps the expression with EVALUATE ROW("v", <expr>).
     kind='table'  wraps the expression with EVALUATE TOPN(0, <expr>).
+
+    semantic=True additionally checks every ``Table[Column]`` / ``[Measure]``
+    reference against the live model index and heuristically flags a
+    percent-shaped ``format_string`` on a scalar-money expression — the
+    response then carries a ``semantic`` block (see
+    ``pbi_validate_dax_semantic_tool``).
     """
+    if semantic:
+        return pbi_validate_dax_semantic_tool(
+            manager,
+            expression=expression,
+            kind=kind,
+            format_string=format_string,
+            include_hidden=include_hidden,
+        )
     if not expression or not expression.strip():
         raise PowerBIValidationError("expression is required.")
     policy = SECURITY.policy()

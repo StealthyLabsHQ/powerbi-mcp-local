@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "powerbi-mcp-local"
-version = "0.13.5"
+version = "0.15.0"
 description = "FastMCP server for Power BI Desktop model, Excel, and Power Query automation."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -101,5 +101,8 @@ ignore = [
 "tests/*" = ["F401", "F841"]                          # unused imports/vars in tests are fine
 "src/tools/visuals/__init__.py" = ["F401", "E402"]    # re-export façade — imports are public surface
 "src/tools/__init__.py" = ["F401"]                    # re-export façade
+"src/tools/quality/__init__.py" = ["F401"]            # re-export façade
+"src/tools/measures/__init__.py" = ["F401"]           # re-export façade
+"src/pbi_connection.py" = ["F401"]                    # compat re-export of pbi_errors + envelopes
 "src/wrappers/__init__.py" = ["F401"]                 # re-export façade
 "src/server.py" = ["E402"]                            # wrappers loaded after find_pbi_port + fn defs (side-effect registration)

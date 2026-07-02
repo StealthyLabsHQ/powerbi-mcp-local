@@ -31,26 +31,25 @@ MCP client  <─────────────────>  src/server.py
 
 | Layer | Path | Responsibility |
 |---|---|---|
-| **Entry** | `src/server.py` | argparse, transport launch, `@mcp.resource()`/`@mcp.prompt()`, side-effect imports of every wrapper module. Stays thin (~320 L). |
+| **Entry** | `src/server.py` | argparse, transport launch, `@mcp.resource()`/`@mcp.prompt()`, calls `wrappers.register_all()`. Stays thin (~320 L). |
 | **Runtime** | `src/mcp_core.py` | The single FastMCP instance, `CONNECTION_MANAGER`, `_run` (audit + error normalisation), registry audit, profile filter, PID lock, parent watcher. |
-| **Wrappers** | `src/wrappers/<domain>.py` | One file per domain (connection / model / measures / relationships / rls / calc_groups / query / quality / visuals / excel / power_query / tmdl / project / workflows). Each calls `register_tool(pbi_xxx_tool)` to register an `@mcp.tool()` from the underlying signature. |
+| **Wrappers** | `src/wrappers/__init__.py` | `register_all()` iterates `tools.__all__` and calls `register_tool(pbi_xxx_tool)` for every exported `*_tool` — the tool list has a single source of truth. |
 | **Tools** | `src/tools/<domain>.py` | Business logic — the `pbi_xxx_tool(manager, *, …)` functions called by the wrappers. The visual surface lives in the `src/tools/visuals/` package (17 submodules). |
 | **Connection** | `src/pbi_connection.py` | Instance discovery, TOM / ADOMD bring-up, write helpers (`execute_write` injects the `persistence: memory_only` warning), operation history. |
 | **Security** | `src/security.py` | Path traversal, allowed dirs, redaction, DAX / M sanitisers, tool category sets used by `--profile`. |
 
 ## Wrapper auto-registration
 
-Every wrapper module is one-liners — no `@mcp.tool()` boilerplate:
+Registration is fully derived from `tools.__all__` — no per-domain wrapper files, no `@mcp.tool()` boilerplate:
 
 ```python
-# src/wrappers/connection.py
-from tools import pbi_connect_tool, pbi_list_instances_tool, ...
-from ._helpers import register_tool
+# src/server.py
+import wrappers
 
-register_tool(pbi_connect_tool)
-register_tool(pbi_list_instances_tool)
-...
+wrappers.register_all()   # registers every tools.__all__ *_tool
 ```
+
+Adding a tool = implement `pbi_xxx_tool` in `src/tools/<domain>.py` + export it from `src/tools/__init__.py`. Nothing else.
 
 `register_tool()` introspects the underlying tool's signature, drops `manager` from the public schema, injects `CONNECTION_MANAGER` at call time, and pipes the result through `mcp_core._run`. Manager-injection style is auto-detected:
 
@@ -62,7 +61,7 @@ register_tool(pbi_list_instances_tool)
 
 The generated wrapper has `__signature__` reassigned so FastMCP picks up the right JSON parameter schema (typed args, not `**kwargs`).
 
-A handful of wrappers that need extra logic (none today, but `pbi_add_visual` was the canonical example before its `dry_run` was upstreamed into the underlying tool) keep their hand-written form. Use `register_tool(fn, name=…, inject_manager=…)` if you ever need to override.
+If a wrapper ever needs extra logic, call `register_tool(fn, name=…, inject_manager=…, docstring=…)` manually before `register_all()` — already-registered names are skipped by the loop.
 
 ## visuals/ package
 
