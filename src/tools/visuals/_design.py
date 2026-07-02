@@ -9,6 +9,7 @@ styling), and the ``pbi_build_dashboard_tool`` multi-visual composer
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from pbi_connection import PowerBIValidationError, ok
@@ -307,7 +308,10 @@ def pbi_export_active_theme_tool(extract_folder: str, output_path: str) -> dict[
                 "No active theme is referenced by the report layout.",
                 details={"extract_folder": str(folder)},
             )
-        theme_file = folder / str(relative_path).replace("/", "\\")
+        # Layout stores the theme path with either separator; normalize to
+        # forward slashes so the join works on POSIX too (Windows Path
+        # accepts "/" natively).
+        theme_file = folder / Path(str(relative_path).replace("\\", "/"))
         if not theme_file.exists():
             raise PowerBIValidationError(
                 "Active theme file is missing from the extract folder.",

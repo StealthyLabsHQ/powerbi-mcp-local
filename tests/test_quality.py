@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -477,6 +478,7 @@ class QualityToolTests(unittest.TestCase):
         self.assertFalse(result["valid"], result)
         self.assertIn("visual_count_mismatch", {item["type"] for item in result["issues"]})
 
+    @unittest.skipUnless(os.name == "nt", "patching os.name to 'nt' makes pathlib instantiate WindowsPath")
     def test_validate_pbix_reopen_flags_fix_this_signal(self) -> None:
         pbix = self.root / "report.pbix"
         with zipfile.ZipFile(pbix, "w") as archive:
@@ -502,6 +504,7 @@ class QualityToolTests(unittest.TestCase):
         self.assertFalse(result["valid"], result)
         self.assertIn("powerbi_fix_this_signal", {item["type"] for item in result["issues"]})
 
+    @unittest.skipUnless(os.name == "nt", "patching os.name to 'nt' makes pathlib instantiate WindowsPath")
     def test_validate_pbix_reopen_accepts_clean_probe(self) -> None:
         pbix = self.root / "report.pbix"
         with zipfile.ZipFile(pbix, "w") as archive:
@@ -528,6 +531,7 @@ class QualityToolTests(unittest.TestCase):
 
         self.assertTrue(result["valid"], result)
 
+    @unittest.skipUnless(os.name == "nt", "patching os.name to 'nt' makes pathlib instantiate WindowsPath")
     def test_validate_pbix_reopen_flags_screenshot_signal(self) -> None:
         pbix = self.root / "report.pbix"
         screenshot = self.root / "probe.png"
@@ -568,6 +572,7 @@ class QualityToolTests(unittest.TestCase):
         self.assertFalse(result["valid"], result)
         self.assertIn("screenshot_fix_this_like_regions", {item["type"] for item in result["issues"]})
 
+    @unittest.skipUnless(os.name == "nt", "patching os.name to 'nt' makes pathlib instantiate WindowsPath")
     def test_validate_pbix_reopen_flags_windows_ocr_signal(self) -> None:
         pbix = self.root / "report.pbix"
         screenshot = self.root / "probe.png"
