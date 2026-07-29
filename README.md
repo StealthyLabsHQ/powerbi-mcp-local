@@ -4,9 +4,9 @@
 
 # powerbi-mcp-local
 
-**Local-first MCP server for Power BI Desktop automation**
+**MCP server for local Power BI Desktop automation**
 
-Automate semantic model changes, DAX, Power Query, Excel, and report layout from MCP-capable AI clients.
+It exposes tools for semantic model changes, DAX, Power Query, Excel, and report layouts to MCP clients.
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Protocol MCP](https://img.shields.io/badge/protocol-MCP-blueviolet)](https://modelcontextprotocol.io)
